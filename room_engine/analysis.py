@@ -66,6 +66,7 @@ class RoomAnalysis:
 
     # --- balance (stage 5) ---
     late_energy_fraction: float  # share of energy arriving > 50 ms after the hit
+    steady: bool                 # True for steady sounds (hiss, room tone) with no hits
     balance: float               # 0 tonal ... 1 spatial
     balance_details: dict = field(default_factory=dict)
 
@@ -273,7 +274,17 @@ def late_energy_fraction(x, sr, early_s=0.05):
     return float(e[split:].sum() / total)
 
 
-def balance_score(t60s, confident, peaks, late_frac):
+def is_steady_sound(x, sr):
+    """
+    True if the recording never really rises and falls (tape hiss, room
+    tone, a hum): the loud parts are less than MIN_DYNAMIC_RANGE_DB above
+    the quiet parts. Such sounds have no decay to measure.
+    """
+    env_db = smooth_energy_db(x, sr, window_s=0.05)
+    return float(np.percentile(env_db, 99) - np.percentile(env_db, 10)) < MIN_DYNAMIC_RANGE_DB
+
+
+def balance_score(t60s, confident, peaks, late_frac, steady=False):
     """
     PROVISIONAL FORMULA. Tweak freely; this is the main thing to tune by ear.
 
@@ -286,12 +297,15 @@ def balance_score(t60s, confident, peaks, late_frac):
       - spectral peaks are tall (prominent)
       - spectral peaks are narrow (high Q)
 
+    Steady sounds (hiss, room tone) carry no decay information, so they
+    start from a neutral 50/50 and only lean tonal if they have strong peaks.
+
     Result = spatial / (spatial + tonal), from 0 (tonal) to 1 (spatial).
     """
     t60s = np.asarray(t60s)
     confident = np.asarray(confident, dtype=bool)
 
-    if confident.any():
+    if confident.any() and not steady:
         good = t60s[confident]
         median_t60 = float(np.median(good))
         # How much the decay varies across bands (spread in log terms).
@@ -312,6 +326,10 @@ def balance_score(t60s, confident, peaks, late_frac):
         tonal = prominence * sharpness
     else:
         mean_gain, mean_q, tonal = 0.0, 0.0, 0.0
+
+    if steady:
+        # Neutral starting point: equal evidence unless peaks push it tonal.
+        tonal = max(tonal, spatial)
 
     if spatial + tonal < 1e-6:
         ratio = 0.5
@@ -350,9 +368,11 @@ def analyze_room(audio, sr, n_bands=16, n_peaks=6, max_t60=2.5):
     # 2. per-band decay + per-band level
     t60s, conf = zip(*(measure_t60(b, sr, max_t60) for b in bands))
     t60s, conf = list(t60s), list(conf)
-    # If only a few stray bands show a decay, the recording is really a
-    # steady sound (room tone): treat every band as unmeasurable.
-    if sum(conf) < MIN_CONFIDENT_BAND_SHARE * n_bands:
+    # If the whole recording is steady, or only a few stray bands show a
+    # decay, it's really a steady sound (room tone): no band is measurable.
+    steady = is_steady_sound(x, sr)
+    if steady or sum(conf) < MIN_CONFIDENT_BAND_SHARE * n_bands:
+        steady = True
         t60s = [FALLBACK_T60] * n_bands
         conf = [False] * n_bands
     energies = np.array([np.sum(b ** 2) for b in bands]) + 1e-20
@@ -368,7 +388,7 @@ def analyze_room(audio, sr, n_bands=16, n_peaks=6, max_t60=2.5):
 
     # 5. balance
     late = late_energy_fraction(x, sr)
-    ratio, details = balance_score(t60s, conf, peaks, late)
+    ratio, details = balance_score(t60s, conf, peaks, late, steady)
 
     return RoomAnalysis(
         sr=sr,
@@ -382,6 +402,7 @@ def analyze_room(audio, sr, n_bands=16, n_peaks=6, max_t60=2.5):
         spectrum_db=(spec_smooth - spec_smooth.max()).tolist(),
         peaks=peaks,
         late_energy_fraction=late,
+        steady=steady,
         balance=ratio,
         balance_details=details,
     )

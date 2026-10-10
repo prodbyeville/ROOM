@@ -5,7 +5,7 @@ Upload any recording (room tone, a clap, a one-shot, found sound) and this tool 
 This is **not** convolution with the uploaded file. The recording is measured, and a brand new room is built from the measurements:
 
 - a **synthetic impulse response** made from filtered noise, decaying band by band at the measured rates (the *spatial* path)
-- a **resonant filter bank** tuned to the sharp peaks in the recording's spectrum (the *tonal* path)
+- a **tone-match EQ** that moves the target's overall tone toward the recording's (dark, bright, boxy, thin), plus a **resonant filter bank** tuned to the sharp peaks in the recording's spectrum (together, the *tonal* path)
 
 A **balance score** from 0 (tonal) to 1 (spatial) is detected from the recording itself and decides how much of each path you hear.
 
@@ -42,6 +42,7 @@ python room.py path/to/your_recording.wav path/to/your_loop.wav -o renders/out.w
 
 | Option | Default | What it does |
 |---|---|---|
+| `--intensity` | 1.0 | How strongly the room's character is applied. 0 = none, 1 = as measured, 2 = exaggerated. Scales the EQ match, the resonances and the decay length together |
 | `--mix` | 0.5 | Wet/dry. 0 = untouched, 1 = fully processed |
 | `--balance` | auto | Force the blend. 0 = only resonances, 1 = only reverb tail. Leave out to use the detected value |
 | `--tail` | 2.5 | Length of the synthetic tail in seconds (also the longest decay it will measure) |
@@ -76,7 +77,7 @@ The terminal also prints a short summary, for example:
 ```
 room source ──► ANALYSIS ──► SYNTHESIS ──► Room
                                              │
-target audio ──► resonant filters ──► convolve with synthetic IR
+target audio ──► tone-match EQ ──► resonant filters ──► convolve with synthetic IR
                       │ (tonal)              │ (spatial)
                       └──── blend by balance ┘
                                  │
@@ -86,7 +87,7 @@ target audio ──► resonant filters ──► convolve with synthetic IR
 | File | Stage |
 |---|---|
 | `room_engine/analysis.py` | 1. split into log-spaced bands, 2. measure decay (T60) per band, 3. averaged spectrum, 4. find resonant peaks, 5. balance score |
-| `room_engine/synthesis.py` | build the synthetic IR and the resonant filter bank |
+| `room_engine/synthesis.py` | build the synthetic IR, the tone curve and the resonant filter bank; apply intensity |
 | `room_engine/process.py` | the processing chain above |
 | `room_engine/report.py` | summary, JSON and plot |
 | `room.py` | command line |
@@ -101,11 +102,12 @@ Lives in `balance_score()` in `room_engine/analysis.py`. Right now:
 - **Tonal evidence** rises with tall, narrow spectral peaks.
 - `balance = spatial / (spatial + tonal)`
 
-On the test sounds: hall clap = 0.70, room tone = 0.29, bottle tap = 0.12.
+On the test sounds: hall clap = 0.70, room tone = 0.29, bottle tap = 0.12. On real sources: tape hiss = 0.50 (steady, neutral), 4-track stop = 0.22, a dry kick = 0.04.
 
 ### Known limits
 
-- **Steady sounds** (room tone with no hits in it) have no decay to measure. The tool says so and uses a short fallback tail (0.4 s); the tone color still comes through the resonances.
+- **Steady sounds** (tape hiss, room tone) have no decay to measure. The tool detects them, uses a short fallback tail (0.4 s) and starts the balance at a neutral 0.5; their color comes through the tone-match EQ and any resonances.
+- **The tone-match EQ depends on the target.** It compares the target's tone to the room source's, so the same room EQs a bright synth and a dark pad differently. Strength is `EQ_MATCH_DEPTH` (0.6) and the limit is ±12 dB (`EQ_MAX_DB`), both in `synthesis.py`.
 - **Very ringy sources** can measure 40+ dB resonances; boosts are capped at 18 dB (`MAX_RESONANCE_GAIN_DB` in `synthesis.py`) so the target stays recognizable.
 - The lowest band (around 60 to 85 Hz) is the least reliable decay measurement on short files.
 - The synthetic test sounds are only a sanity check. Real recordings are the real test.

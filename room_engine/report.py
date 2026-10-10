@@ -24,7 +24,9 @@ def summary_text(analysis, balance_used):
                      f"across {len(conf_t60)}/{len(a.band_t60_s)} measurable bands "
                      f"(median {np.median(conf_t60):.2f}s)")
     else:
-        lines.append("  Decay (T60):  no measurable decay (steady sound); using fallback tail")
+        lines.append("  Decay (T60):  no measurable decay; using fallback tail")
+    if a.steady:
+        lines.append("  Steady sound: yes (hiss / room tone); balance starts neutral")
     if a.peaks:
         lines.append(f"  Resonances:   {len(a.peaks)} peak(s)")
         for p in a.peaks:

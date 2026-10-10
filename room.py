@@ -40,6 +40,10 @@ def main(argv=None):
     p.add_argument("--balance", type=float, default=None,
                    help="override the balance: 0 = fully tonal, 1 = fully spatial "
                         "(default: detected from the source)")
+    p.add_argument("--intensity", type=float, default=1.0,
+                   help="how strongly the room's character is applied: 0 = none, "
+                        "1 = as measured, 2 = exaggerated. Scales EQ, resonances "
+                        "and decay length together (default 1.0)")
     p.add_argument("--mix", type=float, default=0.5,
                    help="wet/dry: 0 = dry, 1 = fully processed (default 0.5)")
     p.add_argument("--seed", type=int, default=0,
@@ -60,8 +64,10 @@ def main(argv=None):
                             max_t60=args.tail)
 
     room = synthesize_room(analysis, tail_s=args.tail,
-                           balance_override=args.balance, seed=args.seed)
+                           balance_override=args.balance, seed=args.seed,
+                           intensity=args.intensity)
     print(report.summary_text(analysis, room.balance))
+    print(f"  Intensity:    {room.intensity:.2f}   Mix: {args.mix:.2f}")
 
     print(f"Processing: {args.target}")
     target, _ = load_audio(args.target, sr=sr)
