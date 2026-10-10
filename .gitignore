@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Rendered audio and reports (regenerate with the scripts)
+examples/audio/
+renders/
