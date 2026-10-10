@@ -1,0 +1,34 @@
+ROOM (working name) - Windows VST3, prototype build
+===================================================
+
+INSTALL
+1. Close your DAW.
+2. Copy the "ROOM.vst3" folder into:
+       C:\Program Files\Common Files\VST3
+   (Windows will ask for admin permission. Click Continue.)
+3. Open your DAW and rescan plugins if it doesn't find ROOM by itself.
+   - FL Studio: Options > Manage plugins > Find more plugins
+   - Ableton: Preferences > Plug-ins > Rescan
+4. Look for "ROOM" by "Eville" under effects.
+
+USE
+1. Put ROOM on a track (a one-shot, a melody, anything).
+2. Drag any sound onto the dashed box at the top, or click it to browse.
+   A clap in a room, tape hiss, a kick, found sound...
+3. ROOM listens to that sound and builds a room from it.
+
+KNOBS
+  Intensity  how strongly the room's character is applied
+             (0% = none, 100% = as measured, 200% = exaggerated)
+  Mix        dry vs processed
+  Balance    tone (resonances + EQ) vs space (reverb tail).
+             "Auto" uses what ROOM detected from your sound.
+  Tail       maximum reverb length
+  Output     output volume
+
+The analysed room is saved with your project, so you don't need to keep the
+original sound file around.
+
+If the plugin doesn't show up after a rescan, Windows may have blocked the
+downloaded zip: right-click the zip > Properties > tick "Unblock" > OK, then
+extract and copy again.

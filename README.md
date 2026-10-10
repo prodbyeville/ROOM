@@ -9,7 +9,41 @@ This is **not** convolution with the uploaded file. The recording is measured, a
 
 A **balance score** from 0 (tonal) to 1 (spatial) is detected from the recording itself and decides how much of each path you hear.
 
-This phase is an offline, file-in / file-out prototype for judging the algorithm by ear. No plugin, no UI, no real-time.
+This repo has two parts:
+
+- **`plugin/`**: the real-time **VST3 plugin** (C++/JUCE). See [Plugin](#plugin) below.
+- **Everything else**: the original offline Python prototype used to design and tune the sound by ear.
+
+## Plugin
+
+**Getting it:** every push builds the Windows VST3 on GitHub. Open the repo's **Actions** tab, click the latest green **Build Windows VST3** run, and download **ROOM-VST3-Windows** under *Artifacts*. Unzip it and follow `INSTALL.txt`.
+
+**What it does:** drop any sound on the plugin. It analyzes it once (in the background) and builds the room. The analysis numbers are saved with your project; the audio file isn't needed afterwards.
+
+**Knobs:** Intensity, Mix, Balance (with Auto = detected), Tail, Output.
+
+**How it differs from the Python prototype:**
+- The tone-match EQ compares the room against a fixed "typical music" tilt (-6 dB/octave), not against the whole target file, because a live plugin can't hear the whole track ahead of time. The constant is `kReferenceTiltDbPerOct` in `plugin/Source/dsp/RoomSynth.cpp`.
+- Levels are calibrated with fixed constants instead of per-file level matching.
+- Everything else (analysis, balance formula, IR design, resonators) is a direct port and matches the prototype's numbers closely.
+
+**Code map:**
+
+| File | What |
+|---|---|
+| `plugin/Source/dsp/RoomAnalysis.*` | analysis stages 1 to 5 (port of `analysis.py`) |
+| `plugin/Source/dsp/RoomSynth.*` | synthetic IR, tone EQ, resonators, intensity (port of `synthesis.py`) |
+| `plugin/Source/dsp/RoomEngine.*` | real-time chain (port of `process.py`) |
+| `plugin/Source/PluginProcessor.*` | parameters, background analysis thread, saving with the project |
+| `plugin/Source/PluginEditor.*` | the simple UI |
+| `plugin/Tools/RoomRender.cpp` | `room_render`: runs the plugin DSP on files, for testing |
+| `plugin/Tools/HostTest.cpp` | `room_hosttest`: loads the built VST3 like a DAW and tests it |
+
+**Building it yourself** (optional): `cmake -S plugin -B build && cmake --build build --config Release`. JUCE 8.0.15 is downloaded automatically.
+
+## Python prototype
+
+The prototype is offline, file-in / file-out, for judging the algorithm by ear.
 
 ## Setup (once)
 
