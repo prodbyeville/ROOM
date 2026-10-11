@@ -5,6 +5,8 @@
 // Audio is processed in 512-sample blocks, like a host would.
 
 #include "dsp/RoomEngine.h"
+#include "dsp/ToneShaper.h"
+#include "dsp/ResonanceSuppressor.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <iostream>
@@ -34,7 +36,8 @@ int main (int argc, char* argv[])
 
     if (args.size() < 3)
     {
-        std::cerr << "usage: room_render SOURCE TARGET OUT [--intensity X] [--mix X] [--balance auto|X] [--tail S] [--raw]\n";
+        std::cerr << "usage: room_render SOURCE TARGET OUT [--intensity X] [--mix X] [--balance auto|X] [--tail S]\n"
+                     "                   [--tape X] [--auto X] [--eq band:freq:gain:q,...] [--raw]\n";
         return 1;
     }
 
@@ -47,6 +50,20 @@ int main (int argc, char* argv[])
     const auto mix = option ("--mix", "0.5").getFloatValue();
     const auto balanceArg = option ("--balance", "auto");
     const auto tail = option ("--tail", "2.5").getFloatValue();
+    const auto tape = option ("--tape", "0").getFloatValue();
+    const auto autoEq = option ("--auto", "0").getFloatValue();
+
+    // EQ bands: defaults, then any "--eq 3:1000:6:1,5:8000:-3:0.7" overrides (band is 1-5).
+    EqBand bands[tone::numEqBands];
+    for (int b = 0; b < tone::numEqBands; ++b)
+        bands[b] = { tone::kBandTypes[b], tone::kBandFreqs[b], 0.0f, tone::kBandQs[b] };
+    for (auto& spec : juce::StringArray::fromTokens (option ("--eq", ""), ",", ""))
+    {
+        const auto f = juce::StringArray::fromTokens (spec, ":", "");
+        const auto b = f[0].getIntValue() - 1;
+        if (f.size() == 4 && b >= 0 && b < tone::numEqBands)
+            bands[b] = { tone::kBandTypes[b], f[1].getFloatValue(), f[2].getFloatValue(), f[3].getFloatValue() };
+    }
 
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
@@ -94,14 +111,23 @@ int main (int argc, char* argv[])
     }
     engine.reset();
 
+    // Post-room tone shaping, as in the plugin.
+    ToneShaper toneShaper;
+    toneShaper.prepare (targetSr, chans);
+    ResonanceSuppressor suppressor;
+    suppressor.prepare (targetSr, chans);
+    const auto latency = suppressor.getLatency();
+
     // --- process the target plus the tail, block by block
+    // (plus the Auto EQ latency, which is removed again afterwards)
     const auto inLen = target.getNumSamples();
     const auto total = inLen + (int) (tail * targetSr);
-    juce::AudioBuffer<float> out (chans, total);
-    out.clear();
-    for (int pos = 0; pos < total; pos += block)
+    const auto processed = total + latency;
+    juce::AudioBuffer<float> outWithLatency (chans, processed);
+    outWithLatency.clear();
+    for (int pos = 0; pos < processed; pos += block)
     {
-        const auto len = std::min (block, total - pos);
+        const auto len = std::min (block, processed - pos);
         io.setSize (chans, len, false, false, true);
         io.clear();
         for (int ch = 0; ch < chans; ++ch)
@@ -111,9 +137,14 @@ int main (int argc, char* argv[])
                 io.copyFrom (ch, 0, target, srcCh, pos, std::min (len, inLen - pos));
         }
         engine.process (io, balance, mix, 0.0f);
+        toneShaper.process (io, tape, bands);
+        suppressor.process (io, autoEq);
         for (int ch = 0; ch < chans; ++ch)
-            out.copyFrom (ch, pos, io, ch, 0, len);
+            outWithLatency.copyFrom (ch, pos, io, ch, 0, len);
     }
+    juce::AudioBuffer<float> out (chans, total);
+    for (int ch = 0; ch < chans; ++ch)
+        out.copyFrom (ch, 0, outWithLatency, ch, latency, total);
 
     // Trim trailing near-silence and keep peaks under -1 dBFS (as the prototype did).
     const auto peak = out.getMagnitude (0, total);

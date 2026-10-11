@@ -6,7 +6,7 @@
 //   3. hammering Intensity / Tail while audio runs doesn't crash or blow up
 //   4. saving and reloading the state keeps the room
 //
-//   room_hosttest PLUGIN.vst3 ROOM_SOURCE TARGET OUT.wav ["command to run while the UI is open"]
+//   room_hosttest PLUGIN.vst3 ROOM_SOURCE TARGET OUT.wav
 
 #include "dsp/RoomAnalysis.h"
 
@@ -201,11 +201,40 @@ int main (int argc, char* argv[])
             writer->writeFromAudioSampleBuffer (out, 0, total);
     }
 
-    // --- 3. stress: move Intensity and Tail every few blocks while playing -----
+    // --- 3. latency: Mix 0 with neutral Tape/EQ/Auto EQ must be the dry signal,
+    //        delayed by exactly the latency the plugin reports to the host.
+    const auto latency = plugin->getLatencySamples();
+    if (latency <= 0)
+        return fail ("plugin reports no latency (Auto EQ needs it)");
+    auto* mixParam = findParam (*plugin, "Mix");
+    if (mixParam == nullptr)
+        return fail ("missing Mix parameter");
+    const auto oldMix = mixParam->getValue();
+    mixParam->setValueNotifyingHost (0.0f);
+    run (*plugin, juce::AudioBuffer<float> (2, 0), (int) (0.2 * targetSr));  // let the mix settle
+    plugin->reset();
+    auto dryOut = run (*plugin, target, target.getNumSamples() + latency);
+    float worst = 0.0f;
+    for (int i = 0; i < target.getNumSamples(); ++i)
+        worst = std::max (worst, std::abs (dryOut.getSample (0, i + latency) - target.getSample (0, i)));
+    if (worst > 1e-3f)
+        return fail ("dry signal doesn't line up with the reported latency (max diff " + juce::String (worst) + ")");
+    mixParam->setValueNotifyingHost (oldMix);
+    std::cout << "Latency " << latency << " samples, dry alignment ok (max diff " << worst << ")\n";
+
+    // --- 4. stress: move every tone control every few blocks while playing ---
     auto* intensity = findParam (*plugin, "Intensity");
     auto* tail = findParam (*plugin, "Tail");
     if (intensity == nullptr || tail == nullptr)
         return fail ("missing Intensity/Tail parameters");
+    juce::Array<juce::AudioProcessorParameter*> toneParams;
+    for (auto name : { "Tape", "Auto EQ", "EQ 1 Gain", "EQ 2 Freq", "EQ 3 Gain", "EQ 3 Q", "EQ 4 Gain", "EQ 5 Gain" })
+    {
+        auto* prm = findParam (*plugin, name);
+        if (prm == nullptr)
+            return fail (juce::String ("missing parameter ") + name);
+        toneParams.add (prm);
+    }
 
     juce::Random rng (42);
     for (int round = 0; round < 3; ++round)
@@ -214,6 +243,7 @@ int main (int argc, char* argv[])
         {
             if (b % 3 == 0) intensity->setValueNotifyingHost (rng.nextFloat());
             if (b % 7 == 0) tail->setValueNotifyingHost (rng.nextFloat());
+            if (b % 2 == 0) toneParams[rng.nextInt (toneParams.size())]->setValueNotifyingHost (rng.nextFloat());
             juce::MessageManager::getInstance()->runDispatchLoopUntil (1);
         });
         for (int ch = 0; ch < 2; ++ch)
@@ -223,7 +253,7 @@ int main (int argc, char* argv[])
     }
     std::cout << "Parameter stress: ok\n";
 
-    // --- 4. save, reload into a fresh instance, room must survive ---------------
+    // --- 5. save, reload into a fresh instance, room must survive ---------------
     juce::MemoryBlock saved;
     plugin->getStateInformation (saved);
     if (auto savedXml = unwrapPluginState (saved))
@@ -245,25 +275,6 @@ int main (int argc, char* argv[])
     if (diff2 / target.getNumSamples() < 1e-4)
         return fail ("room was lost after save + reload");
     std::cout << "Save + reload: ok\n";
-
-    // Optional: show the plugin window on screen for a few seconds and run a
-    // command (e.g. a screen capture) while it's open.
-    if (argc > 5)
-    {
-        if (auto* editor = plugin->createEditorIfNeeded())
-        {
-            juce::DocumentWindow window ("ROOM", juce::Colours::black, 0);
-            window.setUsingNativeTitleBar (false);
-            window.setTitleBarHeight (0);
-            window.setContentNonOwned (editor, true);
-            window.setTopLeftPosition (0, 0);
-            window.setVisible (true);
-            juce::MessageManager::getInstance()->runDispatchLoopUntil (800);
-            std::system (argv[5]);
-            window.clearContentComponent();
-            delete editor;
-        }
-    }
 
     plugin->releaseResources();
     plugin2->releaseResources();

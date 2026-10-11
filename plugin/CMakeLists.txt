@@ -30,7 +30,9 @@ FetchContent_MakeAvailable(JUCE)
 set(ROOM_DSP_SOURCES
     Source/dsp/RoomAnalysis.cpp
     Source/dsp/RoomSynth.cpp
-    Source/dsp/RoomEngine.cpp)
+    Source/dsp/RoomEngine.cpp
+    Source/dsp/ToneShaper.cpp
+    Source/dsp/ResonanceSuppressor.cpp)
 
 set(ROOM_DEFINITIONS
     JUCE_WEB_BROWSER=0
@@ -57,7 +59,8 @@ juce_add_plugin(ROOM
 target_sources(ROOM PRIVATE
     ${ROOM_DSP_SOURCES}
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/EqPanel.cpp)
 target_include_directories(ROOM PRIVATE Source)
 target_compile_definitions(ROOM PUBLIC ${ROOM_DEFINITIONS})
 target_link_libraries(ROOM

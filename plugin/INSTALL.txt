@@ -26,6 +26,19 @@ KNOBS
   Tail       maximum reverb length
   Output     output volume
 
+EQ + TONE (bottom section, applied after the room)
+  EQ display shows what's playing. Drag the 5 numbered bands for small cuts
+             and boosts (+/-12 dB). Scroll on a band to make it wider or
+             narrower. Double-click a band to reset it.
+  Tape       low cut and high cut that close in as you turn it up.
+             0% = off, 100% = only about 80 Hz to 9 kHz left (worn tape).
+  Auto EQ    listens live and pulls down harsh, ringing frequencies only when
+             they poke out (mostly 2-10 kHz). The red area on the display
+             shows what it is cutting right now. 0% = off.
+
+Note: Auto EQ adds about 43 ms of latency, which your DAW compensates for
+automatically (plugin delay compensation).
+
 The analysed room is saved with your project, so you don't need to keep the
 original sound file around.
 

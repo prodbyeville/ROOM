@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "EqPanel.h"
 
 // Simple working UI (not the final design):
 //   - drop zone to load a room sound (or click to browse)
@@ -74,6 +75,9 @@ private:
     juce::TextButton clearButton { "Clear" };
 
     Knob intensity, mix, balance, tail, output;
+    Knob tape, autoEq;
+    EqPanel eqPanel { proc };
+    juce::Rectangle<int> eqLabelArea;
     juce::ToggleButton autoBalance { "Auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
 

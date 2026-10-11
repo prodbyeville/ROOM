@@ -1,15 +1,6 @@
 #include "PluginEditor.h"
 
-namespace Colours
-{
-    const juce::Colour background { 0xff141417 };
-    const juce::Colour panel      { 0xff1e1e23 };
-    const juce::Colour outline    { 0xff34343c };
-    const juce::Colour text       { 0xffe8e6e1 };
-    const juce::Colour dim        { 0xff8a8892 };
-    const juce::Colour accent     { 0xffd2a865 };  // decay / spatial
-    const juce::Colour accent2    { 0xff6fa8dc };  // tone / tonal
-}
+#include "UiColours.h"
 
 //==============================================================================
 // Drop zone
@@ -225,6 +216,10 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     setupKnob (balance, ParamIDs::balance, "BALANCE");
     setupKnob (tail, ParamIDs::tail, "TAIL");
     setupKnob (output, ParamIDs::output, "OUTPUT");
+    setupKnob (tape, ParamIDs::tape, "TAPE");
+    setupKnob (autoEq, ParamIDs::autoEq, "AUTO EQ");
+    autoEq.slider.setColour (juce::Slider::rotarySliderFillColourId, Colours::reduction);
+    addAndMakeVisible (eqPanel);
     balance.slider.setColour (juce::Slider::rotarySliderFillColourId, Colours::accent2);
 
     addAndMakeVisible (autoBalance);
@@ -241,7 +236,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     };
     balance.slider.updateText();
 
-    setSize (760, 480);
+    setSize (900, 760);
     refreshAnalysis();
     startTimerHz (15);
 }
@@ -315,6 +310,11 @@ void RoomAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (Colours::dim);
     g.setFont (juce::FontOptions (12.0f));
     g.drawText ("working name  |  prototype v" JucePlugin_VersionString, header, juce::Justification::centredRight);
+
+    // Section label above the EQ
+    g.setColour (Colours::dim);
+    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.drawText ("EQ  +  TONE", eqLabelArea, juce::Justification::centredLeft);
 }
 
 void RoomAudioProcessorEditor::resized()
@@ -322,9 +322,9 @@ void RoomAudioProcessorEditor::resized()
     auto area = getLocalBounds().reduced (20, 0);
     area.removeFromTop (48);
 
-    dropZone.setBounds (area.removeFromTop (70));
+    dropZone.setBounds (area.removeFromTop (62));
     area.removeFromTop (10);
-    display.setBounds (area.removeFromTop (150));
+    display.setBounds (area.removeFromTop (140));
     area.removeFromTop (4);
 
     auto readoutRow = area.removeFromTop (24);
@@ -341,6 +341,20 @@ void RoomAudioProcessorEditor::resized()
         auto toggleRow = col.removeFromBottom (24);   // same size knobs in every column
         if (k == &balance)
             autoBalance.setBounds (toggleRow.withSizeKeepingCentre (64, 22));
+        k->slider.setBounds (col);
+    }
+
+    // --- EQ section: display on the left, TAPE and AUTO EQ stacked on the right
+    area.removeFromTop (8);
+    eqLabelArea = area.removeFromTop (20);
+    area.removeFromBottom (16);
+    auto side = area.removeFromRight (150);
+    area.removeFromRight (12);
+    eqPanel.setBounds (area);
+    for (auto* k : { &tape, &autoEq })
+    {
+        auto col = side.removeFromTop (side.getHeight() / (k == &tape ? 2 : 1)).reduced (0, 4);
+        k->label.setBounds (col.removeFromTop (18));
         k->slider.setBounds (col);
     }
 }

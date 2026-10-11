@@ -3,6 +3,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "dsp/RoomEngine.h"
+#include "dsp/ToneShaper.h"
+#include "dsp/ResonanceSuppressor.h"
+#include "dsp/SpectrumTap.h"
 
 namespace ParamIDs
 {
@@ -12,6 +15,13 @@ namespace ParamIDs
     inline constexpr const char* balance     = "balance";
     inline constexpr const char* tail        = "tail";
     inline constexpr const char* output      = "output";
+    inline constexpr const char* tape        = "tape";
+    inline constexpr const char* autoEq      = "autoEq";
+
+    // EQ band parameters: "eq1Freq", "eq1Gain", "eq1Q" ... "eq5Q"
+    inline juce::String eqFreq (int band) { return "eq" + juce::String (band + 1) + "Freq"; }
+    inline juce::String eqGain (int band) { return "eq" + juce::String (band + 1) + "Gain"; }
+    inline juce::String eqQ    (int band) { return "eq" + juce::String (band + 1) + "Q"; }
 }
 
 class RoomAudioProcessor : public juce::AudioProcessor,
@@ -64,8 +74,16 @@ public:
     /** Balance detected from the loaded room (used when Auto is on). */
     float getDetectedBalance() const { return detectedBalance.load(); }
 
+    /** Current EQ band settings from the parameters (any thread). */
+    void getEqBands (room::EqBand (&out)[room::tone::numEqBands]) const;
+
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioFormatManager formatManager;
+
+    // Read by the editor for its displays.
+    room::SpectrumTap spectrumTap;
+    const room::ResonanceSuppressor& getSuppressor() const { return suppressor; }
+    double getCurrentSampleRate() const { return currentSampleRate.load(); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -82,6 +100,9 @@ private:
     void setAnalysis (room::RoomAnalysis);  // any non-audio thread
 
     room::RoomEngine engine;
+    room::ToneShaper toneShaper;
+    room::ResonanceSuppressor suppressor;
+    juce::SmoothedValue<float> outputGain;
 
     mutable juce::CriticalSection analysisLock;
     room::RoomAnalysis analysis;
@@ -97,6 +118,11 @@ private:
     std::atomic<float>* balanceParam = nullptr;
     std::atomic<float>* tailParam = nullptr;
     std::atomic<float>* outputParam = nullptr;
+    std::atomic<float>* tapeParam = nullptr;
+    std::atomic<float>* autoEqParam = nullptr;
+    std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
+    std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
+    std::atomic<float>* eqQParam[room::tone::numEqBands] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoomAudioProcessor)
 };

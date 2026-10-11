@@ -96,9 +96,22 @@ RoomAudioProcessor::RoomAudioProcessor()
     balanceParam     = apvts.getRawParameterValue (ParamIDs::balance);
     tailParam        = apvts.getRawParameterValue (ParamIDs::tail);
     outputParam      = apvts.getRawParameterValue (ParamIDs::output);
+    tapeParam        = apvts.getRawParameterValue (ParamIDs::tape);
+    autoEqParam      = apvts.getRawParameterValue (ParamIDs::autoEq);
+    for (int b = 0; b < room::tone::numEqBands; ++b)
+    {
+        eqFreqParam[b] = apvts.getRawParameterValue (ParamIDs::eqFreq (b));
+        eqGainParam[b] = apvts.getRawParameterValue (ParamIDs::eqGain (b));
+        eqQParam[b]    = apvts.getRawParameterValue (ParamIDs::eqQ (b));
+    }
 
     apvts.addParameterListener (ParamIDs::intensity, this);
     apvts.addParameterListener (ParamIDs::tail, this);
+
+    // Report the Auto EQ latency from the start (prepareToPlay refines it for
+    // the actual sample rate), so hosts that ask early get the right answer.
+    suppressor.prepare (44100.0, 2);
+    setLatencySamples (suppressor.getLatency());
 
     worker = std::make_unique<Worker> (*this);
 }
@@ -150,7 +163,46 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         AudioParameterFloatAttributes().withStringFromValueFunction (
             [] (float v, int) { return (v > 0.0f ? "+" : "") + String (v, 1) + " dB"; })));
 
+    // --- Post-room tone shaping -------------------------------------------
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::tape, 1 }, "Tape",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::autoEq, 1 }, "Auto EQ",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+
+    for (int b = 0; b < room::tone::numEqBands; ++b)
+    {
+        const auto name = "EQ " + String (b + 1);
+        NormalisableRange<float> freqRange (20.0f, 20000.0f);
+        freqRange.setSkewForCentre (630.0f);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::eqFreq (b), 1 }, name + " Freq", freqRange, room::tone::kBandFreqs[b],
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            {
+                return v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (juce::roundToInt (v)) + " Hz";
+            })));
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::eqGain (b), 1 }, name + " Gain",
+            NormalisableRange<float> (-12.0f, 12.0f, 0.1f), 0.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int) { return (v > 0.0f ? "+" : "") + String (v, 1) + " dB"; })));
+        NormalisableRange<float> qRange (0.3f, 8.0f);
+        qRange.setSkewForCentre (1.0f);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::eqQ (b), 1 }, name + " Q", qRange, room::tone::kBandQs[b],
+            AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int) { return "Q " + String (v, 2); })));
+    }
+
     return layout;
+}
+
+void RoomAudioProcessor::getEqBands (room::EqBand (&out)[room::tone::numEqBands]) const
+{
+    for (int b = 0; b < room::tone::numEqBands; ++b)
+        out[b] = { room::tone::kBandTypes[b], eqFreqParam[b]->load(), eqGainParam[b]->load(), eqQParam[b]->load() };
 }
 
 //==============================================================================
@@ -168,6 +220,11 @@ bool RoomAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
 void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    toneShaper.prepare (sampleRate, getTotalNumOutputChannels());
+    suppressor.prepare (sampleRate, getTotalNumOutputChannels());
+    setLatencySamples (suppressor.getLatency());
+    outputGain.reset (sampleRate, 0.05);
+    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
     currentSampleRate = sampleRate;
     worker->requestRebuild();   // the IR has to be rebuilt at this sample rate
 }
@@ -187,7 +244,32 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     const auto balance = balanceAutoParam->load() > 0.5f ? detectedBalance.load()
                                                          : balanceParam->load();
-    engine.process (buffer, balance, mixParam->load(), outputParam->load());
+    // Room -> Tape -> EQ -> Auto EQ -> output gain
+    engine.process (buffer, balance, mixParam->load(), 0.0f);
+
+    room::EqBand bands[room::tone::numEqBands];
+    getEqBands (bands);
+    toneShaper.process (buffer, tapeParam->load(), bands);
+    suppressor.process (buffer, autoEqParam->load());
+
+    outputGain.setTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
+    const auto outChans = std::min (buffer.getNumChannels(), 2);
+    if (outputGain.isSmoothing())
+    {
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const auto g = outputGain.getNextValue();
+            for (int ch = 0; ch < outChans; ++ch)
+                buffer.getWritePointer (ch)[i] *= g;
+        }
+    }
+    else
+    {
+        for (int ch = 0; ch < outChans; ++ch)
+            buffer.applyGain (ch, 0, buffer.getNumSamples(), outputGain.getTargetValue());
+    }
+
+    spectrumTap.push (buffer);
 }
 
 double RoomAudioProcessor::getTailLengthSeconds() const

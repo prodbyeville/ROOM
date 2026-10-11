@@ -22,6 +22,10 @@ This repo has two parts:
 
 **Knobs:** Intensity, Mix, Balance (with Auto = detected), Tail, Output.
 
+**EQ + Tone section** (after the room): a live spectrum display with a 5-band EQ (drag the bands), a **Tape** knob (low and high cuts closing in, down to about 80 Hz to 9 kHz) and **Auto EQ**, a live soothe-style resonance suppressor focused on 2 to 10 kHz. Auto EQ adds one analysis window of latency (2048 samples at 44.1/48 kHz), reported to the DAW.
+
+Chain: `room -> Tape -> EQ -> Auto EQ -> Output`.
+
 **How it differs from the Python prototype:**
 - The tone-match EQ compares the room against a fixed "typical music" tilt (-6 dB/octave), not against the whole target file, because a live plugin can't hear the whole track ahead of time. The constant is `kReferenceTiltDbPerOct` in `plugin/Source/dsp/RoomSynth.cpp`.
 - Levels are calibrated with fixed constants instead of per-file level matching.
@@ -34,6 +38,9 @@ This repo has two parts:
 | `plugin/Source/dsp/RoomAnalysis.*` | analysis stages 1 to 5 (port of `analysis.py`) |
 | `plugin/Source/dsp/RoomSynth.*` | synthetic IR, tone EQ, resonators, intensity (port of `synthesis.py`) |
 | `plugin/Source/dsp/RoomEngine.*` | real-time chain (port of `process.py`) |
+| `plugin/Source/dsp/ToneShaper.*` | Tape filter and 5-band EQ |
+| `plugin/Source/dsp/ResonanceSuppressor.*` | Auto EQ (live resonance suppression) |
+| `plugin/Source/EqPanel.*` | EQ display: spectrum, draggable bands, Auto EQ cuts |
 | `plugin/Source/PluginProcessor.*` | parameters, background analysis thread, saving with the project |
 | `plugin/Source/PluginEditor.*` | the simple UI |
 | `plugin/Tools/RoomRender.cpp` | `room_render`: runs the plugin DSP on files, for testing |
