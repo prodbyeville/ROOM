@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "FactoryPresets.h"
 
 //==============================================================================
 // Background worker: one thread that analyses dropped files and rebuilds the
@@ -98,6 +99,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     outputParam      = apvts.getRawParameterValue (ParamIDs::output);
     tapeParam        = apvts.getRawParameterValue (ParamIDs::tape);
     autoEqParam      = apvts.getRawParameterValue (ParamIDs::autoEq);
+    spaceParam       = apvts.getRawParameterValue (ParamIDs::space);
     for (int b = 0; b < room::tone::numEqBands; ++b)
     {
         eqFreqParam[b] = apvts.getRawParameterValue (ParamIDs::eqFreq (b));
@@ -114,6 +116,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     setLatencySamples (suppressor.getLatency());
 
     worker = std::make_unique<Worker> (*this);
+    snapshotPreset();
 }
 
 RoomAudioProcessor::~RoomAudioProcessor()
@@ -156,6 +159,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         NormalisableRange<float> (0.3f, 6.0f, 0.01f, 0.5f), 2.5f,
         AudioParameterFloatAttributes().withStringFromValueFunction (
             [] (float v, int) { return String (v, 2) + " s"; })));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::space, 1 }, "Space",
+        NormalisableRange<float> (0.0f, 2.0f, 0.01f), 1.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        {
+            if (v < 0.005f) return String ("Mono");
+            return String (juce::roundToInt (v * 100.0f)) + "%";
+        })));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::output, 1 }, "Output",
@@ -222,6 +234,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     toneShaper.prepare (sampleRate, getTotalNumOutputChannels());
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
+    stereoWidth.prepare (sampleRate);
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -251,6 +264,7 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     getEqBands (bands);
     toneShaper.process (buffer, tapeParam->load(), bands);
     suppressor.process (buffer, autoEqParam->load());
+    stereoWidth.process (buffer, spaceParam->load());
 
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
     const auto outChans = std::min (buffer.getNumChannels(), 2);
@@ -287,6 +301,10 @@ void RoomAudioProcessor::parameterChanged (const juce::String&, float)
 
 void RoomAudioProcessor::loadRoomFile (const juce::File& file)
 {
+    // A dropped sound replaces the preset's room: it's a new, unsaved sound.
+    currentPresetKey = {};
+    currentPresetName = file.getFileNameWithoutExtension();
+    snapshotPreset();
     {
         const juce::ScopedLock sl (analysisLock);
         statusMessage = "Analyzing " + file.getFileName() + "...";
@@ -389,6 +407,9 @@ juce::String RoomAudioProcessor::getStatusMessage() const
 void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree state ("ROOM_STATE");
+    state.setProperty ("presetKey", currentPresetKey, nullptr);
+    state.setProperty ("presetName", currentPresetName, nullptr);
+    state.setProperty ("presetModified", isPresetModified(), nullptr);
     state.appendChild (apvts.copyState(), nullptr);
     state.appendChild (getAnalysis().toValueTree(), nullptr);
     if (auto xml = state.createXml())
@@ -419,6 +440,113 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
     {
         clearRoom();
     }
+
+    currentPresetKey = state["presetKey"].toString();
+    currentPresetName = state["presetName"].toString();
+    snapshotPreset();
+    restoredAsModified = (bool) state["presetModified"];
+}
+
+//==============================================================================
+// ROOMS presets
+
+room::presets::PresetLibrary& RoomAudioProcessor::getLibrary()
+{
+    if (library == nullptr)
+    {
+        std::vector<juce::String> factory;
+        for (int i = 0; i < FactoryPresets::namedResourceListSize; ++i)
+        {
+            int size = 0;
+            if (auto* data = FactoryPresets::getNamedResource (FactoryPresets::namedResourceList[i], size))
+                factory.push_back (juce::String::fromUTF8 (data, size));
+        }
+        library = std::make_unique<room::presets::PresetLibrary> (presetRoot, std::move (factory));
+    }
+    return *library;
+}
+
+void RoomAudioProcessor::setPresetRoot (const juce::File& root)
+{
+    presetRoot = root;
+    library.reset();
+}
+
+std::map<juce::String, float> RoomAudioProcessor::currentParamValues() const
+{
+    std::map<juce::String, float> values;
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (room::presets::isPresetParameter (rp->paramID))
+                values[rp->paramID] = rp->convertFrom0to1 (rp->getValue());
+    return values;
+}
+
+juce::ValueTree RoomAudioProcessor::capturePreset (const room::presets::PresetMeta& meta) const
+{
+    const auto a = getAnalysis();
+    return room::presets::makePreset (meta, currentParamValues(),
+                                      a.valid ? a.toValueTree() : juce::ValueTree());
+}
+
+void RoomAudioProcessor::applyPreset (const juce::ValueTree& preset, const juce::String& key)
+{
+    const auto values = room::presets::readParams (preset);
+
+    for (auto* p : getParameters())
+    {
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
+        if (rp == nullptr || ! room::presets::isPresetParameter (rp->paramID))
+            continue;
+        // Parameters missing from an older preset go back to their defaults.
+        const auto it = values.find (rp->paramID);
+        const auto norm = it != values.end() ? rp->convertTo0to1 (it->second) : rp->getDefaultValue();
+        rp->beginChangeGesture();
+        rp->setValueNotifyingHost (norm);
+        rp->endChangeGesture();
+    }
+
+    auto a = room::RoomAnalysis::fromValueTree (preset.getChildWithName ("ROOM_ANALYSIS"));
+    if (a.valid)
+    {
+        if (a.sourceName.isEmpty())
+            a.sourceName = room::presets::readMeta (preset).name;
+        setAnalysis (std::move (a));
+        worker->requestRebuild();
+    }
+    else
+    {
+        clearRoom();
+    }
+
+    setCurrentPreset (key, room::presets::readMeta (preset).name);
+}
+
+void RoomAudioProcessor::setCurrentPreset (const juce::String& key, const juce::String& name)
+{
+    currentPresetKey = key;
+    currentPresetName = name;
+    snapshotPreset();
+}
+
+void RoomAudioProcessor::snapshotPreset()
+{
+    presetSnapshot = currentParamValues();
+    restoredAsModified = false;
+}
+
+bool RoomAudioProcessor::isPresetModified() const
+{
+    if (restoredAsModified)
+        return true;
+    const auto now = currentParamValues();
+    for (auto& [id, v] : now)
+    {
+        const auto it = presetSnapshot.find (id);
+        if (it == presetSnapshot.end() || std::abs (it->second - v) > 1e-4f * std::max (1.0f, std::abs (v)))
+            return true;
+    }
+    return false;
 }
 
 //==============================================================================

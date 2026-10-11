@@ -7,6 +7,8 @@
 #include "dsp/RoomEngine.h"
 #include "dsp/ToneShaper.h"
 #include "dsp/ResonanceSuppressor.h"
+#include "dsp/StereoWidth.h"
+#include "presets/PresetFile.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <iostream>
@@ -37,7 +39,8 @@ int main (int argc, char* argv[])
     if (args.size() < 3)
     {
         std::cerr << "usage: room_render SOURCE TARGET OUT [--intensity X] [--mix X] [--balance auto|X] [--tail S]\n"
-                     "                   [--tape X] [--auto X] [--eq band:freq:gain:q,...] [--raw]\n";
+                     "                   [--tape X] [--auto X] [--space X] [--eq band:freq:gain:q,...] [--raw]\n"
+                     "                   [--save-preset FILE.room --name N --type T --styles a,b --notes TEXT]\n";
         return 1;
     }
 
@@ -52,6 +55,7 @@ int main (int argc, char* argv[])
     const auto tail = option ("--tail", "2.5").getFloatValue();
     const auto tape = option ("--tape", "0").getFloatValue();
     const auto autoEq = option ("--auto", "0").getFloatValue();
+    const auto space = option ("--space", "1").getFloatValue();
 
     // EQ bands: defaults, then any "--eq 3:1000:6:1,5:8000:-3:0.7" overrides (band is 1-5).
     EqBand bands[tone::numEqBands];
@@ -92,6 +96,40 @@ int main (int argc, char* argv[])
         std::cout << " " << juce::String (p.freqHz, 1) << "Hz/+" << juce::String (p.gainDb, 1) << "dB/Q" << juce::String (p.q, 1);
     std::cout << "\n";
 
+    // Optional: also write these settings + this room as a ROOM preset.
+    if (const auto presetPath = option ("--save-preset", ""); presetPath.isNotEmpty())
+    {
+        presets::PresetMeta meta;
+        meta.name = option ("--name", juce::File (presetPath).getFileNameWithoutExtension());
+        meta.author = option ("--author", "Eville");
+        meta.type = option ("--type", "Room");
+        meta.styles = juce::StringArray::fromTokens (option ("--styles", ""), ",", "");
+        meta.notes = option ("--notes", "");
+        meta.created = juce::Time::getCurrentTime();
+
+        std::map<juce::String, float> params {
+            { "intensity", intensity }, { "mix", mix }, { "tail", tail }, { "tape", tape },
+            { "autoEq", autoEq }, { "space", space },
+            { "balanceAuto", balanceArg == "auto" ? 1.0f : 0.0f },
+            { "balance", balanceArg == "auto" ? 0.5f : balanceArg.getFloatValue() } };
+        for (int b = 0; b < tone::numEqBands; ++b)
+        {
+            const auto n = juce::String (b + 1);
+            params["eq" + n + "Freq"] = bands[b].freqHz;
+            params["eq" + n + "Gain"] = bands[b].gainDb;
+            params["eq" + n + "Q"] = bands[b].q;
+        }
+        auto a = analysis;
+        a.sourceName = meta.name;
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (presetPath);
+        if (! presets::save (presets::makePreset (meta, params, a.toValueTree()), file))
+        {
+            std::cerr << "Couldn't write preset " << file.getFullPathName() << "\n";
+            return 1;
+        }
+        std::cout << "Saved preset " << file.getFullPathName() << "\n";
+    }
+
     const int block = 512;
     const auto chans = 2;
     RoomEngine engine;
@@ -116,6 +154,8 @@ int main (int argc, char* argv[])
     toneShaper.prepare (targetSr, chans);
     ResonanceSuppressor suppressor;
     suppressor.prepare (targetSr, chans);
+    StereoWidth stereoWidth;
+    stereoWidth.prepare (targetSr);
     const auto latency = suppressor.getLatency();
 
     // --- process the target plus the tail, block by block
@@ -139,6 +179,7 @@ int main (int argc, char* argv[])
         engine.process (io, balance, mix, 0.0f);
         toneShaper.process (io, tape, bands);
         suppressor.process (io, autoEq);
+        stereoWidth.process (io, space);
         for (int ch = 0; ch < chans; ++ch)
             outWithLatency.copyFrom (ch, pos, io, ch, 0, len);
     }

@@ -24,7 +24,11 @@ This repo has two parts:
 
 **EQ + Tone section** (after the room): a live spectrum display with a 5-band EQ (drag the bands), a **Tape** knob (low and high cuts closing in, down to about 80 Hz to 9 kHz) and **Auto EQ**, a live soothe-style resonance suppressor focused on 2 to 10 kHz. Auto EQ adds one analysis window of latency (2048 samples at 44.1/48 kHz), reported to the DAW.
 
-Chain: `room -> Tape -> EQ -> Auto EQ -> Output`.
+**Space:** stereo width (mid/side). 0% = mono, 100% = untouched, 200% = wide, with the side signal below about 120 Hz fading out as it widens.
+
+Chain: `room -> Tape -> EQ -> Auto EQ -> Space -> Output`.
+
+**ROOMS (presets):** `.room` files (small XML: name, author, type, styles, notes, every parameter except Output, and the room analysis) in `Documents/Eville/ROOMS/<pack>/`. Favorites are kept in `ROOMS/favorites.xml`. The built-in **Factory** pack is generated from synthesized sources by `plugin/Tools/make_factory_presets.sh` and compiled into the plugin.
 
 **How it differs from the Python prototype:**
 - The tone-match EQ compares the room against a fixed "typical music" tilt (-6 dB/octave), not against the whole target file, because a live plugin can't hear the whole track ahead of time. The constant is `kReferenceTiltDbPerOct` in `plugin/Source/dsp/RoomSynth.cpp`.
@@ -41,6 +45,11 @@ Chain: `room -> Tape -> EQ -> Auto EQ -> Output`.
 | `plugin/Source/dsp/ToneShaper.*` | Tape filter and 5-band EQ |
 | `plugin/Source/dsp/ResonanceSuppressor.*` | Auto EQ (live resonance suppression) |
 | `plugin/Source/EqPanel.*` | EQ display: spectrum, draggable bands, Auto EQ cuts |
+| `plugin/Source/dsp/StereoWidth.h` | Space (stereo width) |
+| `plugin/Source/presets/PresetFile.*` | the `.room` format, type and style lists |
+| `plugin/Source/presets/PresetLibrary.*` | ROOMS folder: scan, search, sort, favorites, save, edit, delete, import, export |
+| `plugin/Source/presets/PresetBrowser.*` | preset bar, browser and save dialog |
+| `plugin/Tools/RoomTests.cpp` | `room_tests`: presets, Space and state tests against the real processor |
 | `plugin/Source/PluginProcessor.*` | parameters, background analysis thread, saving with the project |
 | `plugin/Source/PluginEditor.*` | the simple UI |
 | `plugin/Tools/RoomRender.cpp` | `room_render`: runs the plugin DSP on files, for testing |

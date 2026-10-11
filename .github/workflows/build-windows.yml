@@ -39,6 +39,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
 
+      - name: ROOMS presets + Space tests
+        run: |
+          build/room_tests_artefacts/Release/room_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: pluginval (strictness 10)
         run: |
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip

@@ -8,6 +8,8 @@ Writes to examples/audio/:
     hall_clap.wav     a clap in a big diffuse space (should score SPATIAL, near 1)
     bottle_tap.wav    a tap on a resonant glass object, dry (should score TONAL, near 0)
     room_tone.wav     steady background hiss + hum, no transients (tests the fallback)
+    small_room_clap.wav  a clap in a small, fairly dead room
+    metal_pipe.wav    a struck metal pipe (inharmonic, long ringing)
 
   TARGETS (things to process)
     drum_oneshot.wav  a kick + snare-ish hit
@@ -96,6 +98,42 @@ def room_tone():
     return x / np.max(np.abs(x)) * 0.5
 
 
+def small_room_clap():
+    """A clap in a small, fairly dead room: short decays (0.45 s lows, 0.2 s highs)."""
+    dur = 1.5
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    edges = np.geomspace(60, 16000, 25)
+    tail = np.zeros(n)
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        fc = np.sqrt(lo * hi)
+        t60 = np.interp(np.log2(fc), [np.log2(60), np.log2(16000)], [0.45, 0.2])
+        sos = signal.butter(4, [lo, min(hi, 0.45 * SR)], btype="bandpass", fs=SR, output="sos")
+        tail += signal.sosfilt(sos, rng.standard_normal(n)) * np.exp(-6.91 * t / t60)
+    burst = rng.standard_normal(int(0.004 * SR)) * 4.0
+    x = 0.25 * tail
+    x[: len(burst)] += burst * 0.3
+    x += 1e-4 * rng.standard_normal(n)
+    return x / np.max(np.abs(x)) * 0.8
+
+
+def metal_pipe():
+    """A struck metal pipe: inharmonic, long-ringing modes, slightly in a room."""
+    dur = 3.0
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    modes = [(523.0, 1.0, 2.2), (1443.0, 0.7, 1.8), (2830.0, 0.5, 1.4),
+             (4679.0, 0.35, 1.0), (6990.0, 0.2, 0.7)]
+    x = np.zeros(n)
+    for f, a, t60 in modes:
+        x += a * np.sin(2 * np.pi * f * t + rng.uniform(0, 6.28)) * np.exp(-6.91 * t / t60)
+    hit = np.zeros(n)
+    hit[: int(0.003 * SR)] = rng.standard_normal(int(0.003 * SR))
+    x += 0.6 * hit
+    x += 1e-4 * rng.standard_normal(n)
+    return x / np.max(np.abs(x)) * 0.8
+
+
 def drum_oneshot():
     """Kick (falling sine) + snare-ish noise, ~0.6 s."""
     n = int(0.6 * SR)
@@ -131,6 +169,8 @@ def main():
         "hall_clap.wav": hall_clap(),
         "bottle_tap.wav": bottle_tap(),
         "room_tone.wav": room_tone(),
+        "small_room_clap.wav": small_room_clap(),
+        "metal_pipe.wav": metal_pipe(),
         "drum_oneshot.wav": drum_oneshot(),
         "melody.wav": melody(),
     }

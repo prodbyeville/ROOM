@@ -24,6 +24,8 @@ KNOBS
   Balance    tone (resonances + EQ) vs space (reverb tail).
              "Auto" uses what ROOM detected from your sound.
   Tail       maximum reverb length
+  Space      stereo width. Left = mono, middle = untouched, right = extra
+             wide (the low end stays tight as it widens)
   Output     output volume
 
 EQ + TONE (bottom section, applied after the room)
@@ -35,6 +37,20 @@ EQ + TONE (bottom section, applied after the room)
   Auto EQ    listens live and pulls down harsh, ringing frequencies only when
              they poke out (mostly 2-10 kHz). The red area on the display
              shows what it is cutting right now. 0% = off.
+
+ROOMS (presets)
+  The bar at the top shows the current ROOM. Click it to open the browser.
+  < >        step through ROOMS (in the browser's current list and order)
+  Heart      favorite the current ROOM
+  Save       save the current sound as a ROOM: name, type, styles, pack, notes
+  Browser    search, filter by pack / type / style, click a column to sort,
+             heart to favorite, double-click to load. Your own ROOMS can be
+             edited (rename, retag, move pack) or deleted.
+  A ROOM stores the analyzed room and every knob except Output.
+
+  Your ROOMS live in:  Documents\Eville\ROOMS
+  Each folder in there is a pack. Copy .room files in or out to share them,
+  or use Import... / Export... in the browser.
 
 Note: Auto EQ adds about 43 ms of latency, which your DAW compensates for
 automatically (plugin delay compensation).

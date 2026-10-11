@@ -215,6 +215,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     setupKnob (mix, ParamIDs::mix, "MIX");
     setupKnob (balance, ParamIDs::balance, "BALANCE");
     setupKnob (tail, ParamIDs::tail, "TAIL");
+    setupKnob (space, ParamIDs::space, "SPACE");
     setupKnob (output, ParamIDs::output, "OUTPUT");
     setupKnob (tape, ParamIDs::tape, "TAPE");
     setupKnob (autoEq, ParamIDs::autoEq, "AUTO EQ");
@@ -235,6 +236,34 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
                + juce::String (juce::roundToInt (b * 100.0f)) + " space";
     };
     balance.slider.updateText();
+
+    // --- ROOMS presets ---
+    addAndMakeVisible (presetBar);
+    presetBar.onOpen = [this] { browser.setVisible (true); browser.toFront (true); };
+    presetBar.onPrev = [this] { stepPreset (-1); };
+    presetBar.onNext = [this] { stepPreset (1); };
+    presetBar.onSave = [this] { openSaveDialog(); };
+    presetBar.onToggleFavorite = [this]
+    {
+        auto& lib = proc.getLibrary();
+        if (auto* e = lib.find (proc.getCurrentPresetKey()))
+            lib.setFavorite (e->key, ! e->favorite);
+    };
+
+    addChildComponent (browser);
+    browser.onClose = [this] { browser.setVisible (false); };
+    browser.onLoad = [this] (const juce::String& key) { loadPreset (key); };
+    browser.onEdit = [this] (const juce::String& key, const room::presets::PresetMeta& meta, const juce::String& pack)
+    {
+        editingKey = key;
+        saveDialog.open (room::presets::SaveDialog::Mode::edit, meta, proc.getLibrary().getPacks(), pack);
+    };
+
+    addChildComponent (saveDialog);
+    saveDialog.onSubmit = [this] (auto mode, const auto& meta, const auto& pack, bool overwrite)
+    {
+        return submitSaveDialog (mode, meta, pack, overwrite);
+    };
 
     setSize (900, 760);
     refreshAnalysis();
@@ -261,6 +290,12 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
 
 void RoomAudioProcessorEditor::timerCallback()
 {
+    {
+        auto& lib = proc.getLibrary();
+        const auto* e = lib.find (proc.getCurrentPresetKey());
+        presetBar.setPreset (proc.getCurrentPresetName(), proc.isPresetModified(), e != nullptr && e->favorite, e != nullptr);
+    }
+
     const auto version = proc.getAnalysisVersion();
     const auto inten = proc.apvts.getRawParameterValue (ParamIDs::intensity)->load();
     if (version != shownVersion || std::abs (inten - shownIntensity) > 1e-4f)
@@ -308,8 +343,8 @@ void RoomAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     g.drawText ("ROOM", header, juce::Justification::centredLeft);
     g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("working name  |  prototype v" JucePlugin_VersionString, header, juce::Justification::centredRight);
+    g.setFont (juce::FontOptions (10.0f));
+    g.drawText ("v" JucePlugin_VersionString, header.withTrimmedLeft (78), juce::Justification::centredLeft);
 
     // Section label above the EQ
     g.setColour (Colours::dim);
@@ -319,7 +354,11 @@ void RoomAudioProcessorEditor::paint (juce::Graphics& g)
 
 void RoomAudioProcessorEditor::resized()
 {
+    browser.setBounds (getLocalBounds());
+    saveDialog.setBounds (getLocalBounds());
+
     auto area = getLocalBounds().reduced (20, 0);
+    presetBar.setBounds (area.withHeight (48).withTrimmedLeft (150).reduced (0, 9));
     area.removeFromTop (48);
 
     dropZone.setBounds (area.removeFromTop (62));
@@ -333,8 +372,8 @@ void RoomAudioProcessorEditor::resized()
     area.removeFromTop (10);
 
     auto knobs = area.removeFromTop (150);
-    const auto w = knobs.getWidth() / 5;
-    for (auto* k : { &intensity, &mix, &balance, &tail, &output })
+    const auto w = knobs.getWidth() / 6;
+    for (auto* k : { &intensity, &mix, &balance, &tail, &space, &output })
     {
         auto col = knobs.removeFromLeft (w).reduced (6, 0);
         k->label.setBounds (col.removeFromTop (18));
@@ -357,4 +396,104 @@ void RoomAudioProcessorEditor::resized()
         k->label.setBounds (col.removeFromTop (18));
         k->slider.setBounds (col);
     }
+}
+
+//==============================================================================
+// ROOMS presets
+
+void RoomAudioProcessorEditor::loadPreset (const juce::String& key)
+{
+    auto& lib = proc.getLibrary();
+    const auto* e = lib.find (key);
+    if (e == nullptr)
+        return;
+    const auto tree = lib.loadPreset (*e);
+    if (! tree.isValid())
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("ROOMS")
+                                          .withMessage ("\"" + e->meta.name + "\" couldn't be read.").withButton ("OK"), nullptr);
+        return;
+    }
+    proc.applyPreset (tree, key);
+    browser.repaint();
+}
+
+void RoomAudioProcessorEditor::stepPreset (int delta)
+{
+    auto& lib = proc.getLibrary();
+    const auto list = browser.currentList();
+    if (list.empty())
+        return;
+
+    int index = -1;
+    for (int i = 0; i < (int) list.size(); ++i)
+        if (lib.getEntries()[(size_t) list[(size_t) i]].key == proc.getCurrentPresetKey())
+            index = i;
+
+    const auto n = (int) list.size();
+    const auto next = index < 0 ? (delta > 0 ? 0 : n - 1) : ((index + delta) % n + n) % n;
+    loadPreset (lib.getEntries()[(size_t) list[(size_t) next]].key);
+}
+
+void RoomAudioProcessorEditor::openSaveDialog()
+{
+    auto& lib = proc.getLibrary();
+    room::presets::PresetMeta meta;
+    juce::String pack = room::presets::PresetLibrary::userPack;
+    if (const auto* e = lib.find (proc.getCurrentPresetKey()))
+    {
+        meta = e->meta;
+        meta.created = {};
+        if (e->factory)
+            meta.author = {};   // a copy of a factory ROOM becomes yours
+        else
+            pack = e->pack;
+    }
+    else
+        meta.name = proc.getCurrentPresetName();
+
+    editingKey.clear();
+    saveDialog.open (room::presets::SaveDialog::Mode::save, meta, lib.getPacks(), pack);
+}
+
+juce::String RoomAudioProcessorEditor::submitSaveDialog (room::presets::SaveDialog::Mode mode,
+                                                         const room::presets::PresetMeta& metaIn,
+                                                         const juce::String& pack, bool overwrite)
+{
+    using room::presets::PresetLibrary;
+    auto& lib = proc.getLibrary();
+    auto meta = metaIn;
+
+    if (meta.name.isEmpty())
+        return "Give the ROOM a name.";
+    if (meta.type.isEmpty())
+        return "Pick a type.";
+    if (! PresetLibrary::isValidPackName (pack))
+        return "Choose or name a pack (not Factory).";
+
+    juce::String err;
+    if (! lib.getPacks().contains (pack) && ! lib.createPack (pack, err))
+        return err;
+
+    juce::String key;
+    if (mode == room::presets::SaveDialog::Mode::save)
+    {
+        if (meta.author.isEmpty())
+            meta.author = "User";
+        meta.created = juce::Time::getCurrentTime();
+        if (! lib.save (proc.capturePreset (meta), pack, overwrite, key, err))
+            return err;
+        proc.setCurrentPreset (key, meta.name);
+    }
+    else
+    {
+        if (! lib.updateMeta (editingKey, meta, pack, key, err))
+            return err;
+        if (editingKey == proc.getCurrentPresetKey())
+            proc.relabelCurrentPreset (key, meta.name);
+    }
+
+    if (browser.isVisible())
+        browser.refresh();
+    return {};
 }

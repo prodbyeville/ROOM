@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "EqPanel.h"
+#include "presets/PresetBrowser.h"
 
 // Simple working UI (not the final design):
 //   - drop zone to load a room sound (or click to browse)
@@ -74,10 +75,22 @@ private:
     juce::Label readout;
     juce::TextButton clearButton { "Clear" };
 
-    Knob intensity, mix, balance, tail, output;
+    Knob intensity, mix, balance, tail, space, output;
     Knob tape, autoEq;
     EqPanel eqPanel { proc };
     juce::Rectangle<int> eqLabelArea;
+
+    // ROOMS presets
+    void loadPreset (const juce::String& key);
+    void stepPreset (int delta);
+    void openSaveDialog();
+    juce::String submitSaveDialog (room::presets::SaveDialog::Mode, const room::presets::PresetMeta&,
+                                   const juce::String& pack, bool overwrite);
+
+    room::presets::PresetBar presetBar;
+    room::presets::PresetBrowser browser { proc };
+    room::presets::SaveDialog saveDialog;
+    juce::String editingKey;
     juce::ToggleButton autoBalance { "Auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
 

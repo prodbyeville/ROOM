@@ -6,6 +6,8 @@
 #include "dsp/ToneShaper.h"
 #include "dsp/ResonanceSuppressor.h"
 #include "dsp/SpectrumTap.h"
+#include "dsp/StereoWidth.h"
+#include "presets/PresetLibrary.h"
 
 namespace ParamIDs
 {
@@ -17,6 +19,7 @@ namespace ParamIDs
     inline constexpr const char* output      = "output";
     inline constexpr const char* tape        = "tape";
     inline constexpr const char* autoEq      = "autoEq";
+    inline constexpr const char* space       = "space";
 
     // EQ band parameters: "eq1Freq", "eq1Gain", "eq1Q" ... "eq5Q"
     inline juce::String eqFreq (int band) { return "eq" + juce::String (band + 1) + "Freq"; }
@@ -85,6 +88,32 @@ public:
     const room::ResonanceSuppressor& getSuppressor() const { return suppressor; }
     double getCurrentSampleRate() const { return currentSampleRate.load(); }
 
+    //==========================================================================
+    // ROOMS presets (message thread)
+
+    room::presets::PresetLibrary& getLibrary();
+
+    /** Use a different ROOMS folder (tests). Rebuilds the library. */
+    void setPresetRoot (const juce::File&);
+
+    /** The current sound as a preset: every parameter except Output, plus the room. */
+    juce::ValueTree capturePreset (const room::presets::PresetMeta&) const;
+
+    /** Restores a preset: every parameter it has (Output untouched) and its room. */
+    void applyPreset (const juce::ValueTree& preset, const juce::String& key);
+
+    /** Remember that the current sound is now saved as this preset. */
+    void setCurrentPreset (const juce::String& key, const juce::String& name);
+
+    /** Same, but keeps the "modified" state (used when a preset is only renamed or retagged). */
+    void relabelCurrentPreset (const juce::String& key, const juce::String& name) { currentPresetKey = key; currentPresetName = name; }
+
+    juce::String getCurrentPresetKey() const { return currentPresetKey; }
+    juce::String getCurrentPresetName() const { return currentPresetName; }
+
+    /** True if any knob moved since the preset was loaded or saved. */
+    bool isPresetModified() const;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void parameterChanged (const juce::String& id, float) override;
@@ -102,6 +131,7 @@ private:
     room::RoomEngine engine;
     room::ToneShaper toneShaper;
     room::ResonanceSuppressor suppressor;
+    room::StereoWidth stereoWidth;
     juce::SmoothedValue<float> outputGain;
 
     mutable juce::CriticalSection analysisLock;
@@ -120,9 +150,20 @@ private:
     std::atomic<float>* outputParam = nullptr;
     std::atomic<float>* tapeParam = nullptr;
     std::atomic<float>* autoEqParam = nullptr;
+    std::atomic<float>* spaceParam = nullptr;
     std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
     std::atomic<float>* eqQParam[room::tone::numEqBands] {};
+
+    // Presets
+    std::map<juce::String, float> currentParamValues() const;
+    void snapshotPreset();
+
+    juce::File presetRoot = room::presets::PresetLibrary::defaultRoot();
+    std::unique_ptr<room::presets::PresetLibrary> library;
+    juce::String currentPresetKey, currentPresetName;
+    std::map<juce::String, float> presetSnapshot;
+    bool restoredAsModified = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoomAudioProcessor)
 };
