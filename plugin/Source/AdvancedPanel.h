@@ -1,10 +1,13 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "ModSlider.h"
+#include "LfoPanel.h"
 
 // The ADVANCED screen. It takes the place of the EQ tier:
 //   top row:    PRE-DELAY  SIZE  DAMPING  DUCKING  RELEASE  [FREEZE]
-//   below:      ROOM INFO  (everything ROOM measured about the loaded room)
+//   below:      [ROOM INFO | MODULATION] tabs: everything ROOM measured about
+//               the room, or the two LFOs
 
 class AdvancedPanel : public juce::Component
 {
@@ -17,10 +20,15 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    /** Re-check LFO assignments on this screen's knobs. */
+    void refreshModulation();
+
+    void showModulationTab (bool);
+
 private:
     struct Knob
     {
-        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+        ModSlider slider;
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
@@ -31,6 +39,9 @@ private:
     juce::TextButton freeze { "FREEZE" };
     juce::Label freezeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
+
+    juce::TextButton infoTab { "ROOM INFO" }, modTab { "MODULATION" };
+    LfoPanel lfoPanel;
 
     room::RoomAnalysis analysis;
     juce::Rectangle<int> infoArea;

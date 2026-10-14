@@ -8,6 +8,8 @@
 #include "dsp/SpectrumTap.h"
 #include "dsp/StereoWidth.h"
 #include "presets/PresetLibrary.h"
+#include "dsp/Lfo.h"
+#include "Modulation.h"
 
 namespace ParamIDs
 {
@@ -29,6 +31,13 @@ namespace ParamIDs
     inline constexpr const char* freeze      = "freeze";
     // Top bar
     inline constexpr const char* bypass      = "bypass";
+
+    // LFOs: "lfo1Rate", "lfo1Sync", "lfo1Div", "lfo1Shape", "lfo1Retrig" (and lfo2...)
+    inline juce::String lfoRate (int l)   { return "lfo" + juce::String (l + 1) + "Rate"; }
+    inline juce::String lfoSync (int l)   { return "lfo" + juce::String (l + 1) + "Sync"; }
+    inline juce::String lfoDiv (int l)    { return "lfo" + juce::String (l + 1) + "Div"; }
+    inline juce::String lfoShape (int l)  { return "lfo" + juce::String (l + 1) + "Shape"; }
+    inline juce::String lfoRetrig (int l) { return "lfo" + juce::String (l + 1) + "Retrig"; }
 
     // EQ band parameters: "eq1Freq", "eq1Gain", "eq1Q" ... "eq5Q"
     inline juce::String eqFreq (int band) { return "eq" + juce::String (band + 1) + "Freq"; }
@@ -136,6 +145,9 @@ public:
         Leaves the room itself, Dry/Wet, Output, Bypass and Freeze alone. */
     void randomizeKnobs (juce::Random&);
 
+    /** LFO -> knob assignments (edited by the UI, read by the audio thread). */
+    room::Modulation modulation;
+
     /** UI state saved with the project. */
     float editorScale = 1.0f;
     bool advancedOpen = false;
@@ -195,6 +207,21 @@ private:
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
     std::atomic<float>* eqQParam[room::tone::numEqBands] {};
 
+    // LFOs
+    void updateModulation (int samplesIntoBlock, int numSamples);
+    float effective (int target, float baseValue) const;
+    float effectiveForRebuild (const char* paramId) const;
+    bool rebuildTargetsMoved() const;   // worker thread
+    bool modulatesRebuildTargets() const;
+    room::Lfo lfos[room::Modulation::numLfos];
+    std::array<juce::RangedAudioParameter*, 32> targetParams {};
+    std::array<float, 32> modOffset {};
+    std::array<std::atomic<float>, 32> effValue {};       // effective values (rebuild targets read these)
+    std::array<float, 32> lastBuiltValue {};               // worker thread
+    bool wasPlaying = false;
+    double blockPpq = 0.0, blockBpm = 120.0;
+    bool blockPlaying = false, blockHasPpq = false;
+
     // Recording (buffer allocated in prepareToPlay; audio thread writes)
     juce::AudioBuffer<float> recordBuf;
     std::atomic<int> recordPos { 0 };
@@ -211,6 +238,7 @@ private:
     std::unique_ptr<room::presets::PresetLibrary> library;
     juce::String currentPresetKey, currentPresetName;
     std::map<juce::String, float> presetSnapshot;
+    juce::String modulationSnapshot;
     bool restoredAsModified = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoomAudioProcessor)

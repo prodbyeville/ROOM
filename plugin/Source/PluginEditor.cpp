@@ -447,6 +447,7 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
     content.addAndMakeVisible (k.slider);
     content.addAndMakeVisible (k.label);
     k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, k.slider);
+    k.slider.setModTarget (&proc.modulation, room::Modulation::targetIndex (id));   // -1 = not an LFO target
 }
 
 void RoomAudioProcessorEditor::setAdvanced (bool adv)
@@ -478,6 +479,11 @@ void RoomAudioProcessorEditor::timerCallback()
     if (version != shownVersion || std::abs (inten - shownIntensity) > 1e-4f
         || std::abs (sz - shownSize) > 1e-4f || std::abs (dmp - shownDamping) > 1e-4f)
         refreshAnalysis();
+
+    // LFO assignments can change from presets or the right-click menu.
+    for (auto* k : { &intensity, &balance, &tail, &space, &mix, &output, &tape, &autoEq })
+        k->slider.refreshModulation();
+    advancedPanel.refreshModulation();
 
     // Recording: keep the button and the live meter up to date.
     const auto rec = proc.isRecording();

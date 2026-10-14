@@ -731,6 +731,131 @@ namespace
     }
 
     //==========================================================================
+    // LFOs
+
+    struct MockPlayHead : public juce::AudioPlayHead
+    {
+        double bpm = 120.0, ppq = 0.0;
+        bool playing = true;
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo p;
+            p.setBpm (bpm);
+            p.setPpqPosition (ppq);
+            p.setIsPlaying (playing);
+            return p;
+        }
+    };
+
+    /** Count the up-crossings of a signal's (20 ms) loudness around its mean. */
+    int envelopeCycles (const std::vector<float>& y, double fromS, double toS)
+    {
+        const auto win = (size_t) (0.02 * Rig::sr);
+        std::vector<double> env;
+        for (auto i = (size_t) (fromS * Rig::sr); i + win < std::min (y.size(), (size_t) (toS * Rig::sr)); i += win)
+        {
+            double s = 0;
+            for (size_t k = 0; k < win; ++k) s += (double) y[i + k] * y[i + k];
+            env.push_back (std::sqrt (s / win));
+        }
+        double mean = 0;
+        for (auto e : env) mean += e;
+        mean /= std::max<size_t> (1, env.size());
+        int ups = 0;
+        for (size_t i = 1; i < env.size(); ++i)
+            if (env[i - 1] < mean && env[i] >= mean) ++ups;
+        return ups;
+    }
+
+    /** How far a signal's (20 ms) loudness swings, in dB. */
+    double envelopeSwingDb (const std::vector<float>& y, double fromS, double toS)
+    {
+        const auto win = (size_t) (0.02 * Rig::sr);
+        double lo = 1e9, hi = 0;
+        for (auto i = (size_t) (fromS * Rig::sr); i + win < std::min (y.size(), (size_t) (toS * Rig::sr)); i += win)
+        {
+            double s = 0;
+            for (size_t k = 0; k < win; ++k) s += (double) y[i + k] * y[i + k];
+            const auto e = std::sqrt (s / win);
+            lo = std::min (lo, e);
+            hi = std::max (hi, e);
+        }
+        return 20.0 * std::log10 (hi / std::max (1e-9, lo));
+    }
+
+    void testLfo (const juce::File& root)
+    {
+        std::cout << "LFOs\n";
+        Rig rig (root);
+        auto& p = rig.proc;
+        setParam (p, ParamIDs::mix, 0.0f);   // dry only, so the LFO on Output is all we hear
+        rig.settle();
+
+        std::vector<float> tone ((size_t) (3.0 * Rig::sr));
+        for (size_t i = 0; i < tone.size(); ++i)
+            tone[i] = 0.3f * std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f * (float) i / (float) Rig::sr);
+
+        // Free-running 2 Hz sine on Output.
+        setParam (p, ParamIDs::lfoRate (0), 2.0f);
+        setParam (p, ParamIDs::lfoSync (0), 0.0f);
+        setParam (p, ParamIDs::lfoShape (0), 0.0f);
+        const auto outBefore = paramValue (p, ParamIDs::output);
+        p.setCurrentPreset ({}, "lfo test");   // reference point: everything as it is now
+        check (! p.isPresetModified(), "clean before assigning");
+        p.modulation.assign (0, room::Modulation::targetIndex (ParamIDs::output), 0.3f);
+        check (p.isPresetModified(), "assigning an LFO marks the preset modified");
+        auto y = rig.run (tone, 0.0);
+        const auto cycles = envelopeCycles (y, 0.5, 2.5);
+        std::cout << "    2 Hz LFO on Out: " << cycles << " cycles in 2 s, swing " << juce::String (envelopeSwingDb (y, 0.5, 2.5), 1) << " dB\n";
+        check (cycles >= 3 && cycles <= 5, "LFO moves the knob at its rate");
+        check (std::abs (paramValue (p, ParamIDs::output) - outBefore) < 1e-4f, "the knob itself (and its automation) doesn't move");
+
+        // Synced: 1/4 note at 120 bpm = 2 Hz, following the song position.
+        MockPlayHead ph;
+        p.setPlayHead (&ph);
+        setParam (p, ParamIDs::lfoRate (0), 0.1f);       // would be very slow if not synced
+        setParam (p, ParamIDs::lfoSync (0), 1.0f);
+        setParam (p, ParamIDs::lfoDiv (0), 3.0f);        // "1/4"
+        y = rig.run (tone, 0.0, [&] (int pos) { ph.ppq = pos / Rig::sr * ph.bpm / 60.0; });
+        const auto syncCycles = envelopeCycles (y, 0.5, 2.5);
+        std::cout << "    synced 1/4 at 120 bpm: " << syncCycles << " cycles in 2 s\n";
+        check (syncCycles >= 3 && syncCycles <= 5, "synced LFO follows the tempo");
+        p.setPlayHead (nullptr);
+
+        // No assignments: identical to no LFO at all.
+        p.modulation.clear();
+        y = rig.run (tone, 0.0);
+        check (envelopeSwingDb (y, 0.5, 2.5) < 0.5, "no assignment, no movement");
+
+        // Save with the project and in presets.
+        p.modulation.assign (0, room::Modulation::targetIndex (ParamIDs::tail), 0.5f);
+        p.modulation.assign (1, room::Modulation::targetIndex (ParamIDs::mix), -0.2f);
+        juce::MemoryBlock state;
+        p.getStateInformation (state);
+        RoomAudioProcessor p2;
+        p2.setPresetRoot (root);
+        p2.setStateInformation (state.getData(), (int) state.getSize());
+        check (std::abs (p2.modulation.depthOf (0, room::Modulation::targetIndex (ParamIDs::tail)) - 0.5f) < 1e-4f
+                   && std::abs (p2.modulation.depthOf (1, room::Modulation::targetIndex (ParamIDs::mix)) + 0.2f) < 1e-4f,
+               "LFO assignments are saved with the project");
+
+        PresetMeta meta;
+        meta.name = "LFO test";
+        meta.type = "FX";
+        juce::String key, err;
+        check (p.getLibrary().save (p.capturePreset (meta), "User", true, key, err), "save preset with LFOs");
+        p.modulation.clear();
+        p.applyPreset (p.getLibrary().loadPreset (*p.getLibrary().find (key)), key);
+        check (p.modulation.isAssigned (0, room::Modulation::targetIndex (ParamIDs::tail))
+                   && p.modulation.isAssigned (1, room::Modulation::targetIndex (ParamIDs::mix)),
+               "LFO assignments come back with the preset");
+        check (! p.isPresetModified(), "loaded preset with LFOs is clean");
+        p.applyPreset (p.getLibrary().loadPreset (*p.getLibrary().find ("Factory/Big Hall")), "Factory/Big Hall");
+        check (! p.modulation.anyAssigned(), "a preset without LFOs clears them");
+        p.getLibrary().remove (key);
+    }
+
+    //==========================================================================
 
     int screenshot (const juce::StringArray& args)
     {
@@ -754,6 +879,15 @@ namespace
         ed.setVisible (true);
         if (args[2] == "record")
             p.startRecording();
+        if (args[2] == "lfo")
+        {
+            using M = room::Modulation;
+            p.modulation.assign (0, M::targetIndex (ParamIDs::mix), 0.3f);
+            p.modulation.assign (0, M::targetIndex (ParamIDs::space), 0.4f);
+            p.modulation.assign (1, M::targetIndex (ParamIDs::size), 0.25f);
+            p.modulation.assign (1, M::targetIndex (ParamIDs::intensity), -0.2f);
+            setParam (p, ParamIDs::lfoShape (1), 6.0f);
+        }
         juce::MidiBuffer midi;
         juce::AudioBuffer<float> io (2, 512);
         for (int pos = 0; pos < 200000 && t.getNumSamples() > 1024; pos += 512)
@@ -774,11 +908,13 @@ namespace
                     if (auto* b = dynamic_cast<PresetBrowser*> (child)) { b->setVisible (true); b->toFront (false); }
                 if (mode == "save")
                     if (auto* bar = dynamic_cast<PresetBar*> (child)) if (bar->onSave) bar->onSave();
+                if (mode == "lfo")
+                    if (auto* adv = dynamic_cast<AdvancedPanel*> (child)) adv->showModulationTab (true);
                 findAndShow (*child);
             }
         };
         findAndShow (ed);
-        if (mode == "advanced")
+        if (mode == "advanced" || mode == "lfo")
             ed.setAdvanced (true);
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
             ed.setSize (juce::roundToInt (RoomAudioProcessorEditor::baseWidth * args[5].getFloatValue()),
@@ -830,6 +966,7 @@ int main (int argc, char* argv[])
     testSpace();
     testAdvanced (root);
     testRecord (root, roomSource);
+    testLfo (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

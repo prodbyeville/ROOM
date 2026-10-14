@@ -71,6 +71,7 @@ private:
 };
 
 class RoomAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                 public juce::DragAndDropContainer,
                                  private juce::Timer
 {
 public:
@@ -92,7 +93,7 @@ private:
 
     struct Knob
     {
-        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+        ModSlider slider;
         juce::Label label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };

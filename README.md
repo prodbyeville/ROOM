@@ -28,7 +28,7 @@ This repo has two parts:
 
 Chain: `room (pre-delay, freeze, ducking) -> Tape -> EQ -> Auto EQ -> Space -> Output -> Bypass`.
 
-**Layout:** a top bar (ROOMS, Advanced, Randomize, Dry/Wet, Out, Bypass) and three tiers: 1 load, 2 shape the room (decay + tone displays, Intensity, Balance, Tail, Space), 3 finish (EQ, Tape, Auto EQ). The **Advanced** button swaps tier 3 for Pre-delay, Size, Damping, Ducking + Release, Freeze and full Room Info. The window is resizable (fixed aspect; the whole UI scales). **Record into ROOM:** the record button in tier 1 captures up to 30 s of the track's input (before processing) and analyzes it as the room.
+**Layout:** a top bar (ROOMS, Advanced, Randomize, Dry/Wet, Out, Bypass) and three tiers: 1 load, 2 shape the room (decay + tone displays, Intensity, Balance, Tail, Space), 3 finish (EQ, Tape, Auto EQ). The **Advanced** button swaps tier 3 for Pre-delay, Size, Damping, Ducking + Release, Freeze and full Room Info. The window is resizable (fixed aspect; the whole UI scales). **LFOs:** two LFOs on the Advanced screen's MODULATION tab (sine, triangle, saws, square, S&H, smooth random; Hz or tempo-synced; retrigger). Drag an LFO onto any knob (or right-click a knob) to assign it, up to 8 targets each. Modulation is applied inside the plugin in 64-sample slices and never moves the parameter itself; Intensity/Tail/Size/Damping modulation rebuilds the room on the worker thread (about 20 times a second). Assignments are stored in the project state and in presets (`MODULATION`). **Record into ROOM:** the record button in tier 1 captures up to 30 s of the track's input (before processing) and analyzes it as the room.
 
 **ROOMS (presets):** `.room` files (small XML: name, author, type, styles, notes, every parameter except Output, and the room analysis) in `Documents/Eville/ROOMS/<pack>/`. Favorites are kept in `ROOMS/favorites.xml`. The built-in **Factory** pack is generated from synthesized sources by `plugin/Tools/make_factory_presets.sh` and compiled into the plugin.
 
@@ -48,6 +48,8 @@ Chain: `room (pre-delay, freeze, ducking) -> Tape -> EQ -> Auto EQ -> Space -> O
 | `plugin/Source/dsp/ResonanceSuppressor.*` | Auto EQ (live resonance suppression) |
 | `plugin/Source/EqPanel.*` | EQ display: spectrum, draggable bands, Auto EQ cuts |
 | `plugin/Source/AdvancedPanel.*` | ADVANCED screen: pre-delay, size, damping, ducking, freeze, room info |
+| `plugin/Source/dsp/Lfo.h`, `plugin/Source/Modulation.h` | LFO shapes and the LFO -> knob assignment slots |
+| `plugin/Source/ModSlider.*`, `plugin/Source/LfoPanel.*` | knobs that accept dropped LFOs (rings, right-click menu) and the LFO modules |
 | `plugin/Source/dsp/StereoWidth.h` | Space (stereo width) |
 | `plugin/Source/presets/PresetFile.*` | the `.room` format, type and style lists |
 | `plugin/Source/presets/PresetLibrary.*` | ROOMS folder: scan, search, sort, favorites, save, edit, delete, import, export |

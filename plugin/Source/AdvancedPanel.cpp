@@ -1,8 +1,23 @@
 #include "AdvancedPanel.h"
 #include "UiColours.h"
 
-AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p)
+AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
 {
+    for (auto* t : { &infoTab, &modTab })
+    {
+        t->setClickingTogglesState (true);
+        t->setRadioGroupId (4711);
+        t->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        t->setColour (juce::TextButton::buttonOnColourId, Colours::panel);
+        t->setColour (juce::TextButton::textColourOffId, Colours::dim);
+        t->setColour (juce::TextButton::textColourOnId, Colours::text);
+        addAndMakeVisible (t);
+    }
+    infoTab.onClick = [this] { showModulationTab (false); };
+    modTab.onClick = [this] { showModulationTab (true); };
+    addChildComponent (lfoPanel);
+    infoTab.setToggleState (true, juce::dontSendNotification);
+
     setupKnob (preDelay, ParamIDs::preDelay, "PRE-DELAY");
     setupKnob (size, ParamIDs::size, "SIZE");
     setupKnob (damping, ParamIDs::damping, "DAMPING");
@@ -37,6 +52,21 @@ void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::Stri
     addAndMakeVisible (k.slider);
     addAndMakeVisible (k.label);
     k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, k.slider);
+    k.slider.setModTarget (&proc.modulation, room::Modulation::targetIndex (id));
+}
+
+void AdvancedPanel::refreshModulation()
+{
+    for (auto* k : { &preDelay, &size, &damping, &duck, &duckRelease })
+        k->slider.refreshModulation();
+}
+
+void AdvancedPanel::showModulationTab (bool mod)
+{
+    modTab.setToggleState (mod, juce::dontSendNotification);
+    infoTab.setToggleState (! mod, juce::dontSendNotification);
+    lfoPanel.setVisible (mod);
+    repaint();
 }
 
 void AdvancedPanel::setAnalysis (const room::RoomAnalysis& a)
@@ -59,22 +89,25 @@ void AdvancedPanel::resized()
     auto col = row.reduced (10, 0);
     freezeLabel.setBounds (col.removeFromTop (18));
     freeze.setBounds (col.withSizeKeepingCentre (std::min (col.getWidth(), 100), 40).translated (0, -8));
-    r.removeFromTop (8);
+    auto tabs = r.removeFromTop (26);
+    infoTab.setBounds (tabs.removeFromLeft (110));
+    modTab.setBounds (tabs.removeFromLeft (120));
+    r.removeFromTop (4);
     infoArea = r;
+    lfoPanel.setBounds (r);
 }
 
 void AdvancedPanel::paint (juce::Graphics& g)
 {
+    if (lfoPanel.isVisible())
+        return;
+
     // Room info card
     const auto card = infoArea.toFloat();
     g.setColour (Colours::panel);
     g.fillRoundedRectangle (card, 8.0f);
 
     auto r = infoArea.reduced (16, 12);
-    g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    g.drawText ("ROOM INFO", r.removeFromTop (16), juce::Justification::centredLeft);
-    r.removeFromTop (2);
 
     if (! analysis.valid)
     {

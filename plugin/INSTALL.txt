@@ -48,8 +48,18 @@ ADVANCED SCREEN
   Ducking    the room dips while you play and swells back in the gaps
   Release    how fast the room comes back after ducking
   Freeze     holds the current tail forever (pads, transitions)
-  Room info  everything ROOM measured: balance, decay per band (measured
+  Below the Advanced knobs are two tabs:
+  ROOM INFO  everything ROOM measured: balance, decay per band (measured
              and as your knobs set it now), resonances, length
+  MODULATION two LFOs. Drag an LFO's handle onto any knob to make it
+             move that knob. A coloured ring shows how far it swings it.
+             Right-click any knob to add an LFO, change the depth (10-100%),
+             invert it or remove it.
+             Shape: sine, triangle, saw up/down, square, S&H, smooth random
+             Rate in Hz, or Sync to the song tempo (1/32 note .. 8 bars)
+             Retrig restarts the LFO when you press play
+             The knob itself never moves, so automation still works.
+             LFO assignments are saved in your project and in ROOMS presets.
 
 The window can be resized from the bottom-right corner.
 

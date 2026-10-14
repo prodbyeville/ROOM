@@ -45,9 +45,12 @@ public:
         while (! threadShouldExit())
         {
             if (! hasWork())
-                wait (owner.recordArmed.load() ? 30 : -1);   // while recording, check for the end often
+                // While recording or while an LFO moves Intensity/Tail/Size/Damping, check often.
+                wait (owner.recordArmed.load() ? 30 : owner.modulatesRebuildTargets() ? 50 : -1);
 
             owner.finishRecording();
+            if (owner.rebuildTargetsMoved())
+                owner.rebuildRoom();
 
             juce::File file;
             bool doFile = false;
@@ -117,6 +120,13 @@ RoomAudioProcessor::RoomAudioProcessor()
         eqFreqParam[b] = apvts.getRawParameterValue (ParamIDs::eqFreq (b));
         eqGainParam[b] = apvts.getRawParameterValue (ParamIDs::eqGain (b));
         eqQParam[b]    = apvts.getRawParameterValue (ParamIDs::eqQ (b));
+    }
+
+    for (int t = 0; t < room::Modulation::numTargets(); ++t)
+    {
+        targetParams[(size_t) t] = apvts.getParameter (room::Modulation::targetIds()[t]);
+        jassert (targetParams[(size_t) t] != nullptr);
+        effValue[(size_t) t] = apvts.getRawParameterValue (room::Modulation::targetIds()[t])->load();
     }
 
     // These reshape the room, so the IR is rebuilt when they move.
@@ -217,6 +227,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         ParameterID { ParamIDs::freeze, 1 }, "Freeze", false));
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
+
+    // --- LFOs -----------------------------------------------------------------
+    for (int l = 0; l < room::Modulation::numLfos; ++l)
+    {
+        const auto name = "LFO " + String (l + 1);
+        NormalisableRange<float> rate (0.01f, 20.0f, 0.001f);
+        rate.setSkewForCentre (1.0f);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::lfoRate (l), 1 }, name + " Rate", rate, l == 0 ? 0.5f : 2.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int) { return v < 1.0f ? String (v, 2) + " Hz" : String (v, 1) + " Hz"; })));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::lfoSync (l), 1 }, name + " Sync", false));
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoDiv (l), 1 }, name + " Division",
+                                                            room::Lfo::divisionNames(), 3));
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::lfoShape (l), 1 }, name + " Shape",
+                                                            room::Lfo::shapeNames(), 0));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::lfoRetrig (l), 1 }, name + " Retrigger", false));
+    }
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::output, 1 }, "Output",
@@ -344,8 +372,6 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
     }
 
-    const auto balance = balanceAutoParam->load() > 0.5f ? detectedBalance.load()
-                                                         : balanceParam->load();
     // Keep a copy of the input, delayed by the plugin's latency, for Bypass.
     const auto n = buffer.getNumSamples();
     const auto chansIo = std::min (buffer.getNumChannels(), dryDelay.getNumChannels());
@@ -366,36 +392,67 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         dryDelayWrite = (dryDelayWrite + n) % len;
     }
 
-    room::RoomFx fx;
-    fx.preDelayMs = preDelayParam->load();
-    fx.duck = duckParam->load();
-    fx.duckReleaseMs = duckReleaseParam->load();
-    fx.freeze = freezeParam->load() > 0.5f;
-
-    // Room -> Tape -> EQ -> Auto EQ -> Space -> output gain
-    engine.process (buffer, balance, mixParam->load(), 0.0f, fx);
-
-    room::EqBand bands[room::tone::numEqBands];
-    getEqBands (bands);
-    toneShaper.process (buffer, tapeParam->load(), bands);
-    suppressor.process (buffer, autoEqParam->load());
-    stereoWidth.process (buffer, spaceParam->load());
-
-    outputGain.setTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
-    const auto outChans = std::min (buffer.getNumChannels(), 2);
-    if (outputGain.isSmoothing())
-    {
-        for (int i = 0; i < buffer.getNumSamples(); ++i)
+    // Host transport, for synced LFOs.
+    blockPlaying = false;
+    blockHasPpq = false;
+    if (auto* ph = getPlayHead())
+        if (const auto pos = ph->getPosition())
         {
-            const auto g = outputGain.getNextValue();
-            for (int ch = 0; ch < outChans; ++ch)
-                buffer.getWritePointer (ch)[i] *= g;
+            blockPlaying = pos->getIsPlaying();
+            if (const auto bpm = pos->getBpm()) blockBpm = *bpm;
+            if (const auto ppq = pos->getPpqPosition()) { blockPpq = *ppq; blockHasPpq = true; }
         }
-    }
-    else
+    for (int l = 0; l < room::Modulation::numLfos; ++l)
+        if (blockPlaying && ! wasPlaying && apvts.getRawParameterValue (ParamIDs::lfoRetrig (l))->load() > 0.5f)
+            lfos[l].reset();
+    wasPlaying = blockPlaying;
+
+    // With LFOs assigned, run the chain in small slices so modulation is smooth.
+    const auto modActive = modulation.anyAssigned();
+    const auto slice = modActive ? 64 : n;
+    for (int start = 0; start < n; start += slice)
     {
-        for (int ch = 0; ch < outChans; ++ch)
-            buffer.applyGain (ch, 0, buffer.getNumSamples(), outputGain.getTargetValue());
+        const auto len = std::min (slice, n - start);
+        juce::AudioBuffer<float> part (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), start, len);
+        updateModulation (start, len);
+
+        using M = room::Modulation;
+        auto eff = [this] (const char* id, std::atomic<float>* raw) { return effective (M::targetIndex (id), raw->load()); };
+
+        room::RoomFx fx;
+        fx.preDelayMs = eff (ParamIDs::preDelay, preDelayParam);
+        fx.duck = eff (ParamIDs::duck, duckParam);
+        fx.duckReleaseMs = eff (ParamIDs::duckRelease, duckReleaseParam);
+        fx.freeze = freezeParam->load() > 0.5f;
+
+        const auto baseBalance = balanceAutoParam->load() > 0.5f ? detectedBalance.load() : balanceParam->load();
+        const auto balanceNow = juce::jlimit (0.0f, 1.0f, baseBalance + modOffset[(size_t) M::targetIndex (ParamIDs::balance)]);
+
+        // Room -> Tape -> EQ -> Auto EQ -> Space -> output gain
+        engine.process (part, balanceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
+
+        room::EqBand bands[room::tone::numEqBands];
+        getEqBands (bands);
+        toneShaper.process (part, eff (ParamIDs::tape, tapeParam), bands);
+        suppressor.process (part, eff (ParamIDs::autoEq, autoEqParam));
+        stereoWidth.process (part, eff (ParamIDs::space, spaceParam));
+
+        outputGain.setTargetValue (juce::Decibels::decibelsToGain (eff (ParamIDs::output, outputParam)));
+        const auto outChans = std::min (part.getNumChannels(), 2);
+        if (outputGain.isSmoothing())
+        {
+            for (int i = 0; i < len; ++i)
+            {
+                const auto g = outputGain.getNextValue();
+                for (int ch = 0; ch < outChans; ++ch)
+                    part.getWritePointer (ch)[i] *= g;
+            }
+        }
+        else
+        {
+            for (int ch = 0; ch < outChans; ++ch)
+                part.applyGain (ch, 0, len, outputGain.getTargetValue());
+        }
     }
 
     // Bypass: crossfade to the untouched (latency-matched) input.
@@ -419,6 +476,92 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 juce::AudioProcessorParameter* RoomAudioProcessor::getBypassParameter() const
 {
     return apvts.getParameter (ParamIDs::bypass);
+}
+
+//==============================================================================
+// LFOs
+
+void RoomAudioProcessor::updateModulation (int samplesIntoBlock, int numSamples)
+{
+    using M = room::Modulation;
+    const auto sr = std::max (1.0, currentSampleRate.load());
+
+    float values[M::numLfos];
+    for (int l = 0; l < M::numLfos; ++l)
+    {
+        const auto shape = (room::Lfo::Shape) juce::roundToInt (apvts.getRawParameterValue (ParamIDs::lfoShape (l))->load());
+        const auto synced = apvts.getRawParameterValue (ParamIDs::lfoSync (l))->load() > 0.5f;
+        const auto beats = room::Lfo::divisionBeats (juce::roundToInt (apvts.getRawParameterValue (ParamIDs::lfoDiv (l))->load()));
+
+        if (synced && blockPlaying && blockHasPpq)
+            lfos[l].syncTo (blockPpq + samplesIntoBlock / sr * blockBpm / 60.0, beats);   // locked to the song
+        values[l] = lfos[l].value (shape);
+        if (! (synced && blockPlaying && blockHasPpq))
+        {
+            const auto hz = synced ? blockBpm / 60.0 / beats
+                                   : (double) apvts.getRawParameterValue (ParamIDs::lfoRate (l))->load();
+            lfos[l].advance (numSamples, hz, sr);
+        }
+        modulation.liveValue[(size_t) l] = values[l];
+        modulation.livePhase[(size_t) l] = (float) lfos[l].getPhase();
+    }
+
+    modOffset.fill (0.0f);
+    for (int l = 0; l < M::numLfos; ++l)
+        for (auto& slot : modulation.slots[(size_t) l])
+            if (const auto t = slot.target.load(); t >= 0 && t < (int) modOffset.size())
+                modOffset[(size_t) t] += slot.depth.load() * values[l];
+
+    for (int t = 0; t < M::numTargets(); ++t)
+    {
+        modulation.liveOffset[(size_t) t] = modOffset[(size_t) t];
+        if (M::isRebuildTarget (t))
+            effValue[(size_t) t] = effective (t, apvts.getRawParameterValue (M::targetIds()[t])->load());
+    }
+}
+
+float RoomAudioProcessor::effective (int target, float base) const
+{
+    if (target < 0)
+        return base;
+    const auto off = modOffset[(size_t) target];
+    if (juce::exactlyEqual (off, 0.0f))
+        return base;
+    auto* p = targetParams[(size_t) target];
+    return p->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, p->convertTo0to1 (base) + off));
+}
+
+bool RoomAudioProcessor::modulatesRebuildTargets() const
+{
+    using M = room::Modulation;
+    for (int l = 0; l < M::numLfos; ++l)
+        for (auto& slot : modulation.slots[(size_t) l])
+            if (const auto t = slot.target.load(); t >= 0 && M::isRebuildTarget (t))
+                return true;
+    return false;
+}
+
+float RoomAudioProcessor::effectiveForRebuild (const char* paramId) const
+{
+    // Not modulated: the knob itself. Modulated: what the audio thread last computed.
+    const auto t = room::Modulation::targetIndex (paramId);
+    const auto modulated = modulation.isAssigned (0, t) || modulation.isAssigned (1, t);
+    return modulated ? effValue[(size_t) t].load() : apvts.getRawParameterValue (paramId)->load();
+}
+
+bool RoomAudioProcessor::rebuildTargetsMoved() const
+{
+    if (! modulatesRebuildTargets())
+        return false;
+    using M = room::Modulation;
+    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
+    {
+        const auto t = M::targetIndex (id);
+        const auto now = effectiveForRebuild (id);
+        if (std::abs (now - lastBuiltValue[(size_t) t]) > 0.01f * std::max (0.1f, std::abs (now)))
+            return true;
+    }
+    return false;
 }
 
 void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
@@ -612,10 +755,16 @@ void RoomAudioProcessor::rebuildRoom()
     if (! a.valid || sr <= 0.0)
         return;
 
-    const auto intensity = intensityParam->load();
-    const auto tail = tailParam->load();
-    const auto size = sizeParam->load();
-    const auto damping = dampingParam->load();
+    // Knob values, or where an LFO has moved them to.
+    const auto intensity = effectiveForRebuild (ParamIDs::intensity);
+    const auto tail = effectiveForRebuild (ParamIDs::tail);
+    const auto size = effectiveForRebuild (ParamIDs::size);
+    const auto damping = effectiveForRebuild (ParamIDs::damping);
+    using M = room::Modulation;
+    lastBuiltValue[(size_t) M::targetIndex (ParamIDs::intensity)] = intensity;
+    lastBuiltValue[(size_t) M::targetIndex (ParamIDs::tail)] = tail;
+    lastBuiltValue[(size_t) M::targetIndex (ParamIDs::size)] = size;
+    lastBuiltValue[(size_t) M::targetIndex (ParamIDs::damping)] = damping;
 
     // IR length follows the decays: no point in a 6 s buffer for a 0.3 s room.
     float longest = 0.05f;
@@ -653,6 +802,7 @@ void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("advancedOpen", advancedOpen, nullptr);
     state.appendChild (apvts.copyState(), nullptr);
     state.appendChild (getAnalysis().toValueTree(), nullptr);
+    state.appendChild (modulation.toValueTree(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -682,6 +832,7 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
         clearRoom();
     }
 
+    modulation.fromValueTree (state.getChildWithName ("MODULATION"));
     editorScale = juce::jlimit (0.75f, 1.75f, (float) state.getProperty ("editorScale", 1.0f));
     advancedOpen = (bool) state.getProperty ("advancedOpen", false);
     currentPresetKey = state["presetKey"].toString();
@@ -728,8 +879,10 @@ std::map<juce::String, float> RoomAudioProcessor::currentParamValues() const
 juce::ValueTree RoomAudioProcessor::capturePreset (const room::presets::PresetMeta& meta) const
 {
     const auto a = getAnalysis();
-    return room::presets::makePreset (meta, currentParamValues(),
-                                      a.valid ? a.toValueTree() : juce::ValueTree());
+    auto preset = room::presets::makePreset (meta, currentParamValues(),
+                                             a.valid ? a.toValueTree() : juce::ValueTree());
+    preset.appendChild (modulation.toValueTree(), nullptr);
+    return preset;
 }
 
 void RoomAudioProcessor::applyPreset (const juce::ValueTree& preset, const juce::String& key)
@@ -748,6 +901,9 @@ void RoomAudioProcessor::applyPreset (const juce::ValueTree& preset, const juce:
         rp->setValueNotifyingHost (norm);
         rp->endChangeGesture();
     }
+
+    // LFO assignments (presets from before LFOs existed simply have none).
+    modulation.fromValueTree (preset.getChildWithName ("MODULATION"));
 
     auto a = room::RoomAnalysis::fromValueTree (preset.getChildWithName ("ROOM_ANALYSIS"));
     if (a.valid)
@@ -775,12 +931,13 @@ void RoomAudioProcessor::setCurrentPreset (const juce::String& key, const juce::
 void RoomAudioProcessor::snapshotPreset()
 {
     presetSnapshot = currentParamValues();
+    modulationSnapshot = modulation.toValueTree().toXmlString();
     restoredAsModified = false;
 }
 
 bool RoomAudioProcessor::isPresetModified() const
 {
-    if (restoredAsModified)
+    if (restoredAsModified || modulation.toValueTree().toXmlString() != modulationSnapshot)
         return true;
     const auto now = currentParamValues();
     for (auto& [id, v] : now)
