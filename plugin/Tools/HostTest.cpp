@@ -206,9 +206,9 @@ int main (int argc, char* argv[])
     const auto latency = plugin->getLatencySamples();
     if (latency <= 0)
         return fail ("plugin reports no latency (Auto EQ needs it)");
-    auto* mixParam = findParam (*plugin, "Mix");
+    auto* mixParam = findParam (*plugin, "Dry/Wet");
     if (mixParam == nullptr)
-        return fail ("missing Mix parameter");
+        return fail ("missing Dry/Wet parameter");
     const auto oldMix = mixParam->getValue();
     mixParam->setValueNotifyingHost (0.0f);
     run (*plugin, juce::AudioBuffer<float> (2, 0), (int) (0.2 * targetSr));  // let the mix settle
@@ -228,7 +228,7 @@ int main (int argc, char* argv[])
     if (intensity == nullptr || tail == nullptr)
         return fail ("missing Intensity/Tail parameters");
     juce::Array<juce::AudioProcessorParameter*> toneParams;
-    for (auto name : { "Tape", "Auto EQ", "EQ 1 Gain", "EQ 2 Freq", "EQ 3 Gain", "EQ 3 Q", "EQ 4 Gain", "EQ 5 Gain", "Space" })
+    for (auto name : { "Tape", "Auto EQ", "EQ 1 Gain", "EQ 2 Freq", "EQ 3 Gain", "EQ 3 Q", "EQ 4 Gain", "EQ 5 Gain", "Space", "Pre-delay", "Size", "Damping", "Ducking", "Duck Release", "Freeze" })
     {
         auto* prm = findParam (*plugin, name);
         if (prm == nullptr)

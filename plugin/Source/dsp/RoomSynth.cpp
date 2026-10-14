@@ -78,8 +78,17 @@ namespace
 
 //==============================================================================
 
+float bandDecay (float measured, float centreHz, float intensity, float size, float damping)
+{
+    auto t = measured * intensity * size;
+    if (centreHz > 1000.0f)
+        t *= std::pow (centreHz / 1000.0f, -0.6f * juce::jlimit (-1.0f, 1.0f, damping));
+    return juce::jlimit (kMinT60, 12.0f, t);
+}
+
 juce::AudioBuffer<float> synthesizeIR (const RoomAnalysis& a, double sr,
-                                       float tailSeconds, float intensity, int seed)
+                                       float tailSeconds, float intensity, int seed,
+                                       float size, float damping)
 {
     const auto n = std::max (1, (int) (tailSeconds * sr));
     juce::AudioBuffer<float> ir (2, n);
@@ -109,7 +118,7 @@ juce::AudioBuffer<float> synthesizeIR (const RoomAnalysis& a, double sr,
             const auto norm = 1.0 / (std::sqrt (sumSq / n) + 1e-20);
 
             // exp(-6.91 t / T60) falls by 60 dB at t = T60.
-            const auto t60 = std::max (kMinT60, a.bandT60s[(size_t) b] * intensity);
+            const auto t60 = bandDecay (a.bandT60s[(size_t) b], a.bandCentersHz[(size_t) b], intensity, size, damping);
             const auto k = std::exp (-6.91 / (t60 * sr)); // per-sample decay factor
             double env = 1.0;
             for (int i = 0; i < n; ++i)

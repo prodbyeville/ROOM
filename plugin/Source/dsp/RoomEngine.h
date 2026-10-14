@@ -7,8 +7,10 @@
 //
 //   input
 //     -> tone-match EQ -> resonators          (tonal path)
-//     -> convolve with synthetic IR           (spatial path, fed by tonal)
-//     -> blend tonal / spatial by balance
+//     -> pre-delay -> synthetic IR            (spatial path, fed by tonal)
+//     -> blend tonal / spatial by balance     (= the "wet" room sound)
+//     -> freeze (loop the wet sound)          (Advanced)
+//     -> ducking (wet dips while you play)    (Advanced)
 //     -> wet/dry mix
 //     -> output gain
 //
@@ -17,6 +19,15 @@
 
 namespace room
 {
+
+/** The Advanced-screen settings that act in real time. */
+struct RoomFx
+{
+    float preDelayMs = 0.0f;       // 0 .. 500
+    float duck = 0.0f;             // 0 .. 1
+    float duckReleaseMs = 250.0f;  // 50 .. 1000
+    bool freeze = false;
+};
 
 class RoomEngine
 {
@@ -33,7 +44,11 @@ public:
     void clearRoom();
 
     /** Audio thread. balance: 0 tonal .. 1 spatial, mix: 0 dry .. 1 wet. */
-    void process (juce::AudioBuffer<float>& buffer, float balance, float mix, float outputGainDb);
+    void process (juce::AudioBuffer<float>& buffer, float balance, float mix, float outputGainDb,
+                  const RoomFx& fx = {});
+
+    static constexpr double maxPreDelayS = 0.5;
+    static constexpr double freezeLengthS = 2.0;
 
     /** True once a submitted room is actually running on the audio thread. */
     bool isRoomActive() const { return roomActive.load(); }
@@ -52,6 +67,26 @@ private:
 
     juce::AudioBuffer<float> tonalBuf, spatialBuf;
     juce::SmoothedValue<float> balanceSm, mixSm, gainSm, roomFade;
+
+    // Pre-delay: a delay line in front of the convolution
+    juce::AudioBuffer<float> preDelayBuf;
+    int preDelayWrite = 0;
+    juce::SmoothedValue<float> preDelaySm;       // in samples
+
+    // Ducking: envelope of the dry input
+    float duckEnv = 0.0f;
+
+    // Freeze: the last couple of seconds of the wet sound, looped
+    juce::AudioBuffer<float> wetHistory, frozen;
+    int historyWrite = 0;
+    bool frozenActive = false;
+    juce::SmoothedValue<float> freezeMix;
+    struct Grain { int start = 0; int pos = 0; };
+    Grain grains[2];
+    int grainLen = 1;
+    juce::Random rng;
+    std::vector<float> grainWindow;
+    float freezeGrainSample (int ch);
 
     // Handover from the background thread
     juce::SpinLock pendingLock;

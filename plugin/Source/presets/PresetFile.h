@@ -28,7 +28,7 @@ struct PresetMeta
     juce::Time created;
 };
 
-/** The parameter IDs a preset stores (everything except Output). */
+/** The parameter IDs a preset stores (everything except Output, Bypass, Freeze). */
 bool isPresetParameter (const juce::String& paramId);
 
 /** Build a preset tree from metadata, parameter values and the analysis tree. */

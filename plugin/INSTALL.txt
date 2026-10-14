@@ -17,26 +17,39 @@ USE
    A clap in a room, tape hiss, a kick, found sound...
 3. ROOM listens to that sound and builds a room from it.
 
-KNOBS
-  Intensity  how strongly the room's character is applied
-             (0% = none, 100% = as measured, 200% = exaggerated)
-  Mix        dry vs processed
-  Balance    tone (resonances + EQ) vs space (reverb tail).
-             "Auto" uses what ROOM detected from your sound.
-  Tail       maximum reverb length
-  Space      stereo width. Left = mono, middle = untouched, right = extra
-             wide (the low end stays tight as it widens)
-  Output     output volume
+LAYOUT (top to bottom)
+  Top bar    ROOMS preset bar, heart, Save | Advanced, Randomize,
+             Dry/Wet, Out, Bypass
+  1 LOAD     drop a sound (or click to browse)
+  2 ROOM     what ROOM measured (decay per band, tone), then
+             Intensity  how strongly the room's character is applied
+             Balance    tone (resonances + EQ) vs space (tail). "Auto" uses
+                        what ROOM detected from your sound
+             Tail       maximum reverb length
+             Space      stereo width (left = mono, middle = untouched,
+                        right = wide; the lows stay tight as it widens)
+  3 FINISH   EQ display (drag the 5 bands, scroll = width, double-click =
+             reset), Tape, Auto EQ
 
-EQ + TONE (bottom section, applied after the room)
-  EQ display shows what's playing. Drag the 5 numbered bands for small cuts
-             and boosts (+/-12 dB). Scroll on a band to make it wider or
-             narrower. Double-click a band to reset it.
-  Tape       low cut and high cut that close in as you turn it up.
-             0% = off, 100% = only about 80 Hz to 9 kHz left (worn tape).
-  Auto EQ    listens live and pulls down harsh, ringing frequencies only when
-             they poke out (mostly 2-10 kHz). The red area on the display
-             shows what it is cutting right now. 0% = off.
+TOP BAR
+  Advanced   swaps the bottom section for the ADVANCED screen (below)
+  Randomize  new random knob settings in musical ranges. Keeps your room,
+             Dry/Wet, Out, Bypass and Freeze
+  Dry/Wet    blend of your original sound and the room
+  Out        output volume
+  Bypass     turns ROOM off (no timing shift)
+
+ADVANCED SCREEN
+  Pre-delay  gap before the tail starts (keeps vocals/drums punchy)
+  Size       stretches or shrinks the whole decay (50% - 200%)
+  Damping    + = darker tail (highs die faster), - = brighter tail
+  Ducking    the room dips while you play and swells back in the gaps
+  Release    how fast the room comes back after ducking
+  Freeze     holds the current tail forever (pads, transitions)
+  Room info  everything ROOM measured: balance, decay per band (measured
+             and as your knobs set it now), resonances, length
+
+The window can be resized from the bottom-right corner.
 
 ROOMS (presets)
   The bar at the top shows the current ROOM. Click it to open the browser.

@@ -72,32 +72,41 @@ void DropZone::paint (juce::Graphics& g)
             sub = "Listening to the room";
             break;
         case RoomAudioProcessor::Status::ready:
+        {
             title = proc.getStatusMessage();
-            sub = "Room loaded. Drop another sound or click to replace it";
+            // Short summary of what was detected (the full details are on ADVANCED).
+            const auto a = proc.getAnalysis();
+            const auto lean = a.balance > 0.6f ? "spatial" : a.balance < 0.4f ? "tonal" : "in between";
+            sub << "Balance " << juce::String (a.balance, 2) << " " << lean
+                << "   \xc2\xb7   " << (a.steady ? juce::String ("steady sound") : "decay " + juce::String (a.medianT60, 2) + " s")
+                << "   \xc2\xb7   " << (int) a.peaks.size() << " resonance" << (a.peaks.size() == 1 ? "" : "s")
+                << "        drop or click to replace";
             break;
+        }
         case RoomAudioProcessor::Status::failed:
             title = proc.getStatusMessage();
             sub = "Try another file (WAV, AIFF, FLAC, OGG or MP3)";
             break;
     }
 
+    auto textArea = getLocalBounds().reduced (16, 0).withTrimmedRight (70);
     g.setColour (status == RoomAudioProcessor::Status::failed ? juce::Colours::indianred : Colours::text);
-    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
-    g.drawFittedText (title, getLocalBounds().reduced (16, 0).withTrimmedBottom (getHeight() / 2 - 4),
-                      juce::Justification::centredBottom, 1);
+    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    g.drawFittedText (title, textArea.withTrimmedBottom (getHeight() / 2 - 2), juce::Justification::centredBottom, 1);
     g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (13.0f));
-    g.drawFittedText (sub, getLocalBounds().reduced (16, 0).withTrimmedTop (getHeight() / 2 + 4),
-                      juce::Justification::centredTop, 1);
+    g.setFont (juce::FontOptions (12.0f));
+    g.drawFittedText (sub, textArea.withTrimmedTop (getHeight() / 2 + 4), juce::Justification::centredTop, 1);
 }
 
 //==============================================================================
-// Display
+// Room displays
 
-void RoomDisplay::setAnalysis (const room::RoomAnalysis& a, float newIntensity)
+void RoomDisplay::setAnalysis (const room::RoomAnalysis& a, float newIntensity, float newSize, float newDamping)
 {
     analysis = a;
     intensity = newIntensity;
+    size = newSize;
+    damping = newDamping;
     eqCurve = room::targetEqCurveDb (analysis, intensity);
     repaint();
 }
@@ -108,53 +117,53 @@ void RoomDisplay::paint (juce::Graphics& g)
     g.setColour (Colours::panel);
     g.fillRoundedRectangle (area, 8.0f);
 
+    area = area.reduced (14.0f, 10.0f);
+    g.setColour (Colours::dim);
+    g.setFont (juce::FontOptions (12.0f));
+    g.drawText (mode == Mode::decay ? (analysis.valid && analysis.steady ? "DECAY  (steady sound: estimated)" : "DECAY PER BAND")
+                                    : "TONE  (EQ + RESONANCES)",
+                area.removeFromTop (16.0f), juce::Justification::centredLeft);
+    area.removeFromTop (4.0f);
+
     if (! analysis.valid)
     {
-        g.setColour (Colours::dim);
         g.setFont (juce::FontOptions (13.0f));
         g.drawText ("No room loaded", area, juce::Justification::centred);
         return;
     }
 
-    area = area.reduced (12.0f, 10.0f);
-    auto left = area.removeFromLeft (area.getWidth() * 0.45f).reduced (4.0f, 0.0f);
-    area.removeFromLeft (16.0f);
-    auto right = area;
-
-    auto drawTitle = [&] (juce::Rectangle<float>& r, const juce::String& t)
+    if (mode == Mode::decay)
     {
+        const auto nb = analysis.numBands();
+        std::vector<float> t ((size_t) nb);
+        float maxT = 0.5f;
+        for (int b = 0; b < nb; ++b)
+        {
+            t[(size_t) b] = room::bandDecay (analysis.bandT60s[(size_t) b], analysis.bandCentersHz[(size_t) b],
+                                             intensity, size, damping);
+            maxT = std::max (maxT, t[(size_t) b]);
+        }
+        const auto bw = area.getWidth() / (float) nb;
+        for (int b = 0; b < nb; ++b)
+        {
+            const auto h = area.getHeight() * t[(size_t) b] / maxT;
+            g.setColour (analysis.bandConfident[(size_t) b] ? Colours::accent : Colours::outline);
+            g.fillRoundedRectangle (area.getX() + b * bw + 1.5f, area.getBottom() - h, bw - 3.0f, h, 2.0f);
+        }
         g.setColour (Colours::dim);
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawText (t, r.removeFromTop (16.0f), juce::Justification::centredLeft);
-        r.removeFromTop (4.0f);
-    };
-
-    // --- decay per band ---------------------------------------------------
-    drawTitle (left, analysis.steady ? "DECAY  (steady sound: fallback)" : "DECAY PER BAND");
-    const auto nb = analysis.numBands();
-    float maxT = 0.5f;
-    for (auto t : analysis.bandT60s) maxT = std::max (maxT, t);
-    const auto bw = left.getWidth() / (float) nb;
-    for (int b = 0; b < nb; ++b)
-    {
-        const auto h = left.getHeight() * analysis.bandT60s[(size_t) b] / maxT;
-        g.setColour (analysis.bandConfident[(size_t) b] ? Colours::accent : Colours::outline);
-        g.fillRoundedRectangle (left.getX() + b * bw + 1.5f, left.getBottom() - h, bw - 3.0f, h, 2.0f);
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (juce::String (maxT, 1) + " s", area.withHeight (14.0f).translated (0.0f, -20.0f), juce::Justification::topRight);
+        return;
     }
-    g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String (maxT, 1) + " s", left.withHeight (14.0f), juce::Justification::topRight);
 
-    // --- tone curve + resonances --------------------------------------------
-    drawTitle (right, "TONE (EQ + RESONANCES)");
     const auto fMin = 60.0f, fMax = 16000.0f, dbRange = 15.0f;
-    auto xFor = [&] (float f) { return right.getX() + right.getWidth() * std::log (f / fMin) / std::log (fMax / fMin); };
-    auto yFor = [&] (float db) { return right.getCentreY() - right.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, db / dbRange); };
+    auto xFor = [&] (float f) { return area.getX() + area.getWidth() * std::log (f / fMin) / std::log (fMax / fMin); };
+    auto yFor = [&] (float db) { return area.getCentreY() - area.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, db / dbRange); };
 
     g.setColour (Colours::outline);
-    g.drawHorizontalLine ((int) right.getCentreY(), right.getX(), right.getRight());
+    g.drawHorizontalLine ((int) area.getCentreY(), area.getX(), area.getRight());
     for (float f : { 100.0f, 1000.0f, 10000.0f })
-        g.drawVerticalLine ((int) xFor (f), right.getY(), right.getBottom());
+        g.drawVerticalLine ((int) xFor (f), area.getY(), area.getBottom());
 
     juce::Path p;
     for (size_t i = 0; i < eqCurve.size(); ++i)
@@ -168,17 +177,88 @@ void RoomDisplay::paint (juce::Graphics& g)
     for (auto& pk : analysis.peaks)
     {
         const auto x = xFor (pk.freqHz);
-        const auto h = right.getHeight() * 0.5f * juce::jlimit (0.0f, 1.0f, std::min (pk.gainDb, 18.0f) * intensity / 24.0f);
+        const auto h = area.getHeight() * 0.5f * juce::jlimit (0.0f, 1.0f, std::min (pk.gainDb, 18.0f) * intensity / 24.0f);
         g.setColour (Colours::accent2.withAlpha (0.8f));
-        g.drawLine (x, right.getCentreY(), x, right.getCentreY() - h, 2.0f);
-        g.fillEllipse (x - 3.0f, right.getCentreY() - h - 3.0f, 6.0f, 6.0f);
+        g.drawLine (x, area.getCentreY(), x, area.getCentreY() - h, 2.0f);
+        g.fillEllipse (x - 3.0f, area.getCentreY() - h - 3.0f, 6.0f, 6.0f);
     }
 
     g.setColour (Colours::dim);
     g.setFont (juce::FontOptions (10.0f));
     for (auto [f, t] : { std::pair { 100.0f, "100" }, { 1000.0f, "1k" }, { 10000.0f, "10k" } })
-        g.drawText (t, juce::Rectangle<float> (xFor (f) + 2.0f, right.getBottom() - 12.0f, 30.0f, 12.0f),
+        g.drawText (t, juce::Rectangle<float> (xFor (f) + 2.0f, area.getBottom() - 12.0f, 30.0f, 12.0f),
                     juce::Justification::centredLeft);
+}
+
+//==============================================================================
+// Icon buttons
+
+IconButton::IconButton (Icon i, const juce::String& tip) : juce::Button (tip), icon (i)
+{
+    setTooltip (tip);
+    if (icon != Icon::randomize)
+        setClickingTogglesState (true);
+}
+
+void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto on = getToggleState();
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const auto active = icon == Icon::power ? on : (icon == Icon::advanced && on);
+    g.setColour (active ? (icon == Icon::power ? Colours::reduction.withAlpha (0.25f) : Colours::accent.withAlpha (0.2f))
+                        : (over ? Colours::panel.brighter (0.1f) : Colours::panel));
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (active ? (icon == Icon::power ? Colours::reduction : Colours::accent) : Colours::outline);
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+
+    const auto c = active ? (icon == Icon::power ? Colours::reduction : Colours::accent)
+                          : (over || down ? Colours::text : Colours::dim.brighter (0.2f));
+    g.setColour (c);
+    const auto s = std::min (r.getWidth(), r.getHeight()) * 0.5f;
+    const auto cx = r.getCentreX(), cy = r.getCentreY();
+    juce::PathStrokeType stroke (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+
+    juce::Path p;
+    switch (icon)
+    {
+        case Icon::power:
+        {
+            p.addCentredArc (cx, cy + 1.0f, s * 0.62f, s * 0.62f, 0.0f, 0.7f, juce::MathConstants<float>::twoPi - 0.7f, true);
+            p.startNewSubPath (cx, cy - s * 0.75f);
+            p.lineTo (cx, cy - s * 0.05f);
+            break;
+        }
+        case Icon::randomize:
+        {
+            // two crossing arrows (shuffle)
+            const auto x0 = cx - s * 0.7f, x1 = cx + s * 0.7f, y0 = cy - s * 0.45f, y1 = cy + s * 0.45f;
+            p.startNewSubPath (x0, y1);
+            p.cubicTo (cx, y1, cx, y0, x1, y0);
+            p.startNewSubPath (x0, y0);
+            p.cubicTo (cx, y0, cx, y1, x1, y1);
+            for (auto y : { y0, y1 })
+            {
+                p.startNewSubPath (x1 - s * 0.25f, y - s * 0.22f);
+                p.lineTo (x1, y);
+                p.lineTo (x1 - s * 0.25f, y + s * 0.22f);
+            }
+            break;
+        }
+        case Icon::advanced:
+        {
+            // three sliders ("settings")
+            for (int k = 0; k < 3; ++k)
+            {
+                const auto y = cy + (k - 1) * s * 0.5f;
+                p.startNewSubPath (cx - s * 0.7f, y);
+                p.lineTo (cx + s * 0.7f, y);
+                const auto kx = cx + (k == 1 ? 0.3f : -0.3f) * s;
+                p.addEllipse (kx - s * 0.13f, y - s * 0.13f, s * 0.26f, s * 0.26f);
+            }
+            break;
+        }
+    }
+    g.strokePath (p, stroke);
 }
 
 //==============================================================================
@@ -201,32 +281,42 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     lnf.setColour (juce::ToggleButton::tickColourId, Colours::accent);
     lnf.setColour (juce::TextButton::buttonColourId, Colours::panel);
     lnf.setColour (juce::TextButton::textColourOffId, Colours::dim);
+    lnf.setColour (juce::BubbleComponent::backgroundColourId, Colours::panel);
+    lnf.setColour (juce::BubbleComponent::outlineColourId, Colours::outline);
+    lnf.setColour (juce::TooltipWindow::backgroundColourId, Colours::panel);
+    lnf.setColour (juce::TooltipWindow::textColourId, Colours::text);
+    lnf.setColour (juce::TooltipWindow::outlineColourId, Colours::outline);
     setLookAndFeel (&lnf);
 
-    addAndMakeVisible (dropZone);
-    addAndMakeVisible (display);
-    addAndMakeVisible (readout);
-    addAndMakeVisible (clearButton);
-    readout.setFont (juce::FontOptions (13.0f));
-    readout.setColour (juce::Label::textColourId, Colours::dim);
+    addAndMakeVisible (content);
+    content.painter = [this] (juce::Graphics& g) { paintContent (g); };
+    content.layout = [this] { layoutContent(); };
+
+    // --- Top bar ---
+    for (auto* b : { &advancedButton, &randomButton, &bypassButton })
+        content.addAndMakeVisible (b);
+    advancedButton.onClick = [this] { setAdvanced (advancedButton.getToggleState()); };
+    randomButton.onClick = [this] { proc.randomizeKnobs (random); };
+    bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::bypass, bypassButton);
+    setupKnob (mix, ParamIDs::mix, "DRY/WET", true);
+    setupKnob (output, ParamIDs::output, "OUT", true);
+
+    // --- Tier 1 ---
+    content.addAndMakeVisible (dropZone);
+    content.addAndMakeVisible (clearButton);
     clearButton.onClick = [this] { proc.clearRoom(); };
 
+    // --- Tier 2 ---
+    content.addAndMakeVisible (decayDisplay);
+    content.addAndMakeVisible (toneDisplay);
     setupKnob (intensity, ParamIDs::intensity, "INTENSITY");
-    setupKnob (mix, ParamIDs::mix, "MIX");
     setupKnob (balance, ParamIDs::balance, "BALANCE");
     setupKnob (tail, ParamIDs::tail, "TAIL");
     setupKnob (space, ParamIDs::space, "SPACE");
-    setupKnob (output, ParamIDs::output, "OUTPUT");
-    setupKnob (tape, ParamIDs::tape, "TAPE");
-    setupKnob (autoEq, ParamIDs::autoEq, "AUTO EQ");
-    autoEq.slider.setColour (juce::Slider::rotarySliderFillColourId, Colours::reduction);
-    addAndMakeVisible (eqPanel);
     balance.slider.setColour (juce::Slider::rotarySliderFillColourId, Colours::accent2);
-
-    addAndMakeVisible (autoBalance);
+    content.addAndMakeVisible (autoBalance);
     autoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         proc.apvts, ParamIDs::balanceAuto, autoBalance);
-
     // With Auto on, the Balance knob shows what was detected, not its own value.
     balance.slider.textFromValueFunction = [this] (double v)
     {
@@ -237,8 +327,15 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     };
     balance.slider.updateText();
 
+    // --- Tier 3 ---
+    content.addAndMakeVisible (eqPanel);
+    setupKnob (tape, ParamIDs::tape, "TAPE");
+    setupKnob (autoEq, ParamIDs::autoEq, "AUTO EQ");
+    autoEq.slider.setColour (juce::Slider::rotarySliderFillColourId, Colours::reduction);
+    content.addChildComponent (advancedPanel);
+
     // --- ROOMS presets ---
-    addAndMakeVisible (presetBar);
+    content.addAndMakeVisible (presetBar);
     presetBar.onOpen = [this] { browser.setVisible (true); browser.toFront (true); };
     presetBar.onPrev = [this] { stepPreset (-1); };
     presetBar.onNext = [this] { stepPreset (1); };
@@ -250,7 +347,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
             lib.setFavorite (e->key, ! e->favorite);
     };
 
-    addChildComponent (browser);
+    content.addChildComponent (browser);
     browser.onClose = [this] { browser.setVisible (false); };
     browser.onLoad = [this] (const juce::String& key) { loadPreset (key); };
     browser.onEdit = [this] (const juce::String& key, const room::presets::PresetMeta& meta, const juce::String& pack)
@@ -259,13 +356,25 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         saveDialog.open (room::presets::SaveDialog::Mode::edit, meta, proc.getLibrary().getPacks(), pack);
     };
 
-    addChildComponent (saveDialog);
+    content.addChildComponent (saveDialog);
     saveDialog.onSubmit = [this] (auto mode, const auto& meta, const auto& pack, bool overwrite)
     {
         return submitSaveDialog (mode, meta, pack, overwrite);
     };
 
-    setSize (900, 760);
+    content.setBounds (0, 0, baseWidth, baseHeight);
+    setAdvanced (proc.advancedOpen);
+
+    // Resizable, keeping the shape: everything scales together.
+    // (Size first: the limits/aspect constrainer would otherwise start from 0 x 0.)
+    const auto startScale = proc.editorScale;
+    setSize (juce::roundToInt (baseWidth * startScale), juce::roundToInt (baseHeight * startScale));
+    setResizable (true, true);
+    setResizeLimits (baseWidth * 3 / 4, baseHeight * 3 / 4, baseWidth * 7 / 4, baseHeight * 7 / 4);
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio ((double) baseWidth / baseHeight);
+    setSize (juce::roundToInt (baseWidth * startScale), juce::roundToInt (baseHeight * startScale));
+
     refreshAnalysis();
     startTimerHz (15);
 }
@@ -275,17 +384,40 @@ RoomAudioProcessorEditor::~RoomAudioProcessorEditor()
     setLookAndFeel (nullptr);
 }
 
-void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const juce::String& name)
+void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const juce::String& name, bool small)
 {
-    k.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 150, 20);
+    if (small)
+    {
+        k.slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        k.slider.setPopupDisplayEnabled (true, true, &content);
+        k.label.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    }
+    else
+    {
+        k.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 150, 20);
+        k.label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    }
     k.slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     k.label.setText (name, juce::dontSendNotification);
     k.label.setJustificationType (juce::Justification::centred);
-    k.label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
     k.label.setColour (juce::Label::textColourId, Colours::dim);
-    addAndMakeVisible (k.slider);
-    addAndMakeVisible (k.label);
+    content.addAndMakeVisible (k.slider);
+    content.addAndMakeVisible (k.label);
     k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, k.slider);
+}
+
+void RoomAudioProcessorEditor::setAdvanced (bool adv)
+{
+    proc.advancedOpen = adv;
+    advancedButton.setToggleState (adv, juce::dontSendNotification);
+    advancedPanel.setVisible (adv);
+    eqPanel.setVisible (! adv);
+    for (auto* k : { &tape, &autoEq })
+    {
+        k->slider.setVisible (! adv);
+        k->label.setVisible (! adv);
+    }
+    content.repaint();
 }
 
 void RoomAudioProcessorEditor::timerCallback()
@@ -298,7 +430,10 @@ void RoomAudioProcessorEditor::timerCallback()
 
     const auto version = proc.getAnalysisVersion();
     const auto inten = proc.apvts.getRawParameterValue (ParamIDs::intensity)->load();
-    if (version != shownVersion || std::abs (inten - shownIntensity) > 1e-4f)
+    const auto sz = proc.apvts.getRawParameterValue (ParamIDs::size)->load();
+    const auto dmp = proc.apvts.getRawParameterValue (ParamIDs::damping)->load();
+    if (version != shownVersion || std::abs (inten - shownIntensity) > 1e-4f
+        || std::abs (sz - shownSize) > 1e-4f || std::abs (dmp - shownDamping) > 1e-4f)
         refreshAnalysis();
 
     const auto isAuto = autoBalance.getToggleState();
@@ -314,31 +449,22 @@ void RoomAudioProcessorEditor::refreshAnalysis()
 {
     shownVersion = proc.getAnalysisVersion();
     shownIntensity = proc.apvts.getRawParameterValue (ParamIDs::intensity)->load();
+    shownSize = proc.apvts.getRawParameterValue (ParamIDs::size)->load();
+    shownDamping = proc.apvts.getRawParameterValue (ParamIDs::damping)->load();
 
     const auto a = proc.getAnalysis();
-    display.setAnalysis (a, shownIntensity);
+    decayDisplay.setAnalysis (a, shownIntensity, shownSize, shownDamping);
+    toneDisplay.setAnalysis (a, shownIntensity, shownSize, shownDamping);
+    advancedPanel.setAnalysis (a);
     dropZone.repaint();
     clearButton.setVisible (a.valid);
-
-    if (! a.valid)
-    {
-        readout.setText ({}, juce::dontSendNotification);
-        return;
-    }
-
-    const auto lean = a.balance > 0.6f ? "spatial" : a.balance < 0.4f ? "tonal" : "in between";
-    juce::String s;
-    s << "Detected balance " << juce::String (a.balance, 2) << " (" << lean << ")"
-      << "   |   Decay " << (a.steady ? juce::String ("none (steady sound)") : juce::String (a.medianT60, 2) + " s median")
-      << "   |   " << (int) a.peaks.size() << " resonance" << (a.peaks.size() == 1 ? "" : "s");
-    readout.setText (s, juce::dontSendNotification);
 }
 
-void RoomAudioProcessorEditor::paint (juce::Graphics& g)
+void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
 {
     g.fillAll (Colours::background);
 
-    auto header = getLocalBounds().removeFromTop (48).reduced (20, 0);
+    auto header = juce::Rectangle<int> (20, 0, 140, 56);
     g.setColour (Colours::text);
     g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
     g.drawText ("ROOM", header, juce::Justification::centredLeft);
@@ -346,36 +472,81 @@ void RoomAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (10.0f));
     g.drawText ("v" JucePlugin_VersionString, header.withTrimmedLeft (78), juce::Justification::centredLeft);
 
-    // Section label above the EQ
-    g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    g.drawText ("EQ  +  TONE", eqLabelArea, juce::Justification::centredLeft);
+    // Divider under the top bar
+    g.setColour (Colours::outline);
+    g.drawHorizontalLine (56, 0.0f, (float) baseWidth);
+
+    // Tier numbers down the left edge: 1 load, 2 shape, 3 finish / advanced
+    const juce::String names[3] = { "1", "2", proc.advancedOpen ? "A" : "3" };
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    for (int i = 0; i < 3; ++i)
+    {
+        g.setColour (Colours::outline.brighter (0.25f));
+        g.drawText (names[i], tierLabels[i], juce::Justification::centredTop);
+    }
 }
 
 void RoomAudioProcessorEditor::resized()
 {
-    browser.setBounds (getLocalBounds());
-    saveDialog.setBounds (getLocalBounds());
+    const auto scale = (float) getWidth() / (float) baseWidth;
+    content.setTransform (juce::AffineTransform::scale (scale));
+    proc.editorScale = scale;
+}
 
-    auto area = getLocalBounds().reduced (20, 0);
-    presetBar.setBounds (area.withHeight (48).withTrimmedLeft (150).reduced (0, 9));
-    area.removeFromTop (48);
+void RoomAudioProcessorEditor::layoutContent()
+{
+    const auto full = juce::Rectangle<int> (0, 0, baseWidth, baseHeight);
+    browser.setBounds (full);
+    saveDialog.setBounds (full);
 
-    dropZone.setBounds (area.removeFromTop (62));
-    area.removeFromTop (10);
-    display.setBounds (area.removeFromTop (140));
-    area.removeFromTop (4);
-
-    auto readoutRow = area.removeFromTop (24);
-    clearButton.setBounds (readoutRow.removeFromRight (60).reduced (0, 2));
-    readout.setBounds (readoutRow);
-    area.removeFromTop (10);
-
-    auto knobs = area.removeFromTop (150);
-    const auto w = knobs.getWidth() / 6;
-    for (auto* k : { &intensity, &mix, &balance, &tail, &space, &output })
+    // --- Top bar ---
+    auto bar = juce::Rectangle<int> (20, 0, baseWidth - 40, 56);
+    bar.removeFromLeft (122);
+    auto right = bar.removeFromRight (250);
+    presetBar.setBounds (bar.withTrimmedRight (16).reduced (0, 11));
     {
-        auto col = knobs.removeFromLeft (w).reduced (6, 0);
+        auto r = right;
+        bypassButton.setBounds (r.removeFromRight (36).withSizeKeepingCentre (36, 34));
+        r.removeFromRight (8);
+        for (auto* k : { &output, &mix })
+        {
+            auto col = r.removeFromRight (52);
+            k->slider.setBounds (col.withTrimmedBottom (14).withSizeKeepingCentre (38, 38).translated (0, 2));
+            k->label.setBounds (col.removeFromBottom (16).translated (0, -2));
+            r.removeFromRight (2);
+        }
+        r.removeFromRight (6);
+        randomButton.setBounds (r.removeFromRight (36).withSizeKeepingCentre (36, 34));
+        r.removeFromRight (8);
+        advancedButton.setBounds (r.removeFromRight (36).withSizeKeepingCentre (36, 34));
+    }
+
+    // Tier column on the left for the 1 / 2 / 3 markers
+    auto area = juce::Rectangle<int> (0, 56, baseWidth, baseHeight - 56).reduced (20, 0);
+    auto gutterX = 8;
+
+    // --- Tier 1: load ---
+    area.removeFromTop (12);
+    auto t1 = area.removeFromTop (64);
+    tierLabels[0] = { gutterX, t1.getY() + 4, 12, 20 };
+    dropZone.setBounds (t1);
+    clearButton.setBounds (t1.removeFromRight (70).reduced (10, 18));
+
+    // --- Tier 2: shape the room ---
+    area.removeFromTop (12);
+    auto displays = area.removeFromTop (140);
+    tierLabels[1] = { gutterX, displays.getY() + 4, 12, 20 };
+    auto leftD = displays.removeFromLeft ((displays.getWidth() - 12) / 2);
+    displays.removeFromLeft (12);
+    decayDisplay.setBounds (leftD);
+    toneDisplay.setBounds (displays);
+
+    area.removeFromTop (10);
+    auto knobs = area.removeFromTop (150);
+    const auto w = knobs.getWidth() / 4;
+    for (auto* k : { &intensity, &balance, &tail, &space })
+    {
+        auto col = knobs.removeFromLeft (w).reduced (10, 0);
         k->label.setBounds (col.removeFromTop (18));
         auto toggleRow = col.removeFromBottom (24);   // same size knobs in every column
         if (k == &balance)
@@ -383,11 +554,12 @@ void RoomAudioProcessorEditor::resized()
         k->slider.setBounds (col);
     }
 
-    // --- EQ section: display on the left, TAPE and AUTO EQ stacked on the right
-    area.removeFromTop (8);
-    eqLabelArea = area.removeFromTop (20);
+    // --- Tier 3: finish (EQ + Tape / Auto EQ)  or  ADVANCED ---
+    area.removeFromTop (10);
     area.removeFromBottom (16);
-    auto side = area.removeFromRight (150);
+    tierLabels[2] = { gutterX, area.getY() + 4, 12, 20 };
+    advancedPanel.setBounds (area);
+    auto side = area.removeFromRight (140);
     area.removeFromRight (12);
     eqPanel.setBounds (area);
     for (auto* k : { &tape, &autoEq })

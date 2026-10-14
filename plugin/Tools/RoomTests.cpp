@@ -3,7 +3,7 @@
 //
 //   room_tests                                           run all tests
 //   room_tests --screenshot OUT.png MODE ROOM_SRC TARGET  save a UI snapshot
-//        MODE = main | browser | save
+//        MODE = main | browser | save | advanced     [SCALE, e.g. 0.75]
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -234,7 +234,7 @@ namespace
             {
                 const auto now = rp->convertFrom0to1 (rp->getValue());
                 const auto want = saved[rp->paramID];
-                if (rp->paramID != ParamIDs::output && std::abs (now - want) > 1e-4f * std::max (1.0f, std::abs (want)))
+                if (isPresetParameter (rp->paramID) && std::abs (now - want) > 1e-4f * std::max (1.0f, std::abs (want)))
                 {
                     ++mismatches;
                     std::cout << "    " << rp->paramID << " " << now << " vs " << want << "\n";
@@ -384,6 +384,281 @@ namespace
     }
 
     //==========================================================================
+    // Advanced screen DSP + top bar (Bypass, Randomize)
+
+    struct Rig
+    {
+        RoomAudioProcessor proc;
+        static constexpr double sr = 48000.0;
+
+        explicit Rig (const juce::File& root)
+        {
+            proc.setPresetRoot (root);
+            proc.setPlayConfigDetails (2, 2, sr, 512);
+            proc.prepareToPlay (sr, 512);
+            auto& lib = proc.getLibrary();
+            proc.applyPreset (lib.loadPreset (*lib.find ("Factory/Big Hall")), "Factory/Big Hall");
+            // Hear only the reverb, untouched by the finishing section.
+            for (auto [id, v] : std::initializer_list<std::pair<const char*, float>> {
+                     { ParamIDs::mix, 1.0f }, { ParamIDs::balanceAuto, 0.0f }, { ParamIDs::balance, 1.0f },
+                     { ParamIDs::tape, 0.0f }, { ParamIDs::autoEq, 0.0f }, { ParamIDs::space, 1.0f },
+                     { ParamIDs::tail, 6.0f } })
+                setParam (proc, id, v);
+            settle();
+        }
+
+        /** Let the background rebuild finish and the convolution swap in the new IR. */
+        void settle()
+        {
+            juce::AudioBuffer<float> silence (2, 512);
+            juce::MidiBuffer midi;
+            for (int i = 0; i < 120; ++i)
+            {
+                silence.clear();
+                proc.processBlock (silence, midi);
+                juce::Thread::sleep (4);
+            }
+            proc.reset();
+        }
+
+        /** Runs input (mono, duplicated to stereo) plus `extra` seconds of silence.
+            Returns the left channel with the plugin's latency removed. */
+        std::vector<float> run (const std::vector<float>& input, double extraS,
+                                std::function<void (int sample)> beforeBlock = {})
+        {
+            const auto latency = proc.getLatencySamples();
+            const auto total = (int) input.size() + (int) (extraS * sr) + latency;
+            std::vector<float> out;
+            out.reserve ((size_t) total);
+            juce::AudioBuffer<float> io (2, 512);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos < total; pos += 512)
+            {
+                const auto len = std::min (512, total - pos);
+                io.setSize (2, len, false, false, true);
+                for (int i = 0; i < len; ++i)
+                {
+                    const auto idx = (size_t) (pos + i);
+                    const auto x = idx < input.size() ? input[idx] : 0.0f;
+                    io.setSample (0, i, x);
+                    io.setSample (1, i, x);
+                }
+                if (beforeBlock)
+                    beforeBlock (pos);
+                proc.processBlock (io, midi);
+                for (int i = 0; i < len; ++i)
+                    out.push_back (io.getSample (0, i));
+            }
+            out.erase (out.begin(), out.begin() + latency);
+            return out;
+        }
+    };
+
+    std::vector<float> impulse() { std::vector<float> x (480, 0.0f); x[0] = 0.5f; return x; }
+
+    double rmsDb (const std::vector<float>& x, double fromS, double toS)
+    {
+        const auto a = (size_t) (fromS * Rig::sr), b = std::min (x.size(), (size_t) (toS * Rig::sr));
+        double s = 1e-20;
+        for (auto i = a; i < b; ++i) s += (double) x[i] * x[i];
+        return 10.0 * std::log10 (s / (double) std::max<size_t> (1, b - a));
+    }
+
+    /** Time (s) for the energy-decay curve to fall from -5 to -25 dB, x3 = T60. */
+    double t60Of (std::vector<float> x)
+    {
+        std::vector<double> edc (x.size());
+        double acc = 0.0;
+        for (size_t i = x.size(); i-- > 0;) { acc += (double) x[i] * x[i]; edc[i] = acc; }
+        const auto e0 = edc[0];
+        double t5 = -1, t25 = -1;
+        for (size_t i = 0; i < edc.size(); ++i)
+        {
+            const auto db = 10.0 * std::log10 (edc[i] / e0 + 1e-30);
+            if (t5 < 0 && db <= -5.0) t5 = (double) i / Rig::sr;
+            if (t25 < 0 && db <= -25.0) { t25 = (double) i / Rig::sr; break; }
+        }
+        return (t25 - t5) * 3.0;
+    }
+
+    /** One frequency band of a signal (4th-order band-pass), for the damping test. */
+    std::vector<float> bandOf (const std::vector<float>& x, double lo, double hi)
+    {
+        room::BandFilter f;
+        f.design (lo, hi, Rig::sr);
+        std::vector<float> y (x.size());
+        for (size_t i = 0; i < x.size(); ++i)
+            y[i] = (float) f.process (x[i]);
+        return y;
+    }
+
+    void testAdvanced (const juce::File& root)
+    {
+        std::cout << "Advanced\n";
+
+        // --- Pre-delay shifts the tail ---
+        {
+            Rig rig (root);
+            auto onset = [&] (float ms)
+            {
+                setParam (rig.proc, ParamIDs::preDelay, ms);
+                rig.settle();
+                const auto y = rig.run (impulse(), 1.0);
+                float peak = 0;
+                for (auto v : y) peak = std::max (peak, std::abs (v));
+                for (size_t i = 0; i < y.size(); ++i)
+                    if (std::abs (y[i]) > peak * 0.05f)
+                        return (double) i / Rig::sr * 1000.0;
+                return -1.0;
+            };
+            const auto o0 = onset (0.0f), o100 = onset (100.0f);
+            std::cout << "    onset " << juce::String (o0, 1) << " ms -> " << juce::String (o100, 1) << " ms with 100 ms pre-delay\n";
+            check (std::abs ((o100 - o0) - 100.0) < 6.0, "pre-delay 100 ms moves the tail by ~100 ms");
+        }
+
+        // --- Size stretches the decay ---
+        {
+            Rig rig (root);
+            auto t60At = [&] (float size)
+            {
+                setParam (rig.proc, ParamIDs::size, size);
+                rig.settle();
+                return t60Of (rig.run (impulse(), 5.0));
+            };
+            const auto t1 = t60At (1.0f), t2 = t60At (2.0f), th = t60At (0.5f);
+            std::cout << "    T60 size 50/100/200%: " << juce::String (th, 2) << " / " << juce::String (t1, 2) << " / " << juce::String (t2, 2) << " s\n";
+            check (t2 / t1 > 1.6 && t2 / t1 < 2.4, "Size 200% roughly doubles the decay");
+            check (th / t1 > 0.35 && th / t1 < 0.65, "Size 50% roughly halves the decay");
+        }
+
+        // --- Damping darkens the tail (highs die faster than lows) ---
+        {
+            Rig rig (root);
+            auto ratioAt = [&] (float d)
+            {
+                setParam (rig.proc, ParamIDs::damping, d);
+                rig.settle();
+                const auto y = rig.run (impulse(), 5.0);
+                return t60Of (bandOf (y, 4000.0, 8000.0)) / t60Of (bandOf (y, 300.0, 600.0));
+            };
+            const auto r0 = ratioAt (0.0f), rDark = ratioAt (1.0f), rBright = ratioAt (-1.0f);
+            std::cout << "    high/low decay ratio: bright " << juce::String (rBright, 2) << ", neutral " << juce::String (r0, 2)
+                      << ", dark " << juce::String (rDark, 2) << "\n";
+            check (rDark < r0 * 0.75, "Damping + makes the highs die faster");
+            check (rBright > r0 * 1.2, "Damping - makes the highs last longer");
+        }
+
+        // --- Ducking: room dips while you play, comes back after ---
+        {
+            Rig rig (root);
+            std::vector<float> tone ((size_t) (1.5 * Rig::sr));
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = 0.4f * std::sin (2.0f * juce::MathConstants<float>::pi * 220.0f * (float) i / (float) Rig::sr);
+            auto levels = [&] (float duck)
+            {
+                setParam (rig.proc, ParamIDs::duck, duck);
+                setParam (rig.proc, ParamIDs::duckRelease, 150.0f);
+                rig.settle();
+                const auto y = rig.run (tone, 2.0);
+                return std::pair { rmsDb (y, 0.8, 1.4), rmsDb (y, 2.0, 2.4) };   // while playing, well after
+            };
+            const auto [playOff, afterOff] = levels (0.0f);
+            const auto [playOn, afterOn] = levels (1.0f);
+            std::cout << "    while playing " << juce::String (playOff - playOn, 1) << " dB lower, afterwards "
+                      << juce::String (afterOff - afterOn, 1) << " dB lower\n";
+            check (playOff - playOn > 6.0, "Ducking 100% pulls the room down while you play");
+            check (afterOff - afterOn < 2.0, "the room comes back after you stop");
+        }
+
+        // --- Freeze: the tail holds with no input ---
+        {
+            Rig rig (root);
+            juce::Random r (5);
+            std::vector<float> burst ((size_t) (0.4 * Rig::sr));
+            for (auto& v : burst) v = (r.nextFloat() * 2.0f - 1.0f) * 0.3f;
+            auto run = [&] (bool freeze)
+            {
+                setParam (rig.proc, ParamIDs::freeze, 0.0f);
+                rig.settle();
+                const auto freezeAt = (int) (0.6 * Rig::sr);
+                return rig.run (burst, 5.0, [&] (int pos)
+                {
+                    if (freeze && pos >= freezeAt && pos < freezeAt + 512)
+                        setParam (rig.proc, ParamIDs::freeze, 1.0f);
+                });
+            };
+            const auto held = run (true), free = run (false);
+            const auto heldLate = rmsDb (held, 4.0, 5.0), freeLate = rmsDb (free, 4.0, 5.0), early = rmsDb (held, 0.4, 0.6);
+            std::cout << "    4-5 s after: frozen " << juce::String (heldLate - early, 1) << " dB, free "
+                      << juce::String (freeLate - early, 1) << " dB (vs the tail at 0.5 s)\n";
+            check (heldLate - early > -12.0, "Freeze holds the tail");
+            check (freeLate - early < -40.0, "without Freeze the tail dies away");
+            // no clicks: no sudden sample jump after freezing
+            float maxJump = 0, typical = 0;
+            for (size_t i = (size_t) (0.7 * Rig::sr); i < (size_t) (4.0 * Rig::sr); ++i)
+            {
+                maxJump = std::max (maxJump, std::abs (held[i] - held[i - 1]));
+                typical = std::max (typical, std::abs (held[i]));
+            }
+            check (maxJump < typical * 0.8f, "Freeze loop has no clicks");
+            setParam (rig.proc, ParamIDs::freeze, 0.0f);
+        }
+
+        // --- Bypass = input, delayed by the reported latency ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::bypass, 1.0f);
+            rig.settle();
+            std::vector<float> x (24000);
+            juce::Random r (9);
+            for (auto& v : x) v = r.nextFloat() - 0.5f;
+            const auto y = rig.run (x, 0.1);
+            float worst = 0;
+            for (size_t i = 0; i < x.size(); ++i) worst = std::max (worst, std::abs (y[i] - x[i]));
+            check (worst < 1e-5f, "Bypass passes the input untouched (latency matched)");
+            check (rig.proc.getBypassParameter() == rig.proc.apvts.getParameter (ParamIDs::bypass), "host bypass uses ROOM's Bypass");
+        }
+
+        // --- Randomize: moves the sound knobs, keeps room / dry-wet / output / bypass ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::mix, 0.37f);
+            setParam (rig.proc, ParamIDs::output, -4.0f);
+            const auto room = analysisXml (rig.proc);
+            const auto before = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
+                              + paramValue (rig.proc, ParamIDs::size);
+            juce::Random r (11);
+            rig.proc.randomizeKnobs (r);
+            const auto after = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
+                             + paramValue (rig.proc, ParamIDs::size);
+            check (std::abs (after - before) > 0.01f, "Randomize changes the knobs");
+            check (std::abs (paramValue (rig.proc, ParamIDs::mix) - 0.37f) < 0.011f, "Randomize keeps Dry/Wet");
+            check (std::abs (paramValue (rig.proc, ParamIDs::output) + 4.0f) < 0.05f, "Randomize keeps Output");
+            check (paramValue (rig.proc, ParamIDs::bypass) < 0.5f && paramValue (rig.proc, ParamIDs::freeze) < 0.5f,
+                   "Randomize never bypasses or freezes");
+            check (analysisXml (rig.proc) == room, "Randomize keeps the room");
+            for (int k = 0; k < 50; ++k)
+            {
+                rig.proc.randomizeKnobs (r);
+                check (paramValue (rig.proc, ParamIDs::tail) <= 4.01f && paramValue (rig.proc, ParamIDs::intensity) <= 1.61f,
+                       "Randomize stays in musical ranges");
+            }
+        }
+
+        // --- Old presets (no Advanced values) load with Advanced at neutral ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::size, 1.8f);
+            setParam (rig.proc, ParamIDs::preDelay, 200.0f);
+            auto& lib = rig.proc.getLibrary();
+            rig.proc.applyPreset (lib.loadPreset (*lib.find ("Factory/Small Room")), "Factory/Small Room");
+            check (std::abs (paramValue (rig.proc, ParamIDs::size) - 1.0f) < 0.011f
+                       && paramValue (rig.proc, ParamIDs::preDelay) < 0.5f,
+                   "presets without Advanced settings reset them to neutral");
+        }
+    }
+
+    //==========================================================================
 
     int screenshot (const juce::StringArray& args)
     {
@@ -429,6 +704,11 @@ namespace
             }
         };
         findAndShow (ed);
+        if (mode == "advanced")
+            ed.setAdvanced (true);
+        if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
+            ed.setSize (juce::roundToInt (RoomAudioProcessorEditor::baseWidth * args[5].getFloatValue()),
+                        juce::roundToInt (RoomAudioProcessorEditor::baseHeight * args[5].getFloatValue()));
         juce::Timer::callPendingTimersSynchronously();
 
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
@@ -474,6 +754,7 @@ int main (int argc, char* argv[])
     testLibrary (root);
     testSaveLoad (root, roomSource);
     testSpace();
+    testAdvanced (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

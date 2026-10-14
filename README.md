@@ -26,7 +26,9 @@ This repo has two parts:
 
 **Space:** stereo width (mid/side). 0% = mono, 100% = untouched, 200% = wide, with the side signal below about 120 Hz fading out as it widens.
 
-Chain: `room -> Tape -> EQ -> Auto EQ -> Space -> Output`.
+Chain: `room (pre-delay, freeze, ducking) -> Tape -> EQ -> Auto EQ -> Space -> Output -> Bypass`.
+
+**Layout:** a top bar (ROOMS, Advanced, Randomize, Dry/Wet, Out, Bypass) and three tiers: 1 load, 2 shape the room (decay + tone displays, Intensity, Balance, Tail, Space), 3 finish (EQ, Tape, Auto EQ). The **Advanced** button swaps tier 3 for Pre-delay, Size, Damping, Ducking + Release, Freeze and full Room Info. The window is resizable (fixed aspect; the whole UI scales).
 
 **ROOMS (presets):** `.room` files (small XML: name, author, type, styles, notes, every parameter except Output, and the room analysis) in `Documents/Eville/ROOMS/<pack>/`. Favorites are kept in `ROOMS/favorites.xml`. The built-in **Factory** pack is generated from synthesized sources by `plugin/Tools/make_factory_presets.sh` and compiled into the plugin.
 
@@ -45,6 +47,7 @@ Chain: `room -> Tape -> EQ -> Auto EQ -> Space -> Output`.
 | `plugin/Source/dsp/ToneShaper.*` | Tape filter and 5-band EQ |
 | `plugin/Source/dsp/ResonanceSuppressor.*` | Auto EQ (live resonance suppression) |
 | `plugin/Source/EqPanel.*` | EQ display: spectrum, draggable bands, Auto EQ cuts |
+| `plugin/Source/AdvancedPanel.*` | ADVANCED screen: pre-delay, size, damping, ducking, freeze, room info |
 | `plugin/Source/dsp/StereoWidth.h` | Space (stereo width) |
 | `plugin/Source/presets/PresetFile.*` | the `.room` format, type and style lists |
 | `plugin/Source/presets/PresetLibrary.*` | ROOMS folder: scan, search, sort, favorites, save, edit, delete, import, export |

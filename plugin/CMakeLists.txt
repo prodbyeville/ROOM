@@ -63,6 +63,7 @@ target_sources(ROOM PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/EqPanel.cpp
+    Source/AdvancedPanel.cpp
     Source/presets/PresetBrowser.cpp)
 target_include_directories(ROOM PRIVATE Source)
 target_compile_definitions(ROOM PUBLIC ${ROOM_DEFINITIONS})

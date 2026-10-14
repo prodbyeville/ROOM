@@ -19,7 +19,8 @@ const juce::StringArray& allStyles()
 
 bool isPresetParameter (const juce::String& id)
 {
-    return id != "output";
+    // Not part of a sound: your monitoring level and on/off states.
+    return id != "output" && id != "bypass" && id != "freeze";
 }
 
 juce::ValueTree makePreset (const PresetMeta& meta, const std::map<juce::String, float>& params,

@@ -34,7 +34,12 @@ struct ToneSettings
 /** Synthetic stereo IR: per band, filtered noise decaying at that band's
     T60 (times intensity). Unit energy per channel. */
 juce::AudioBuffer<float> synthesizeIR (const RoomAnalysis&, double sampleRate,
-                                       float tailSeconds, float intensity, int seed = 0);
+                                       float tailSeconds, float intensity, int seed = 0,
+                                       float size = 1.0f, float damping = 0.0f);
+
+/** Decay time of one band after Intensity, Size and Damping (Advanced).
+    Damping > 0 makes bands above 1 kHz die faster (darker tail), < 0 slower. */
+float bandDecay (float measuredT60, float bandCentreHz, float intensity, float size, float damping);
 
 /** Tone-match EQ (room tone curve vs a neutral reference) + resonators. */
 ToneSettings designTone (const RoomAnalysis&, double sampleRate, float intensity);

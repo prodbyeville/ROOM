@@ -10,6 +10,10 @@ namespace
     // 4 dB under the tonal path on the test rooms.
     constexpr float kSpatialGain = 1.6f;
     constexpr double kSmoothingS = 0.05;
+    constexpr double kFreezeFadeS = 0.15;
+    constexpr double kGrainS = 0.4;         // freeze loop grain length
+    constexpr float kDuckDepth = 8.0f;      // how hard full Ducking pulls the room down
+    constexpr double kDuckAttackS = 0.005;
 }
 
 RoomEngine::RoomEngine() = default;
@@ -27,6 +31,18 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     mixSm.reset (sr, kSmoothingS);
     gainSm.reset (sr, kSmoothingS);
     roomFade.reset (sr, 0.2);
+
+    preDelayBuf.setSize (numChans, (int) (maxPreDelayS * sr) + maxBlockSize + 4);
+    preDelaySm.reset (sr, 0.1);
+
+    const auto histLen = (int) (freezeLengthS * sr);
+    wetHistory.setSize (numChans, histLen);
+    frozen.setSize (numChans, histLen);
+    freezeMix.reset (sr, kFreezeFadeS);
+    grainLen = std::max (16, (int) (kGrainS * sr));
+    grainWindow.resize ((size_t) grainLen);
+    for (int i = 0; i < grainLen; ++i)   // sine window: two at 50 % overlap keep the power constant
+        grainWindow[(size_t) i] = (float) std::sin (juce::MathConstants<double>::pi * (i + 0.5) / grainLen);
     reset();
 }
 
@@ -35,6 +51,24 @@ void RoomEngine::reset()
     convolution.reset();
     for (auto& chan : eq) for (auto& f : chan) f.reset();
     for (auto& chan : res) for (auto& f : chan) f.reset();
+    preDelayBuf.clear();
+    preDelayWrite = 0;
+    wetHistory.clear();
+    historyWrite = 0;
+    duckEnv = 0.0f;
+    frozenActive = false;
+    freezeMix.setCurrentAndTargetValue (0.0f);
+}
+
+float RoomEngine::freezeGrainSample (int ch)
+{
+    // Two grains, half a grain apart, each reading from a random place in the
+    // frozen audio. A reverb tail is noise-like, so this sounds continuous.
+    float out = 0.0f;
+    const auto len = frozen.getNumSamples();
+    for (auto& g : grains)
+        out += frozen.getSample (ch, (g.start + g.pos) % len) * grainWindow[(size_t) g.pos];
+    return out;
 }
 
 void RoomEngine::submitRoom (juce::AudioBuffer<float>&& ir, double irRate, const ToneSettings& newTone)
@@ -86,7 +120,8 @@ void RoomEngine::applyPending()
     roomActive = true;
 }
 
-void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float mix, float outputGainDb)
+void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float mix, float outputGainDb,
+                          const RoomFx& fx)
 {
     applyPending();
 
@@ -128,27 +163,90 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
         }
     }
 
-    // --- 2. spatial path: the tonal signal through the synthetic IR -----------
-    for (int ch = 0; ch < chans; ++ch)
-        spatialBuf.copyFrom (ch, 0, tonalBuf, ch, 0, n);
+    // --- 2. spatial path: pre-delay, then the synthetic IR --------------------
+    preDelaySm.setTargetValue ((float) (juce::jlimit (0.0, maxPreDelayS * 1000.0, (double) fx.preDelayMs) * 0.001 * sampleRate));
+    {
+        const auto len = preDelayBuf.getNumSamples();
+        for (int i = 0; i < n; ++i)
+        {
+            const auto d = preDelaySm.getNextValue();
+            const auto readPos = (double) preDelayWrite - d;
+            auto r0 = (int) std::floor (readPos);
+            const auto frac = (float) (readPos - r0);
+            r0 = ((r0 % len) + len) % len;
+            const auto r1 = (r0 + 1) % len;
+            for (int ch = 0; ch < chans; ++ch)
+            {
+                preDelayBuf.setSample (ch, preDelayWrite, tonalBuf.getSample (ch, i));
+                // read between two samples so changing the time glides instead of clicking
+                const auto a = preDelayBuf.getSample (ch, r0), b = preDelayBuf.getSample (ch, r1);
+                spatialBuf.setSample (ch, i, d < 0.5f ? tonalBuf.getSample (ch, i) : a + frac * (b - a));
+            }
+            preDelayWrite = (preDelayWrite + 1) % len;
+        }
+    }
     {
         juce::dsp::AudioBlock<float> block (spatialBuf.getArrayOfWritePointers(), (size_t) chans, (size_t) n);
         convolution.process (juce::dsp::ProcessContextReplacing<float> (block));
     }
 
-    // --- 3 + 4. blend by balance, then wet/dry --------------------------------
+    // --- Freeze: on the way in, grab the last couple of seconds of wet sound ---
+    if (fx.freeze && ! frozenActive)
+    {
+        const auto len = wetHistory.getNumSamples();
+        for (int ch = 0; ch < chans; ++ch)
+            for (int k = 0; k < len; ++k)   // oldest first
+                frozen.setSample (ch, k, wetHistory.getSample (ch, (historyWrite + k) % len));
+        grains[0] = { rng.nextInt (len), 0 };
+        grains[1] = { rng.nextInt (len), grainLen / 2 };
+        frozenActive = true;
+    }
+    freezeMix.setTargetValue (fx.freeze ? 1.0f : 0.0f);
+
+    // Ducking: release time sets how fast the room swells back.
+    const auto attack = (float) std::exp (-1.0 / (kDuckAttackS * sampleRate));
+    const auto release = (float) std::exp (-1.0 / (juce::jlimit (0.05, 1.0, fx.duckReleaseMs * 0.001) * sampleRate));
+    const auto duckAmount = juce::jlimit (0.0f, 1.0f, fx.duck);
+
+    // --- 3 + 4. blend by balance (= wet), freeze, duck, then wet/dry ----------
+    const auto histLen = wetHistory.getNumSamples();
     for (int i = 0; i < n; ++i)
     {
         const auto b = balanceSm.getNextValue();
         const auto m = mixSm.getNextValue() * roomFade.getNextValue();
         const auto g = gainSm.getNextValue();
+        const auto fz = freezeMix.getNextValue();
+
+        float level = 0.0f;
+        for (int ch = 0; ch < chans; ++ch)
+            level = std::max (level, std::abs (buffer.getSample (ch, i)));
+        duckEnv = level > duckEnv ? attack * duckEnv + (1.0f - attack) * level
+                                  : release * duckEnv + (1.0f - release) * level;
+        const auto duckGain = 1.0f / (1.0f + kDuckDepth * duckAmount * duckEnv);
+
         for (int ch = 0; ch < chans; ++ch)
         {
             auto* io = buffer.getWritePointer (ch);
-            const auto wet = (1.0f - b) * tonalBuf.getSample (ch, i)
-                           + b * kSpatialGain * spatialBuf.getSample (ch, i);
-            io[i] = ((1.0f - m) * io[i] + m * wet) * g;
+            auto wet = (1.0f - b) * tonalBuf.getSample (ch, i)
+                     + b * kSpatialGain * spatialBuf.getSample (ch, i);
+            if (! frozenActive)
+                wetHistory.setSample (ch, historyWrite, wet);
+            else
+                wet = (1.0f - fz) * wet + fz * freezeGrainSample (ch);
+            io[i] = ((1.0f - m) * io[i] + m * wet * duckGain) * g;
         }
+
+        if (frozenActive)
+        {
+            for (auto& gr : grains)
+                if (++gr.pos >= grainLen)
+                    gr = { rng.nextInt (histLen), 0 };
+            // Fully faded back out: forget the frozen loop.
+            if (! fx.freeze && ! freezeMix.isSmoothing())
+                frozenActive = false;
+        }
+        else
+            historyWrite = (historyWrite + 1) % histLen;
     }
 }
 

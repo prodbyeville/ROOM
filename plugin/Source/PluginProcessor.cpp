@@ -100,6 +100,13 @@ RoomAudioProcessor::RoomAudioProcessor()
     tapeParam        = apvts.getRawParameterValue (ParamIDs::tape);
     autoEqParam      = apvts.getRawParameterValue (ParamIDs::autoEq);
     spaceParam       = apvts.getRawParameterValue (ParamIDs::space);
+    preDelayParam    = apvts.getRawParameterValue (ParamIDs::preDelay);
+    sizeParam        = apvts.getRawParameterValue (ParamIDs::size);
+    dampingParam     = apvts.getRawParameterValue (ParamIDs::damping);
+    duckParam        = apvts.getRawParameterValue (ParamIDs::duck);
+    duckReleaseParam = apvts.getRawParameterValue (ParamIDs::duckRelease);
+    freezeParam      = apvts.getRawParameterValue (ParamIDs::freeze);
+    bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
     for (int b = 0; b < room::tone::numEqBands; ++b)
     {
         eqFreqParam[b] = apvts.getRawParameterValue (ParamIDs::eqFreq (b));
@@ -107,8 +114,9 @@ RoomAudioProcessor::RoomAudioProcessor()
         eqQParam[b]    = apvts.getRawParameterValue (ParamIDs::eqQ (b));
     }
 
-    apvts.addParameterListener (ParamIDs::intensity, this);
-    apvts.addParameterListener (ParamIDs::tail, this);
+    // These reshape the room, so the IR is rebuilt when they move.
+    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
+        apvts.addParameterListener (id, this);
 
     // Report the Auto EQ latency from the start (prepareToPlay refines it for
     // the actual sample rate), so hosts that ask early get the right answer.
@@ -121,8 +129,8 @@ RoomAudioProcessor::RoomAudioProcessor()
 
 RoomAudioProcessor::~RoomAudioProcessor()
 {
-    apvts.removeParameterListener (ParamIDs::intensity, this);
-    apvts.removeParameterListener (ParamIDs::tail, this);
+    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
+        apvts.removeParameterListener (id, this);
     worker.reset();
 }
 
@@ -139,7 +147,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         NormalisableRange<float> (0.0f, 2.0f, 0.01f), 1.0f, pct));
 
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::mix, 1 }, "Mix",
+        ParameterID { ParamIDs::mix, 1 }, "Dry/Wet",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, pct));
 
     layout.add (std::make_unique<AudioParameterBool> (
@@ -168,6 +176,42 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
             if (v < 0.005f) return String ("Mono");
             return String (juce::roundToInt (v * 100.0f)) + "%";
         })));
+
+    // --- Advanced screen ------------------------------------------------------
+    {
+        NormalisableRange<float> r (0.0f, 500.0f, 0.1f);
+        r.setSkewForCentre (80.0f);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::preDelay, 1 }, "Pre-delay", r, 0.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int) { return String (juce::roundToInt (v)) + " ms"; })));
+    }
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::size, 1 }, "Size",
+        NormalisableRange<float> (0.5f, 2.0f, 0.01f, 0.5f), 1.0f, pct));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::damping, 1 }, "Damping",
+        NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        {
+            const auto p = juce::roundToInt (v * 100.0f);
+            return p == 0 ? String ("0") : (p > 0 ? "+" + String (p) + " dark" : String (p) + " bright");
+        })));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::duck, 1 }, "Ducking",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    {
+        NormalisableRange<float> r (50.0f, 1000.0f, 1.0f);
+        r.setSkewForCentre (250.0f);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::duckRelease, 1 }, "Duck Release", r, 250.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction (
+                [] (float v, int) { return String (juce::roundToInt (v)) + " ms"; })));
+    }
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::freeze, 1 }, "Freeze", false));
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::output, 1 }, "Output",
@@ -238,6 +282,14 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
+
+    const auto chans = std::max (2, getTotalNumOutputChannels());
+    dryDelay.setSize (chans, suppressor.getLatency() + 1);
+    dryDelay.clear();
+    dryDelayWrite = 0;
+    dryBlock.setSize (chans, samplesPerBlock);
+    bypassMix.reset (sampleRate, 0.03);
+    bypassMix.setCurrentAndTargetValue (bypassParam->load() > 0.5f ? 1.0f : 0.0f);
     currentSampleRate = sampleRate;
     worker->requestRebuild();   // the IR has to be rebuilt at this sample rate
 }
@@ -257,8 +309,34 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     const auto balance = balanceAutoParam->load() > 0.5f ? detectedBalance.load()
                                                          : balanceParam->load();
-    // Room -> Tape -> EQ -> Auto EQ -> output gain
-    engine.process (buffer, balance, mixParam->load(), 0.0f);
+    // Keep a copy of the input, delayed by the plugin's latency, for Bypass.
+    const auto n = buffer.getNumSamples();
+    const auto chansIo = std::min (buffer.getNumChannels(), dryDelay.getNumChannels());
+    if (n <= dryBlock.getNumSamples())
+    {
+        const auto len = dryDelay.getNumSamples();
+        for (int ch = 0; ch < chansIo; ++ch)
+        {
+            auto w = dryDelayWrite;
+            for (int i = 0; i < n; ++i)
+            {
+                // len = latency + 1, so the oldest sample is exactly `latency` behind.
+                dryDelay.setSample (ch, w, buffer.getSample (ch, i));
+                dryBlock.setSample (ch, i, dryDelay.getSample (ch, (w + 1) % len));
+                w = (w + 1) % len;
+            }
+        }
+        dryDelayWrite = (dryDelayWrite + n) % len;
+    }
+
+    room::RoomFx fx;
+    fx.preDelayMs = preDelayParam->load();
+    fx.duck = duckParam->load();
+    fx.duckReleaseMs = duckReleaseParam->load();
+    fx.freeze = freezeParam->load() > 0.5f;
+
+    // Room -> Tape -> EQ -> Auto EQ -> Space -> output gain
+    engine.process (buffer, balance, mixParam->load(), 0.0f, fx);
 
     room::EqBand bands[room::tone::numEqBands];
     getEqBands (bands);
@@ -283,12 +361,63 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             buffer.applyGain (ch, 0, buffer.getNumSamples(), outputGain.getTargetValue());
     }
 
+    // Bypass: crossfade to the untouched (latency-matched) input.
+    bypassMix.setTargetValue (bypassParam->load() > 0.5f ? 1.0f : 0.0f);
+    if ((bypassMix.isSmoothing() || bypassMix.getTargetValue() > 0.5f) && n <= dryBlock.getNumSamples())
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const auto b = bypassMix.getNextValue();
+            for (int ch = 0; ch < chansIo; ++ch)
+            {
+                auto* d = buffer.getWritePointer (ch);
+                d[i] = (1.0f - b) * d[i] + b * dryBlock.getSample (ch, i);
+            }
+        }
+    }
+
     spectrumTap.push (buffer);
+}
+
+juce::AudioProcessorParameter* RoomAudioProcessor::getBypassParameter() const
+{
+    return apvts.getParameter (ParamIDs::bypass);
+}
+
+void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
+{
+    auto set = [this] (const juce::String& id, float value)
+    {
+        if (auto* p = apvts.getParameter (id))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 (value));
+            p->endChangeGesture();
+        }
+    };
+    auto between = [&r] (float lo, float hi) { return lo + r.nextFloat() * (hi - lo); };
+    auto maybe = [&r] (float chance) { return r.nextFloat() < chance; };
+
+    // Musical ranges, not the full extremes.
+    set (ParamIDs::intensity, between (0.5f, 1.6f));
+    set (ParamIDs::balanceAuto, maybe (0.5f) ? 1.0f : 0.0f);
+    set (ParamIDs::balance, between (0.1f, 0.9f));
+    set (ParamIDs::tail, between (0.6f, 4.0f));
+    set (ParamIDs::space, between (0.7f, 1.6f));
+    set (ParamIDs::tape, maybe (0.5f) ? between (0.1f, 0.8f) : 0.0f);
+    set (ParamIDs::autoEq, maybe (0.5f) ? between (0.1f, 0.6f) : 0.0f);
+    for (int b = 0; b < room::tone::numEqBands; ++b)
+        set (ParamIDs::eqGain (b), maybe (0.4f) ? between (-4.0f, 4.0f) : 0.0f);
+    set (ParamIDs::preDelay, maybe (0.5f) ? between (5.0f, 120.0f) : 0.0f);
+    set (ParamIDs::size, between (0.7f, 1.5f));
+    set (ParamIDs::damping, between (-0.5f, 0.7f));
+    set (ParamIDs::duck, maybe (0.3f) ? between (0.2f, 0.7f) : 0.0f);
+    set (ParamIDs::duckRelease, between (120.0f, 600.0f));
 }
 
 double RoomAudioProcessor::getTailLengthSeconds() const
 {
-    return tailParam->load() * std::max (1.0f, intensityParam->load());
+    return tailParam->load() * std::max (1.0f, intensityParam->load()) + preDelayParam->load() * 0.001;
 }
 
 void RoomAudioProcessor::parameterChanged (const juce::String&, float)
@@ -378,14 +507,17 @@ void RoomAudioProcessor::rebuildRoom()
 
     const auto intensity = intensityParam->load();
     const auto tail = tailParam->load();
+    const auto size = sizeParam->load();
+    const auto damping = dampingParam->load();
 
     // IR length follows the decays: no point in a 6 s buffer for a 0.3 s room.
     float longest = 0.05f;
-    for (auto t : a.bandT60s)
-        longest = std::max (longest, t * intensity);
+    for (int b = 0; b < a.numBands(); ++b)
+        longest = std::max (longest, room::bandDecay (a.bandT60s[(size_t) b], a.bandCentersHz[(size_t) b],
+                                                      intensity, size, damping));
     const auto irSeconds = std::min (tail, longest + 0.1f);
 
-    engine.submitRoom (room::synthesizeIR (a, sr, irSeconds, intensity), sr,
+    engine.submitRoom (room::synthesizeIR (a, sr, irSeconds, intensity, 0, size, damping), sr,
                        room::designTone (a, sr, intensity));
 }
 
@@ -410,6 +542,8 @@ void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("presetKey", currentPresetKey, nullptr);
     state.setProperty ("presetName", currentPresetName, nullptr);
     state.setProperty ("presetModified", isPresetModified(), nullptr);
+    state.setProperty ("editorScale", editorScale, nullptr);
+    state.setProperty ("advancedOpen", advancedOpen, nullptr);
     state.appendChild (apvts.copyState(), nullptr);
     state.appendChild (getAnalysis().toValueTree(), nullptr);
     if (auto xml = state.createXml())
@@ -441,6 +575,8 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
         clearRoom();
     }
 
+    editorScale = juce::jlimit (0.75f, 1.75f, (float) state.getProperty ("editorScale", 1.0f));
+    advancedOpen = (bool) state.getProperty ("advancedOpen", false);
     currentPresetKey = state["presetKey"].toString();
     currentPresetName = state["presetName"].toString();
     snapshotPreset();

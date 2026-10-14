@@ -20,6 +20,15 @@ namespace ParamIDs
     inline constexpr const char* tape        = "tape";
     inline constexpr const char* autoEq      = "autoEq";
     inline constexpr const char* space       = "space";
+    // Advanced screen
+    inline constexpr const char* preDelay    = "preDelay";
+    inline constexpr const char* size        = "size";
+    inline constexpr const char* damping     = "damping";
+    inline constexpr const char* duck        = "duck";
+    inline constexpr const char* duckRelease = "duckRelease";
+    inline constexpr const char* freeze      = "freeze";
+    // Top bar
+    inline constexpr const char* bypass      = "bypass";
 
     // EQ band parameters: "eq1Freq", "eq1Gain", "eq1Q" ... "eq5Q"
     inline juce::String eqFreq (int band) { return "eq" + juce::String (band + 1) + "Freq"; }
@@ -49,6 +58,7 @@ public:
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override;
+    juce::AudioProcessorParameter* getBypassParameter() const override;
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -114,6 +124,14 @@ public:
     /** True if any knob moved since the preset was loaded or saved. */
     bool isPresetModified() const;
 
+    /** Randomize the sound-shaping knobs within musical ranges (message thread).
+        Leaves the room itself, Dry/Wet, Output, Bypass and Freeze alone. */
+    void randomizeKnobs (juce::Random&);
+
+    /** UI state saved with the project. */
+    float editorScale = 1.0f;
+    bool advancedOpen = false;
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void parameterChanged (const juce::String& id, float) override;
@@ -134,6 +152,11 @@ private:
     room::StereoWidth stereoWidth;
     juce::SmoothedValue<float> outputGain;
 
+    // Bypass: a latency-matched copy of the input, crossfaded in.
+    juce::AudioBuffer<float> dryDelay, dryBlock;
+    int dryDelayWrite = 0;
+    juce::SmoothedValue<float> bypassMix;
+
     mutable juce::CriticalSection analysisLock;
     room::RoomAnalysis analysis;
     juce::String statusMessage;
@@ -151,6 +174,13 @@ private:
     std::atomic<float>* tapeParam = nullptr;
     std::atomic<float>* autoEqParam = nullptr;
     std::atomic<float>* spaceParam = nullptr;
+    std::atomic<float>* preDelayParam = nullptr;
+    std::atomic<float>* sizeParam = nullptr;
+    std::atomic<float>* dampingParam = nullptr;
+    std::atomic<float>* duckParam = nullptr;
+    std::atomic<float>* duckReleaseParam = nullptr;
+    std::atomic<float>* freezeParam = nullptr;
+    std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
     std::atomic<float>* eqQParam[room::tone::numEqBands] {};
