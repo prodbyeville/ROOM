@@ -593,14 +593,38 @@ namespace
                       << juce::String (freeLate - early, 1) << " dB (vs the tail at 0.5 s)\n";
             check (heldLate - early > -12.0, "Freeze holds the tail");
             check (freeLate - early < -40.0, "without Freeze the tail dies away");
-            // no clicks: no sudden sample jump after freezing
-            float maxJump = 0, typical = 0;
-            for (size_t i = (size_t) (0.7 * Rig::sr); i < (size_t) (4.0 * Rig::sr); ++i)
+            // No clicks. Freeze a steady 200 Hz tone: the held sound is then
+            // (almost) a 200 Hz wave, so any seam shows up as a sample-to-sample
+            // jump far steeper than a 200 Hz wave can make. Several tries,
+            // because the loop picks random positions.
+            std::vector<float> tone ((size_t) (1.5 * Rig::sr));
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = 0.3f * std::sin (2.0f * juce::MathConstants<float>::pi * 200.0f * (float) i / (float) Rig::sr);
+            int clicky = 0;
+            float worstRatio = 0.0f;
+            for (int attempt = 0; attempt < 6; ++attempt)
             {
-                maxJump = std::max (maxJump, std::abs (held[i] - held[i - 1]));
-                typical = std::max (typical, std::abs (held[i]));
+                setParam (rig.proc, ParamIDs::freeze, 0.0f);
+                rig.settle();
+                const auto freezeAt = (int) (1.0 * Rig::sr);
+                const auto y = rig.run (tone, 4.0, [&] (int pos)
+                {
+                    if (pos >= freezeAt && pos < freezeAt + 512)
+                        setParam (rig.proc, ParamIDs::freeze, 1.0f);
+                });
+                float maxJump = 0, peak = 0;
+                for (size_t i = (size_t) (1.8 * Rig::sr); i < (size_t) (5.0 * Rig::sr); ++i)
+                {
+                    maxJump = std::max (maxJump, std::abs (y[i] - y[i - 1]));
+                    peak = std::max (peak, std::abs (y[i]));
+                }
+                const auto smoothest = 2.0f * juce::MathConstants<float>::pi * 200.0f / (float) Rig::sr * peak;
+                worstRatio = std::max (worstRatio, maxJump / std::max (1e-9f, smoothest));
+                if (maxJump > 3.0f * smoothest || peak < 1e-4f)
+                    ++clicky;
             }
-            check (maxJump < typical * 0.8f, "Freeze loop has no clicks");
+            std::cout << "    freeze loop: steepest step " << juce::String (worstRatio, 2) << "x a clean 200 Hz wave (6 tries)\n";
+            check (clicky == 0, "Freeze loop has no clicks (6 tries)");
             setParam (rig.proc, ParamIDs::freeze, 0.0f);
         }
 

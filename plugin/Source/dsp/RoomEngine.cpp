@@ -12,6 +12,7 @@ namespace
     constexpr double kSmoothingS = 0.05;
     constexpr double kFreezeFadeS = 0.15;
     constexpr double kGrainS = 0.4;         // freeze loop grain length
+    constexpr double kFreezeHoldS = 1.0;    // freeze holds the most recent second
     constexpr float kDuckDepth = 8.0f;      // how hard full Ducking pulls the room down
     constexpr double kDuckAttackS = 0.005;
 }
@@ -60,14 +61,21 @@ void RoomEngine::reset()
     freezeMix.setCurrentAndTargetValue (0.0f);
 }
 
+int RoomEngine::nextGrainStart()
+{
+    const auto range = std::max (1, frozen.getNumSamples() - grainLen - freezeStart);
+    return juce::jlimit (0, std::max (0, frozen.getNumSamples() - grainLen), freezeStart + rng.nextInt (range));
+}
+
 float RoomEngine::freezeGrainSample (int ch)
 {
     // Two grains, half a grain apart, each reading from a random place in the
     // frozen audio. A reverb tail is noise-like, so this sounds continuous.
+    // Grains never cross the end of the frozen audio (where the newest sample
+    // meets the oldest), so there is no seam to click on.
     float out = 0.0f;
-    const auto len = frozen.getNumSamples();
     for (auto& g : grains)
-        out += frozen.getSample (ch, (g.start + g.pos) % len) * grainWindow[(size_t) g.pos];
+        out += frozen.getSample (ch, g.start + g.pos) * grainWindow[(size_t) g.pos];
     return out;
 }
 
@@ -197,8 +205,19 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
         for (int ch = 0; ch < chans; ++ch)
             for (int k = 0; k < len; ++k)   // oldest first
                 frozen.setSample (ch, k, wetHistory.getSample (ch, (historyWrite + k) % len));
-        grains[0] = { rng.nextInt (len), 0 };
-        grains[1] = { rng.nextInt (len), grainLen / 2 };
+        // Hold what's ringing now: only the most recent second, and skip any
+        // silence at its start (e.g. freezing right after a short hit).
+        freezeStart = std::max (0, len - (int) (kFreezeHoldS * sampleRate));
+        {
+            const auto chunk = std::max (1, (int) (0.05 * sampleRate));
+            float loudest = 0.0f;
+            for (int k = freezeStart; k + chunk <= len; k += chunk)
+                loudest = std::max (loudest, frozen.getRMSLevel (0, k, chunk));
+            while (freezeStart + chunk <= len - grainLen && frozen.getRMSLevel (0, freezeStart, chunk) < loudest * 0.03f)
+                freezeStart += chunk;
+        }
+        grains[0] = { nextGrainStart(), 0 };
+        grains[1] = { nextGrainStart(), grainLen / 2 };
         frozenActive = true;
     }
     freezeMix.setTargetValue (fx.freeze ? 1.0f : 0.0f);
@@ -240,7 +259,7 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
         {
             for (auto& gr : grains)
                 if (++gr.pos >= grainLen)
-                    gr = { rng.nextInt (histLen), 0 };
+                    gr = { nextGrainStart(), 0 };
             // Fully faded back out: forget the frozen loop.
             if (! fx.freeze && ! freezeMix.isSmoothing())
                 frozenActive = false;

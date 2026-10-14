@@ -87,6 +87,8 @@ private:
     juce::Random rng;
     std::vector<float> grainWindow;
     float freezeGrainSample (int ch);
+    int nextGrainStart();
+    int freezeStart = 0;   // where the held part of the frozen audio begins
 
     // Handover from the background thread
     juce::SpinLock pendingLock;
