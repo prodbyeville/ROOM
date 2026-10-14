@@ -62,7 +62,7 @@ private:
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { randomize, power, advanced };
+    enum class Icon { randomize, power, advanced, record };
     IconButton (Icon i, const juce::String& tooltip);
     void paintButton (juce::Graphics&, bool over, bool down) override;
 
@@ -123,6 +123,7 @@ private:
     // Tier 1
     DropZone dropZone;
     juce::TextButton clearButton { "Clear" };
+    IconButton recordButton { IconButton::Icon::record, "Record a room: play, clap or sing into this track, then press again to stop (max 30 s)" };
 
     // Tier 2
     RoomDisplay decayDisplay { RoomDisplay::Mode::decay };

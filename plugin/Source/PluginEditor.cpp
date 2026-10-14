@@ -61,8 +61,34 @@ void DropZone::paint (juce::Graphics& g)
 
     const auto status = proc.getStatus();
     juce::String title, sub;
+    if (status == RoomAudioProcessor::Status::recording)
+    {
+        // Recording: time, a level meter, and how to stop.
+        auto area = getLocalBounds().reduced (24, 10).withTrimmedRight (110).withTrimmedLeft (46);
+        const auto secs = proc.getRecordedSeconds();
+        const auto blink = (juce::Time::getMillisecondCounter() / 500) % 2 == 0;
+        g.setColour (Colours::reduction.withAlpha (blink ? 1.0f : 0.4f));
+        g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ (float) area.getX() + 6.0f, (float) area.getCentreY() - 9.0f }));
+        g.setColour (Colours::text);
+        g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        g.drawText ("Recording   " + juce::String (secs, 1) + " s  /  " + juce::String ((int) RoomAudioProcessor::maxRecordSeconds) + " s",
+                    area.withTrimmedLeft (20).removeFromTop (area.getHeight() / 2), juce::Justification::bottomLeft);
+        auto meter = area.withTrimmedLeft (20).removeFromBottom (area.getHeight() / 2).reduced (0, 8).withWidth (area.getWidth() / 2);
+        g.setColour (Colours::background);
+        g.fillRoundedRectangle (meter.toFloat(), 3.0f);
+        const auto lvl = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (proc.getRecordLevel(), -60.0f) + 60.0f) / 60.0f);
+        g.setColour (lvl > 0.95f ? Colours::reduction : Colours::accent);
+        g.fillRoundedRectangle (meter.toFloat().withWidth (meter.getWidth() * lvl), 3.0f);
+        g.setColour (Colours::dim);
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText ("play into this track, press the record button again to stop",
+                    meter.withX (meter.getRight() + 14).withWidth (area.getRight() - meter.getRight() - 14), juce::Justification::centredLeft);
+        return;
+    }
+
     switch (status)
     {
+        case RoomAudioProcessor::Status::recording:
         case RoomAudioProcessor::Status::empty:
             title = "Drop any sound here";
             sub = "or click to browse. A clap, room tone, a one-shot, found sound...";
@@ -89,7 +115,7 @@ void DropZone::paint (juce::Graphics& g)
             break;
     }
 
-    auto textArea = getLocalBounds().reduced (16, 0).withTrimmedRight (70);
+    auto textArea = getLocalBounds().reduced (16, 0).withTrimmedRight (110).withTrimmedLeft (60);
     g.setColour (status == RoomAudioProcessor::Status::failed ? juce::Colours::indianred : Colours::text);
     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     g.drawFittedText (title, textArea.withTrimmedBottom (getHeight() / 2 - 2), juce::Justification::centredBottom, 1);
@@ -204,7 +230,7 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     const auto on = getToggleState();
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const auto active = icon == Icon::power ? on : (icon == Icon::advanced && on);
+    const auto active = icon == Icon::power || icon == Icon::record ? on : (icon == Icon::advanced && on);
     g.setColour (active ? (icon == Icon::power ? Colours::reduction.withAlpha (0.25f) : Colours::accent.withAlpha (0.2f))
                         : (over ? Colours::panel.brighter (0.1f) : Colours::panel));
     g.fillRoundedRectangle (r, 6.0f);
@@ -243,6 +269,16 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
                 p.lineTo (x1 - s * 0.25f, y + s * 0.22f);
             }
             break;
+        }
+        case Icon::record:
+        {
+            const auto rec = getToggleState();
+            g.setColour (Colours::reduction.withAlpha (rec ? 1.0f : 0.85f));
+            if (rec)   // stop square while recording
+                g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.8f, s * 0.8f).withCentre ({ cx, cy }), 2.0f);
+            else
+                g.fillEllipse (juce::Rectangle<float> (s * 0.9f, s * 0.9f).withCentre ({ cx, cy }));
+            return;
         }
         case Icon::advanced:
         {
@@ -305,6 +341,13 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addAndMakeVisible (dropZone);
     content.addAndMakeVisible (clearButton);
     clearButton.onClick = [this] { proc.clearRoom(); };
+    content.addAndMakeVisible (recordButton);
+    recordButton.setClickingTogglesState (false);
+    recordButton.onClick = [this]
+    {
+        if (proc.isRecording()) proc.stopRecording();
+        else                    proc.startRecording();
+    };
 
     // --- Tier 2 ---
     content.addAndMakeVisible (decayDisplay);
@@ -436,6 +479,13 @@ void RoomAudioProcessorEditor::timerCallback()
         || std::abs (sz - shownSize) > 1e-4f || std::abs (dmp - shownDamping) > 1e-4f)
         refreshAnalysis();
 
+    // Recording: keep the button and the live meter up to date.
+    const auto rec = proc.isRecording();
+    if (recordButton.getToggleState() != rec)
+        recordButton.setToggleState (rec, juce::dontSendNotification);
+    if (rec || proc.getStatus() == RoomAudioProcessor::Status::analyzing)
+        dropZone.repaint();
+
     const auto isAuto = autoBalance.getToggleState();
     if (balance.slider.isEnabled() == isAuto)
     {
@@ -531,6 +581,7 @@ void RoomAudioProcessorEditor::layoutContent()
     tierLabels[0] = { gutterX, t1.getY() + 4, 12, 20 };
     dropZone.setBounds (t1);
     clearButton.setBounds (t1.removeFromRight (70).reduced (10, 18));
+    recordButton.setBounds (t1.removeFromLeft (52).withSizeKeepingCentre (36, 34).translated (10, 0));
 
     // --- Tier 2: shape the room ---
     area.removeFromTop (12);

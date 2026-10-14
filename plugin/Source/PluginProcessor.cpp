@@ -37,12 +37,17 @@ public:
         notify();
     }
 
+    /** Wake up to pick up a finished recording. */
+    void poke() { notify(); }
+
     void run() override
     {
         while (! threadShouldExit())
         {
             if (! hasWork())
-                wait (-1);
+                wait (owner.recordArmed.load() ? 30 : -1);   // while recording, check for the end often
+
+            owner.finishRecording();
 
             juce::File file;
             bool doFile = false;
@@ -71,7 +76,7 @@ private:
     bool hasWork()
     {
         const juce::ScopedLock sl (lock);
-        return hasFile || rebuild.load();
+        return hasFile || rebuild.load() || owner.recordFinished.load();
     }
 
     RoomAudioProcessor& owner;
@@ -288,6 +293,8 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     dryDelay.clear();
     dryDelayWrite = 0;
     dryBlock.setSize (chans, samplesPerBlock);
+    if (! recordArmed.load())
+        recordBuf.setSize (2, (int) (maxRecordSeconds * sampleRate));
     bypassMix.reset (sampleRate, 0.03);
     bypassMix.setCurrentAndTargetValue (bypassParam->load() > 0.5f ? 1.0f : 0.0f);
     currentSampleRate = sampleRate;
@@ -306,6 +313,36 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         buffer.copyFrom (1, 0, buffer, 0, 0, buffer.getNumSamples());
     for (auto ch = std::max (numIn, 2); ch < numOut; ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
+
+    // Record into ROOM: copy the incoming audio before any processing.
+    if (recordArmed.load())
+    {
+        const auto cap = recordBuf.getNumSamples();
+        auto pos = recordPos.load();
+        if (recordStopRequest.exchange (false) || pos >= cap)
+        {
+            recordArmed = false;
+            recordFinished = true;
+        }
+        else
+        {
+            const auto count = std::min (buffer.getNumSamples(), cap - pos);
+            float peak = 0.0f;
+            for (int ch = 0; ch < recordBuf.getNumChannels(); ++ch)
+            {
+                const auto src = std::min (ch, buffer.getNumChannels() - 1);
+                recordBuf.copyFrom (ch, pos, buffer, src, 0, count);
+                peak = std::max (peak, buffer.getMagnitude (src, 0, count));
+            }
+            recordPos = pos + count;
+            recordLevel = std::max (peak, recordLevel.load() * 0.8f);
+            if (pos + count >= cap)   // 30 s reached: stop by itself
+            {
+                recordArmed = false;
+                recordFinished = true;
+            }
+        }
+    }
 
     const auto balance = balanceAutoParam->load() > 0.5f ? detectedBalance.load()
                                                          : balanceParam->load();
@@ -443,6 +480,72 @@ void RoomAudioProcessor::loadRoomFile (const juce::File& file)
     worker->requestFile (file);
 }
 
+void RoomAudioProcessor::startRecording()
+{
+    if (recordArmed.load() || recordBuf.getNumSamples() == 0)
+        return;
+    currentPresetKey = {};
+    currentPresetName = "Recorded room " + juce::String (recordCount + 1);
+    snapshotPreset();
+    {
+        const juce::ScopedLock sl (analysisLock);
+        statusMessage = "Recording...";
+    }
+    recordPos = 0;
+    recordLevel = 0.0f;
+    recordStopRequest = false;
+    recordFinished = false;
+    recordArmed = true;
+    status = Status::recording;
+    ++analysisVersion;
+    worker->poke();
+}
+
+void RoomAudioProcessor::stopRecording()
+{
+    if (! recordArmed.load())
+        return;
+    recordStopRequest = true;
+    recordStopTime = juce::Time::getMillisecondCounter();
+    worker->poke();
+}
+
+double RoomAudioProcessor::getRecordedSeconds() const
+{
+    const auto sr = currentSampleRate.load();
+    return sr > 0.0 ? recordPos.load() / sr : 0.0;
+}
+
+void RoomAudioProcessor::finishRecording()
+{
+    // If the host isn't running audio, nobody will see the stop request:
+    // finish it here after a moment instead.
+    if (recordArmed.load() && recordStopRequest.load()
+        && juce::Time::getMillisecondCounter() - recordStopTime > 300)
+    {
+        recordArmed = false;
+        recordStopRequest = false;
+        recordFinished = true;
+    }
+
+    if (! recordFinished.exchange (false))
+        return;
+
+    const auto n = recordPos.load();
+    juce::AudioBuffer<float> take (recordBuf.getNumChannels(), std::max (1, n));
+    for (int ch = 0; ch < take.getNumChannels(); ++ch)
+        take.copyFrom (ch, 0, recordBuf, ch, 0, std::max (1, n));
+
+    ++recordCount;
+    {
+        const juce::ScopedLock sl (analysisLock);
+        statusMessage = "Analyzing recording...";
+    }
+    status = Status::analyzing;
+    ++analysisVersion;
+    analyseAudio (take, currentSampleRate.load(), "Recorded room " + juce::String (recordCount));
+}
+
 void RoomAudioProcessor::clearRoom()
 {
     setAnalysis ({});
@@ -467,20 +570,24 @@ void RoomAudioProcessor::analyseFile (const juce::File& file)
     const auto len = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (60.0 * reader->sampleRate));
     juce::AudioBuffer<float> audio ((int) std::min (2u, reader->numChannels), len);
     reader->read (&audio, 0, len, 0, true, audio.getNumChannels() > 1);
+    analyseAudio (audio, reader->sampleRate, file.getFileName());
+}
 
-    auto result = room::analyzeRoom (audio, reader->sampleRate);
+void RoomAudioProcessor::analyseAudio (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::String& name)
+{
+    auto result = room::analyzeRoom (audio, sampleRate);
     if (! result.valid)
     {
         {
             const juce::ScopedLock sl (analysisLock);
-            statusMessage = file.getFileName() + " is too short to analyze";
+            statusMessage = name + " is too short to analyze";
         }
         status = Status::failed;
         ++analysisVersion;
         return;
     }
 
-    result.sourceName = file.getFileName();
+    result.sourceName = name;
     setAnalysis (std::move (result));
     rebuildRoom();
 }

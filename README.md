@@ -28,7 +28,7 @@ This repo has two parts:
 
 Chain: `room (pre-delay, freeze, ducking) -> Tape -> EQ -> Auto EQ -> Space -> Output -> Bypass`.
 
-**Layout:** a top bar (ROOMS, Advanced, Randomize, Dry/Wet, Out, Bypass) and three tiers: 1 load, 2 shape the room (decay + tone displays, Intensity, Balance, Tail, Space), 3 finish (EQ, Tape, Auto EQ). The **Advanced** button swaps tier 3 for Pre-delay, Size, Damping, Ducking + Release, Freeze and full Room Info. The window is resizable (fixed aspect; the whole UI scales).
+**Layout:** a top bar (ROOMS, Advanced, Randomize, Dry/Wet, Out, Bypass) and three tiers: 1 load, 2 shape the room (decay + tone displays, Intensity, Balance, Tail, Space), 3 finish (EQ, Tape, Auto EQ). The **Advanced** button swaps tier 3 for Pre-delay, Size, Damping, Ducking + Release, Freeze and full Room Info. The window is resizable (fixed aspect; the whole UI scales). **Record into ROOM:** the record button in tier 1 captures up to 30 s of the track's input (before processing) and analyzes it as the room.
 
 **ROOMS (presets):** `.room` files (small XML: name, author, type, styles, notes, every parameter except Output, and the room analysis) in `Documents/Eville/ROOMS/<pack>/`. Favorites are kept in `ROOMS/favorites.xml`. The built-in **Factory** pack is generated from synthesized sources by `plugin/Tools/make_factory_presets.sh` and compiled into the plugin.
 

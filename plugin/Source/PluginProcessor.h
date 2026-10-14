@@ -72,9 +72,17 @@ public:
     //==========================================================================
     // Room loading (call from the message thread)
     void loadRoomFile (const juce::File&);
+
+    // Record into ROOM: whatever comes into this track becomes the room.
+    static constexpr double maxRecordSeconds = 30.0;
+    void startRecording();
+    void stopRecording();
+    bool isRecording() const { return recordArmed.load(); }
+    double getRecordedSeconds() const;
+    float getRecordLevel() const { return recordLevel.load(); }
     void clearRoom();
 
-    enum class Status { empty, analyzing, ready, failed };
+    enum class Status { empty, recording, analyzing, ready, failed };
     Status getStatus() const { return status.load(); }
     juce::String getStatusMessage() const;
 
@@ -143,6 +151,8 @@ private:
     std::unique_ptr<Worker> worker;
 
     void analyseFile (const juce::File&);   // worker thread
+    void analyseAudio (const juce::AudioBuffer<float>&, double sampleRate, const juce::String& name); // worker thread
+    void finishRecording();                 // worker thread
     void rebuildRoom();                     // worker thread
     void setAnalysis (room::RoomAnalysis);  // any non-audio thread
 
@@ -184,6 +194,14 @@ private:
     std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
     std::atomic<float>* eqQParam[room::tone::numEqBands] {};
+
+    // Recording (buffer allocated in prepareToPlay; audio thread writes)
+    juce::AudioBuffer<float> recordBuf;
+    std::atomic<int> recordPos { 0 };
+    std::atomic<bool> recordArmed { false }, recordStopRequest { false }, recordFinished { false };
+    std::atomic<float> recordLevel { 0.0f };
+    juce::uint32 recordStopTime = 0;
+    int recordCount = 0;
 
     // Presets
     std::map<juce::String, float> currentParamValues() const;

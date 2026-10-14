@@ -3,7 +3,7 @@
 //
 //   room_tests                                           run all tests
 //   room_tests --screenshot OUT.png MODE ROOM_SRC TARGET  save a UI snapshot
-//        MODE = main | browser | save | advanced     [SCALE, e.g. 0.75]
+//        MODE = main | browser | save | advanced | record     [SCALE, e.g. 0.75]
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -659,6 +659,78 @@ namespace
     }
 
     //==========================================================================
+    // Record into ROOM
+
+    void waitUntil (std::function<bool()> cond, int maxMs = 8000)
+    {
+        for (int t = 0; t < maxMs && ! cond(); t += 10)
+            juce::Thread::sleep (10);
+    }
+
+    void testRecord (const juce::File& root, const juce::File& roomSource)
+    {
+        std::cout << "Record\n";
+        Rig rig (root);
+        auto& p = rig.proc;
+        double sr = 0;
+        const auto clap = readAudio (roomSource, sr);
+        check (std::abs (sr - Rig::sr) < 1.0, "test source is 48 kHz");
+
+        // Play the clap into the track while recording, then stop.
+        p.startRecording();
+        check (p.isRecording() && p.getStatus() == RoomAudioProcessor::Status::recording, "recording starts");
+        check (p.getCurrentPresetName().startsWith ("Recorded room"), "a recording starts a new, unsaved sound");
+        juce::AudioBuffer<float> io (2, 512);
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < clap.getNumSamples(); pos += 512)
+        {
+            io.clear();
+            const auto len = std::min (512, clap.getNumSamples() - pos);
+            for (int ch = 0; ch < 2; ++ch)
+                io.copyFrom (ch, 0, clap, std::min (ch, clap.getNumChannels() - 1), pos, len);
+            p.processBlock (io, midi);
+        }
+        p.stopRecording();
+        io.clear();
+        p.processBlock (io, midi);   // the audio thread sees the stop
+        waitUntil ([&] { return p.getStatus() == RoomAudioProcessor::Status::ready; });
+
+        check (! p.isRecording(), "recording stops");
+        check (p.getStatus() == RoomAudioProcessor::Status::ready, "the recording becomes the room");
+        const auto recorded = p.getAnalysis();
+        const auto direct = room::analyzeRoom (clap, sr);
+        std::cout << "    recorded " << juce::String (p.getRecordedSeconds(), 2) << " s: balance " << juce::String (recorded.balance, 3)
+                  << " vs file " << juce::String (direct.balance, 3) << ", decay " << juce::String (recorded.medianT60, 3)
+                  << " vs " << juce::String (direct.medianT60, 3) << " s\n";
+        check (std::abs (recorded.balance - direct.balance) < 0.02f
+                   && std::abs (recorded.medianT60 - direct.medianT60) < 0.05f * std::max (0.1f, direct.medianT60),
+               "a recorded room matches the same sound loaded as a file");
+        check (recorded.sourceName.startsWith ("Recorded room"), "recorded room is named");
+
+        // Stops by itself at 30 s.
+        p.startRecording();
+        juce::Random r (3);
+        for (int pos = 0; pos < (int) (31.0 * Rig::sr); pos += 512)
+        {
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 512; ++i)
+                    io.setSample (ch, i, (r.nextFloat() - 0.5f) * 0.2f);
+            p.processBlock (io, midi);
+        }
+        check (! p.isRecording(), "recording stops by itself at 30 s");
+        check (std::abs (p.getRecordedSeconds() - RoomAudioProcessor::maxRecordSeconds) < 0.02, "30 s were kept");
+        waitUntil ([&] { return p.getStatus() == RoomAudioProcessor::Status::ready; });
+        check (p.getStatus() == RoomAudioProcessor::Status::ready, "a 30 s recording is analysed");
+
+        // If the host isn't running audio, stopping still finishes cleanly.
+        p.startRecording();
+        p.stopRecording();
+        waitUntil ([&] { return ! p.isRecording() && p.getStatus() != RoomAudioProcessor::Status::analyzing; }, 3000);
+        check (! p.isRecording(), "stop works even with no audio running");
+        check (p.getStatus() == RoomAudioProcessor::Status::failed, "an empty recording is reported, not loaded");
+    }
+
+    //==========================================================================
 
     int screenshot (const juce::StringArray& args)
     {
@@ -680,6 +752,8 @@ namespace
         const auto t = readAudio (juce::File (args[4]), sr);
         RoomAudioProcessorEditor ed (p);
         ed.setVisible (true);
+        if (args[2] == "record")
+            p.startRecording();
         juce::MidiBuffer midi;
         juce::AudioBuffer<float> io (2, 512);
         for (int pos = 0; pos < 200000 && t.getNumSamples() > 1024; pos += 512)
@@ -755,6 +829,7 @@ int main (int argc, char* argv[])
     testSaveLoad (root, roomSource);
     testSpace();
     testAdvanced (root);
+    testRecord (root, roomSource);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

@@ -20,7 +20,9 @@ USE
 LAYOUT (top to bottom)
   Top bar    ROOMS preset bar, heart, Save | Advanced, Randomize,
              Dry/Wet, Out, Bypass
-  1 LOAD     drop a sound (or click to browse)
+  1 LOAD     drop a sound (or click to browse), or press the red record
+             button and play / clap / sing into the track (press again to
+             stop, max 30 s): that becomes the room
   2 ROOM     what ROOM measured (decay per band, tone), then
              Intensity  how strongly the room's character is applied
              Balance    tone (resonances + EQ) vs space (tail). "Auto" uses
