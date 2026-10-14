@@ -66,6 +66,8 @@ target_sources(ROOM PRIVATE
     Source/AdvancedPanel.cpp
     Source/ModSlider.cpp
     Source/LfoPanel.cpp
+    Source/EvilleLookAndFeel.cpp
+    Source/Screens.cpp
     Source/presets/PresetBrowser.cpp)
 target_include_directories(ROOM PRIVATE Source)
 target_compile_definitions(ROOM PUBLIC ${ROOM_DEFINITIONS})
@@ -78,9 +80,20 @@ juce_add_binary_data(ROOM_FactoryPresets
     NAMESPACE FactoryPresets
     SOURCES ${ROOM_FACTORY_PRESETS})
 
+# UI assets: fonts (Satoshi, Cormorant Garamond) and images for the faceplate.
+file(GLOB ROOM_UI_ASSETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.otf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.ttf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.jpg")
+juce_add_binary_data(ROOM_UiAssets
+    HEADER_NAME UiAssets.h
+    NAMESPACE UiAssets
+    SOURCES ${ROOM_UI_ASSETS})
+
 target_link_libraries(ROOM
     PRIVATE
         ROOM_FactoryPresets
+        ROOM_UiAssets
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -143,7 +156,7 @@ if (ROOM_BUILD_TESTS)
         $<TARGET_PROPERTY:ROOM,INCLUDE_DIRECTORIES>)
     target_compile_definitions(room_tests PRIVATE
         $<TARGET_PROPERTY:ROOM,COMPILE_DEFINITIONS>)
-    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets)
+    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets ROOM_UiAssets)
     set_target_properties(room_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/room_tests_artefacts/$<CONFIG>")
     if (UNIX AND NOT APPLE)

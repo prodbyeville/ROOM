@@ -1,9 +1,10 @@
 #include "ModSlider.h"
 #include "UiColours.h"
+#include "EvilleLookAndFeel.h"
 
 juce::Colour ModSlider::lfoColour (int lfo)
 {
-    return lfo == 0 ? juce::Colour (0xff4fd1c5) : juce::Colour (0xffc792ea);
+    return lfo == 0 ? juce::Colour (0xffd03a3a) : juce::Colour (0xff9a9288);   // crimson, warm grey
 }
 
 void ModSlider::setModTarget (room::Modulation* m, int targetIndex)
@@ -36,12 +37,8 @@ void ModSlider::timerCallback()
 
 ModSlider::RingGeometry ModSlider::ringGeometry() const
 {
-    auto& lf = const_cast<ModSlider*> (this)->getLookAndFeel();
-    const auto layout = lf.getSliderLayout (*const_cast<ModSlider*> (this));
-    const auto bounds = layout.sliderBounds.toFloat().reduced (10.0f);
-    const auto radius = std::min (bounds.getWidth(), bounds.getHeight()) / 2.0f;
-    const auto lineW = std::min (8.0f, radius * 0.5f);
-    return { bounds.getCentre(), radius + lineW * 0.15f + 3.0f };
+    const auto kb = EvilleLookAndFeel::knobBounds (*this);
+    return { kb.getCentre(), kb.getWidth() * 0.5f + 2.5f };
 }
 
 juce::Rectangle<float> ModSlider::depthDotBounds (int lfo) const
@@ -54,7 +51,7 @@ juce::Rectangle<float> ModSlider::depthDotBounds (int lfo) const
         if (mod->isAssigned (l, target))
             ++k;
     const auto geo = ringGeometry();
-    const auto x = geo.centre.x + geo.ringR + 12.0f;
+    const auto x = geo.centre.x + geo.ringR + 16.0f;
     if (x + 6.0f > (float) getWidth())
         return {};   // a tiny knob: use right-click or the LFO panel instead
     return juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ x, geo.centre.y - 6.0f + (float) k * 16.0f });
@@ -86,7 +83,7 @@ void ModSlider::paint (juce::Graphics& g)
 
     if (dropHighlight)
     {
-        g.setColour (Colours::text.withAlpha (0.25f));
+        g.setColour ((EvilleLookAndFeel::onBlack (*this) ? Colours::dustWhite : Colours::ink).withAlpha (0.25f));
         g.drawEllipse (juce::Rectangle<float> (ringR * 2.0f + 8.0f, ringR * 2.0f + 8.0f).withCentre (centre), 2.0f);
     }
 
@@ -110,7 +107,7 @@ void ModSlider::paint (juce::Graphics& g)
         const auto now = angleFor (base + mod->liveOffset[(size_t) target].load());
         const auto r = ringR;
         const juce::Point<float> dot (centre.x + r * std::sin (now), centre.y - r * std::cos (now));
-        g.setColour (Colours::text);
+        g.setColour (EvilleLookAndFeel::onBlack (*this) ? Colours::dustWhite : Colours::ink);
         g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (dot));
     }
 
@@ -135,7 +132,7 @@ void ModSlider::paint (juce::Graphics& g)
             g.fillRect (juce::Rectangle<float> (6.0f, 1.6f).withCentre (b.getCentre()).translated (0.0f, 0.0f));
         if (active)
         {
-            g.setColour (Colours::text);
+            g.setColour (EvilleLookAndFeel::onBlack (*this) ? Colours::dustWhite : Colours::ink);
             g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
             const auto txt = juce::String (juce::roundToInt (depth * 100.0f)) + "%";
             auto tr = juce::Rectangle<float> (40.0f, 14.0f).withCentre (b.getCentre()).translated (0.0f, -15.0f);

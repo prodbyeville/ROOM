@@ -101,6 +101,7 @@ public:
     std::function<void()> onClose;
     std::function<void (const juce::String& key)> onLoad;
     std::function<void (const juce::String& key, const PresetMeta&, const juce::String& pack)> onEdit;
+    std::function<void()> onOpenSoundFile;   // ROOMS only: build a room from a sound file
 
 private:
     // TableListBoxModel
@@ -132,7 +133,7 @@ private:
 
     juce::TextEditor search;
     juce::Label countLabel;
-    juce::TextButton closeButton { "Close" };
+    juce::TextButton closeButton { "close" }, soundButton { "build from a sound..." };
 
     // Sidebar
     juce::OwnedArray<juce::TextButton> packButtons;

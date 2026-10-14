@@ -342,6 +342,14 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     for (auto ch = std::max (numIn, 2); ch < numOut; ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
+    // Input level for the room screen (peak, falling slowly).
+    {
+        float peak = 0.0f;
+        for (int ch = 0; ch < std::min (numIn, buffer.getNumChannels()); ++ch)
+            peak = std::max (peak, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
+        inputLevel = std::max (peak, inputLevel.load() * 0.9f);
+    }
+
     // Record into ROOM: copy the incoming audio before any processing.
     if (recordArmed.load())
     {

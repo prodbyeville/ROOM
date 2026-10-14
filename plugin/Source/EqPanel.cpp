@@ -1,12 +1,14 @@
 #include "EqPanel.h"
 #include "UiColours.h"
+#include "Screens.h"
+#include "EvilleLookAndFeel.h"
 
 namespace
 {
     constexpr float kFMin = 20.0f, kFMax = 20000.0f;
     constexpr float kSpecTopDb = 0.0f, kSpecBottomDb = -84.0f;
     constexpr float kSpecTiltDbPerOct = 4.5f;   // so typical music looks roughly flat
-    constexpr float kNodeRadius = 9.0f;
+    constexpr float kNodeRadius = 5.0f;
 }
 
 EqPanel::EqPanel (RoomAudioProcessor& p) : proc (p)
@@ -23,7 +25,9 @@ EqPanel::~EqPanel() = default;
 
 juce::Rectangle<float> EqPanel::plotArea() const
 {
-    return getLocalBounds().toFloat().reduced (1.0f).withTrimmedBottom (18.0f).withTrimmedRight (28.0f);
+    // Inside the glass: room for dB numbers on the left and Hz numbers below.
+    return getLocalBounds().toFloat().reduced (4.0f).withTrimmedLeft (34.0f).withTrimmedBottom (20.0f)
+                                                     .withTrimmedTop (22.0f).withTrimmedRight (12.0f);
 }
 
 float EqPanel::xForFreq (float f) const
@@ -235,21 +239,19 @@ void EqPanel::resized() {}
 
 void EqPanel::paint (juce::Graphics& g)
 {
-    const auto bounds = getLocalBounds().toFloat();
-    g.setColour (Colours::panel);
-    g.fillRoundedRectangle (bounds, 8.0f);
+    const auto glass = Hw::drawScreen (g, getLocalBounds().toFloat());
 
     const auto r = plotArea();
     g.saveState();
     g.reduceClipRegion (r.toNearestInt());
 
     // --- grid ---
-    g.setColour (Colours::outline.withAlpha (0.6f));
+    g.setColour (Colours::screenDim.withAlpha (0.15f));
     for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         g.drawVerticalLine (juce::roundToInt (xForFreq (f)), r.getY(), r.getBottom());
     for (float db : { -12.0f, -6.0f, 6.0f, 12.0f })
         g.drawHorizontalLine (juce::roundToInt (yForEqDb (db)), r.getX(), r.getRight());
-    g.setColour (Colours::outline);
+    g.setColour (Colours::screenDim.withAlpha (0.3f));
     g.drawHorizontalLine (juce::roundToInt (yForEqDb (0.0f)), r.getX(), r.getRight());
 
     // --- live spectrum ---
@@ -263,11 +265,11 @@ void EqPanel::paint (juce::Graphics& g)
         }
         spec.lineTo (r.getRight(), r.getBottom());
         spec.closeSubPath();
-        g.setGradientFill (juce::ColourGradient (Colours::accent2.withAlpha (0.35f), 0.0f, r.getY(),
-                                                 Colours::accent2.withAlpha (0.05f), 0.0f, r.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (Colours::screenDim.withAlpha (0.30f), 0.0f, r.getY(),
+                                                 Colours::screenDim.withAlpha (0.04f), 0.0f, r.getBottom(), false));
         g.fillPath (spec);
-        g.setColour (Colours::accent2.withAlpha (0.45f));
-        g.strokePath (spec, juce::PathStrokeType (1.0f));
+        g.setColour (Colours::screenDim.withAlpha (0.35f));
+        g.strokePath (spec, juce::PathStrokeType (0.8f));
     }
 
     // --- Auto EQ reduction (hangs down from the 0 dB line) ---
@@ -313,10 +315,9 @@ void EqPanel::paint (juce::Graphics& g)
         fill.lineTo (r.getRight(), yForEqDb (0.0f));
         fill.lineTo (r.getX(), yForEqDb (0.0f));
         fill.closeSubPath();
-        g.setColour (Colours::text.withAlpha (0.06f));
+        g.setColour (Colours::screenText.withAlpha (0.05f));
         g.fillPath (fill);
-        g.setColour (Colours::text.withAlpha (0.9f));
-        g.strokePath (curve, juce::PathStrokeType (2.0f));
+        Hw::strokeGlow (g, curve, Colours::screenText.withAlpha (0.9f), 1.4f);
     }
 
     g.restoreState();
@@ -327,29 +328,32 @@ void EqPanel::paint (juce::Graphics& g)
         const auto pos = nodePosition (b);
         const auto active = std::abs (bands[b].gainDb) > 0.05f;
         const auto highlighted = b == hoverBand || b == dragBand;
-        const auto col = Colours::band[b];
-        const auto rad = kNodeRadius + (highlighted ? 2.0f : 0.0f);
-        g.setColour (col.withAlpha (active || highlighted ? 0.9f : 0.45f));
+        const auto rad = kNodeRadius + (highlighted ? 1.5f : 0.0f);
+        const auto col = highlighted ? Colours::crimson.brighter (0.2f) : Colours::screenText;
+        if (highlighted)
+        {
+            g.setColour (Colours::crimson.withAlpha (0.3f));
+            g.fillEllipse (juce::Rectangle<float> (rad * 4, rad * 4).withCentre (pos));
+        }
+        g.setColour (col.withAlpha (active || highlighted ? 1.0f : 0.55f));
         g.fillEllipse (juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos));
-        g.setColour (Colours::background.withAlpha (0.8f));
-        g.drawEllipse (juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos), 1.5f);
-        g.setColour (Colours::background);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (juce::String (b + 1), juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos),
-                    juce::Justification::centred);
+        g.setColour (Colours::glass);
+        g.drawEllipse (juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos), 1.2f);
     }
 
-    // --- labels ---
-    g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (10.0f));
-    for (auto [f, t] : { std::pair { 50.0f, "50" }, { 100.0f, "100" }, { 200.0f, "200" }, { 500.0f, "500" },
-                         { 1000.0f, "1k" }, { 2000.0f, "2k" }, { 5000.0f, "5k" }, { 10000.0f, "10k" } })
-        g.drawText (t, juce::Rectangle<float> (xForFreq (f) - 15.0f, r.getBottom() + 2.0f, 30.0f, 14.0f),
+    // --- printed numbers ---
+    g.setColour (Colours::screenDim);
+    g.setFont (Fonts::mono (10.0f));
+    for (auto [f, t] : { std::pair { 20.0f, "20" }, { 100.0f, "100" }, { 1000.0f, "1k" }, { 10000.0f, "10k" }, { 20000.0f, "20k" } })
+        g.drawText (t, juce::Rectangle<float> (juce::jlimit (r.getX(), r.getRight() - 30.0f, xForFreq (f) - 15.0f), r.getBottom() + 3.0f, 30.0f, 14.0f),
                     juce::Justification::centred);
-    for (float db : { -12.0f, -6.0f, 0.0f, 6.0f, 12.0f })
+    for (float db : { -12.0f, 0.0f, 12.0f })
         g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db),
-                    juce::Rectangle<float> (r.getRight() + 2.0f, yForEqDb (db) - 7.0f, 26.0f, 14.0f),
+                    juce::Rectangle<float> (glass.getX() + 6.0f, yForEqDb (db) - 7.0f, 28.0f, 14.0f),
                     juce::Justification::centredLeft);
+    g.setColour (Colours::screenText);
+    g.setFont (Fonts::mono (12.0f));
+    g.drawText ("eq", juce::Rectangle<float> (glass.getX() + 9.0f, glass.getY() + 4.0f, 40.0f, 16.0f), juce::Justification::centredLeft);
 
     // --- readout for the band under the mouse ---
     const auto shown = dragBand >= 0 ? dragBand : hoverBand;
@@ -357,20 +361,21 @@ void EqPanel::paint (juce::Graphics& g)
     {
         const auto& b = bands[shown];
         juce::String s;
-        s << "Band " << (shown + 1) << "   "
+        s << "band " << (shown + 1) << "   "
           << (b.freqHz >= 1000.0f ? juce::String (b.freqHz / 1000.0f, 2) + " kHz" : juce::String (juce::roundToInt (b.freqHz)) + " Hz")
           << "   " << (b.gainDb > 0 ? "+" : "") << juce::String (b.gainDb, 1) << " dB";
         if (b.type == room::EqBand::Type::peak)
             s << "   Q " << juce::String (b.q, 2);
-        g.setColour (Colours::text);
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawText (s, r.reduced (10.0f, 6.0f).removeFromTop (16.0f), juce::Justification::topLeft);
+        g.setColour (Colours::screenText);
+        g.setFont (Fonts::mono (11.0f));
+        g.drawText (s, juce::Rectangle<float> (r.getX() + 30.0f, glass.getY() + 4.0f, r.getWidth() - 30.0f, 16.0f), juce::Justification::centredRight);
     }
     else
     {
-        g.setColour (Colours::dim.withAlpha (0.8f));
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawText ("drag bands  |  scroll = width  |  double-click = reset",
-                    r.reduced (10.0f, 6.0f).removeFromTop (16.0f), juce::Justification::topLeft);
+        g.setColour (Colours::screenDim.withAlpha (0.8f));
+        g.setFont (Fonts::mono (10.0f));
+        g.drawText ("drag bands  (scroll = width, double-click = reset)",
+                    juce::Rectangle<float> (r.getX() + 30.0f, glass.getY() + 4.0f, r.getWidth() - 30.0f, 16.0f), juce::Justification::centredRight);
     }
+    Hw::drawScreenOverlay (g, glass);
 }

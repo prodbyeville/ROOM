@@ -1,28 +1,37 @@
 #include "LfoPanel.h"
 #include "UiColours.h"
+#include "Screens.h"
+#include "EvilleLookAndFeel.h"
 
 LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
 {
-    shape.addItemList (room::Lfo::shapeNames(), 1);
+    {
+        juce::StringArray shapes;
+        for (auto& n : room::Lfo::shapeNames())
+            shapes.add (n.toLowerCase());
+        shape.addItemList (shapes, 1);
+    }
     division.addItemList (room::Lfo::divisionNames(), 1);
     for (auto* c : { &shape, &division })
     {
-        c->setColour (juce::ComboBox::backgroundColourId, Colours::background);
+        c->setColour (juce::ComboBox::backgroundColourId, Colours::glass);
         c->setColour (juce::ComboBox::outlineColourId, Colours::outline);
-        c->setColour (juce::ComboBox::textColourId, Colours::text);
-        c->setColour (juce::ComboBox::arrowColourId, Colours::dim);
+        c->setColour (juce::ComboBox::textColourId, Colours::screenText);
+        c->setColour (juce::ComboBox::arrowColourId, Colours::screenDim);
         addAndMakeVisible (c);
     }
-    rate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, 18);
-    rate.setColour (juce::Slider::trackColourId, ModSlider::lfoColour (lfo));
-    rate.setColour (juce::Slider::backgroundColourId, Colours::background);
-    rate.setColour (juce::Slider::thumbColourId, Colours::text);
+    rate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 62, 18);
+    rate.setColour (juce::Slider::textBoxTextColourId, Colours::screenText);
     rate.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (rate);
     for (auto* b : { &sync, &retrig })
+    {
+        b->getProperties().set ("style", "led");
+        b->getProperties().set ("surface", "black");
         addAndMakeVisible (b);
-    sync.setTooltip ("Lock the rate to the song tempo");
-    retrig.setTooltip ("Restart the LFO when you press play");
+    }
+    sync.setTooltip ("lock the rate to the song tempo");
+    retrig.setTooltip ("restart the lfo when you press play");
 
     shapeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, ParamIDs::lfoShape (lfo), shape);
     divAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, ParamIDs::lfoDiv (lfo), division);
@@ -36,16 +45,16 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
 
 juce::Rectangle<int> LfoModule::handleArea() const
 {
-    return getLocalBounds().reduced (10, 8).removeFromTop (26).removeFromLeft (150);
+    return getLocalBounds().removeFromTop (28).removeFromLeft (getWidth() / 2 + 6);
 }
 
 static juce::String targetName (int t)
 {
     static const std::map<juce::String, juce::String> names {
-        { "intensity", "Intensity" }, { "balance", "Balance" }, { "tail", "Tail" }, { "space", "Space" },
-        { "mix", "Dry/Wet" }, { "output", "Out" }, { "tape", "Tape" }, { "autoEq", "Auto EQ" },
-        { "preDelay", "Pre-delay" }, { "size", "Size" }, { "damping", "Damping" }, { "duck", "Ducking" },
-        { "duckRelease", "Release" } };
+        { "intensity", "intensity" }, { "balance", "balance" }, { "tail", "tail" }, { "space", "space" },
+        { "mix", "wet" }, { "output", "out" }, { "tape", "tape" }, { "autoEq", "auto eq" },
+        { "preDelay", "pre-delay" }, { "size", "size" }, { "damping", "damping" }, { "duck", "ducking" },
+        { "duckRelease", "release" } };
     const auto id = room::Modulation::targetIds()[t];
     const auto it = names.find (id);
     return it != names.end() ? it->second : id;
@@ -59,7 +68,7 @@ static juce::String chipText (int target, float depth)
 std::vector<LfoModule::TargetChip> LfoModule::targetChips() const
 {
     std::vector<TargetChip> out;
-    const juce::Font font (juce::FontOptions (11.0f, juce::Font::bold));
+    const auto font = Fonts::sans (11.5f);
     int x = targetsArea.getX(), y = targetsArea.getY();
     for (auto& slot : proc.modulation.slots[(size_t) lfo])
         if (const auto t = slot.target.load(); t >= 0)
@@ -165,53 +174,55 @@ void LfoModule::timerCallback()
 void LfoModule::paint (juce::Graphics& g)
 {
     const auto col = ModSlider::lfoColour (lfo);
-    g.setColour (Colours::panel);
-    g.fillRoundedRectangle (getLocalBounds().toFloat(), 8.0f);
 
-    // Drag handle
+    // Drag handle: a small key with a grip
     const auto h = handleArea().toFloat();
-    g.setColour (col.withAlpha (0.18f));
-    g.fillRoundedRectangle (h, 6.0f);
+    Hw::drawKey (g, h.reduced (0.5f), false, false, false);
     g.setColour (col);
-    g.drawRoundedRectangle (h.reduced (0.5f), 6.0f, 1.0f);
     for (int k = 0; k < 3; ++k)   // grip dots
         for (int j = 0; j < 2; ++j)
-            g.fillEllipse (h.getX() + 9.0f + j * 5.0f, h.getY() + 7.0f + k * 5.0f, 3.0f, 3.0f);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText ("LFO " + juce::String (lfo + 1), h.withTrimmedLeft (24.0f), juce::Justification::centredLeft);
-    g.setColour (Colours::dim);
-    g.setFont (juce::FontOptions (10.0f));
-    g.drawText ("drag to a knob", h.withTrimmedRight (8.0f), juce::Justification::centredRight);
+            g.fillEllipse (h.getX() + 9.0f + j * 5.0f, h.getY() + 8.0f + k * 4.5f, 2.6f, 2.6f);
+    g.setColour (Colours::dustWhite);
+    g.setFont (Fonts::sans (13.0f, Fonts::bold));
+    g.drawText ("lfo " + juce::String (lfo + 1), h.withTrimmedLeft (24.0f), juce::Justification::centredLeft);
+    g.setColour (Colours::screenDim);
+    g.setFont (Fonts::sans (10.0f));
+    g.drawText ("drag to a knob", h.withTrimmedRight (7.0f).withTrimmedBottom (2.0f), juce::Justification::centredRight);
 
-    // Scope: the last couple of seconds of this LFO
-    const auto w = waveArea.toFloat();
-    g.setColour (Colours::background);
-    g.fillRoundedRectangle (w, 5.0f);
+    // Scope: the last couple of seconds of this LFO, on glass
+    const auto glass = Hw::drawScreen (g, waveArea.toFloat());
+    const auto w = glass.reduced (8.0f, 10.0f);
+    g.setColour (Colours::screenDim.withAlpha (0.18f));
+    g.drawHorizontalLine (juce::roundToInt (w.getCentreY()), w.getX(), w.getRight());
     juce::Path p;
     for (size_t i = 0; i < trail.size(); ++i)
     {
         const auto x = w.getX() + w.getWidth() * (float) i / (float) (trail.size() - 1);
-        const auto y = w.getCentreY() - trail[i] * (w.getHeight() * 0.42f);
+        const auto y = w.getCentreY() - trail[i] * (w.getHeight() * 0.45f);
         if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
     }
-    g.setColour (col.withAlpha (0.9f));
-    g.strokePath (p, juce::PathStrokeType (1.6f));
-    g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ w.getRight() - 1.0f, w.getCentreY() - trail.back() * (w.getHeight() * 0.42f) }));
+    Hw::strokeGlow (g, p, Colours::screenText.withAlpha (0.9f), 1.4f);
+    const auto dotPos = juce::Point<float> (w.getRight() - 1.0f, w.getCentreY() - trail.back() * (w.getHeight() * 0.45f));
+    g.setColour (Colours::crimson.withAlpha (0.35f));
+    g.fillEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (dotPos));
+    g.setColour (Colours::crimson);
+    g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (dotPos));
+    Hw::drawScreenOverlay (g, glass);
 
     // Target chips: dot + knob + amount. Drag up/down to change the amount.
     const auto chips = targetChips();
     if (chips.empty())
     {
-        g.setColour (Colours::dim);
-        g.setFont (juce::FontOptions (11.0f));
-        g.drawFittedText ("Drag the LFO handle onto any knob (or right-click a knob).", targetsArea,
+        g.setColour (Colours::screenDim);
+        g.setFont (Fonts::sans (11.5f));
+        g.drawFittedText ("drag the handle onto any knob (or right-click a knob)", targetsArea,
                           juce::Justification::centredLeft, 2);
     }
     for (auto& c : chips)
     {
         const auto depth = proc.modulation.depthOf (lfo, c.target);
         const auto b = c.bounds.toFloat();
-        g.setColour (c.target == dragTarget ? col.withAlpha (0.28f) : Colours::background);
+        g.setColour (c.target == dragTarget ? col.withAlpha (0.28f) : Colours::glass);
         g.fillRoundedRectangle (b, 10.0f);
         g.setColour (col.withAlpha (0.7f));
         g.drawRoundedRectangle (b.reduced (0.5f), 10.0f, 1.0f);
@@ -222,29 +233,181 @@ void LfoModule::paint (juce::Graphics& g)
         amt.addPieSegment (dot, 0.0f, juce::MathConstants<float>::twoPi * std::abs (depth), 0.0f);
         g.setColour (col);
         g.fillPath (amt);
-        g.setColour (Colours::text);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setColour (Colours::dustWhite);
+        g.setFont (Fonts::sans (11.5f));
         g.drawText (chipText (c.target, depth), b.withTrimmedLeft (22.0f), juce::Justification::centredLeft);
     }
 }
 
 void LfoModule::resized()
 {
-    auto r = getLocalBounds().reduced (10, 8);
-    auto top = r.removeFromTop (26);
-    top.removeFromLeft (158);
-    shape.setBounds (top.removeFromLeft (std::min (130, top.getWidth())));
-    r.removeFromTop (6);
+    auto r = getLocalBounds();
+    auto top = r.removeFromTop (28);
+    top.removeFromLeft (handleArea().getWidth() + 8);
+    shape.setBounds (top.reduced (0, 2));
+    r.removeFromTop (8);
 
-    auto controls = r.removeFromTop (30);
-    sync.setBounds (controls.removeFromLeft (64));
-    retrig.setBounds (controls.removeFromRight (70));
-    controls.removeFromRight (8);
-    auto rateArea = controls;
-    rate.setBounds (rateArea);
-    division.setBounds (rateArea.withSizeKeepingCentre (std::min (rateArea.getWidth(), 120), 24).withX (rateArea.getX()));
+    waveArea = r.removeFromTop (std::max (60, std::min (130, r.getHeight() - 110)));
+    r.removeFromTop (10);
 
-    r.removeFromTop (6);
-    targetsArea = r.removeFromBottom (44);
-    waveArea = r.reduced (0, 2);
+    auto controls = r.removeFromTop (26);
+    sync.setBounds (controls.removeFromLeft (58));
+    retrig.setBounds (controls.removeFromRight (62));
+    controls.removeFromRight (6);
+    rate.setBounds (controls);
+    division.setBounds (controls.withSizeKeepingCentre (std::min (controls.getWidth(), 110), 24));
+
+    r.removeFromTop (10);
+    targetsArea = r;
+}
+
+//==============================================================================
+// Compact card
+
+LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
+{
+    for (auto* b : { &sync, &retrig })
+    {
+        b->getProperties().set ("style", "led");
+        b->getProperties().set ("surface", "black");
+        addAndMakeVisible (b);
+    }
+    syncAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoSync (lfo), sync);
+    retrigAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoRetrig (lfo), retrig);
+    setTooltip ("lfo " + juce::String (lfo + 1) + ": click to open, drag onto a knob to assign");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    trail.assign (90, 0.0f);
+    startTimerHz (30);
+}
+
+juce::Rectangle<int> LfoCard::screenArea() const
+{
+    return getLocalBounds().withTrimmedBottom (30);
+}
+
+void LfoCard::resized()
+{
+    auto r = getLocalBounds().removeFromBottom (24);
+    sync.setBounds (r.removeFromLeft (r.getWidth() / 2).withSizeKeepingCentre (58, 22));
+    retrig.setBounds (r.withSizeKeepingCentre (62, 22));
+}
+
+void LfoCard::timerCallback()
+{
+    std::rotate (trail.begin(), trail.begin() + 1, trail.end());
+    trail.back() = proc.modulation.liveValue[(size_t) lfo].load();
+    repaint (screenArea());
+}
+
+void LfoCard::paint (juce::Graphics& g)
+{
+    const auto glass = Hw::drawScreen (g, screenArea().toFloat());
+    auto inner = glass.reduced (9.0f, 6.0f);
+    g.setColour (Colours::screenText);
+    g.setFont (Fonts::mono (12.0f));
+    g.drawText ("lfo " + juce::String (lfo + 1), inner.removeFromTop (16.0f), juce::Justification::centredLeft);
+
+    // What it moves
+    juce::StringArray parts;
+    for (auto& slot : proc.modulation.slots[(size_t) lfo])
+        if (const auto t = slot.target.load(); t >= 0)
+            parts.add (targetName (t) + " " + juce::String (juce::roundToInt (slot.depth.load() * 100.0f)) + "%");
+    auto textRow = inner.removeFromBottom (14.0f);
+    g.setColour (parts.isEmpty() ? Colours::screenDim : Colours::screenText);
+    g.setFont (Fonts::mono (10.5f));
+    g.drawText (parts.isEmpty() ? juce::String ("drag onto a knob")
+                                : parts.size() <= 2 ? parts.joinIntoString ("  ") : parts[0] + "  +" + juce::String (parts.size() - 1),
+                textRow, juce::Justification::centred, true);
+
+    // Waveform
+    auto w = inner.reduced (2.0f, 4.0f);
+    juce::Path p;
+    for (size_t i = 0; i < trail.size(); ++i)
+    {
+        const auto x = w.getX() + w.getWidth() * (float) i / (float) (trail.size() - 1);
+        const auto y = w.getCentreY() - trail[i] * w.getHeight() * 0.45f;
+        if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+    }
+    Hw::strokeGlow (g, p, Colours::screenText.withAlpha (0.85f), 1.2f, 0.8f);
+    const auto dot = juce::Point<float> (w.getRight(), w.getCentreY() - trail.back() * w.getHeight() * 0.45f);
+    g.setColour (Colours::crimson);
+    g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (dot));
+    Hw::drawScreenOverlay (g, glass);
+}
+
+void LfoCard::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragged || e.getDistanceFromDragStart() < 6)
+        return;
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        if (! container->isDragAndDropActive())
+        {
+            dragged = true;
+            juce::Image chip (juce::Image::ARGB, 64, 22, true);
+            {
+                juce::Graphics cg (chip);
+                cg.setColour (ModSlider::lfoColour (lfo));
+                cg.fillRoundedRectangle (0.0f, 0.0f, 64.0f, 22.0f, 6.0f);
+                cg.setColour (Colours::dustWhite);
+                cg.setFont (Fonts::sans (12.0f, Fonts::bold));
+                cg.drawText ("lfo " + juce::String (lfo + 1), 0, 0, 64, 22, juce::Justification::centred);
+            }
+            container->startDragging (ModSlider::dragDescription (lfo), this, juce::ScaledImage (chip), false);
+        }
+}
+
+void LfoCard::mouseUp (const juce::MouseEvent& e)
+{
+    if (! dragged && screenArea().contains (e.getPosition()) && onOpen)
+        onOpen (lfo);
+    dragged = false;
+}
+
+//==============================================================================
+// Full controls
+
+LfoPanel::LfoPanel (RoomAudioProcessor& p) : lfo1 (p, 0), lfo2 (p, 1)
+{
+    addAndMakeVisible (lfo1);
+    addChildComponent (lfo2);
+    for (auto* b : { &tab1, &tab2, &done })
+    {
+        b->getProperties().set ("key", "dark");
+        addAndMakeVisible (b);
+    }
+    tab1.onClick = [this] { showLfo (0); };
+    tab2.onClick = [this] { showLfo (1); };
+    done.onClick = [this] { if (onDone) onDone(); };
+    done.setTooltip ("back to the advanced knobs");
+    showLfo (0);
+}
+
+void LfoPanel::showLfo (int l)
+{
+    shown = l;
+    lfo1.setVisible (l == 0);
+    lfo2.setVisible (l == 1);
+    tab1.setToggleState (l == 0, juce::dontSendNotification);
+    tab2.setToggleState (l == 1, juce::dontSendNotification);
+    repaint();
+}
+
+void LfoPanel::paint (juce::Graphics& g)
+{
+    // A small LED over the open tab
+    for (auto* b : { &tab1, &tab2 })
+        Hw::drawLed (g, { (float) b->getRight() - 9.0f, (float) b->getY() + 9.0f }, b->getToggleState(), 2.5f);
+}
+
+void LfoPanel::resized()
+{
+    auto r = getLocalBounds();
+    auto tabs = r.removeFromTop (30);
+    tab1.setBounds (tabs.removeFromLeft (70));
+    tabs.removeFromLeft (6);
+    tab2.setBounds (tabs.removeFromLeft (70));
+    done.setBounds (tabs.removeFromRight (64));
+    r.removeFromTop (12);
+    lfo1.setBounds (r);
+    lfo2.setBounds (r);
 }

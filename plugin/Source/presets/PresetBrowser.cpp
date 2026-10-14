@@ -1,5 +1,7 @@
 #include "PresetBrowser.h"
 #include "../UiColours.h"
+#include "../Screens.h"
+#include "../EvilleLookAndFeel.h"
 
 namespace room::presets
 {
@@ -55,7 +57,7 @@ namespace
     void styleButton (juce::TextButton& b, bool primary = false)
     {
         b.setColour (juce::TextButton::buttonColourId, primary ? Colours::accent : Colours::panel);
-        b.setColour (juce::TextButton::textColourOffId, primary ? Colours::background : Colours::text);
+        b.setColour (juce::TextButton::textColourOffId, Colours::text);
         b.setColour (juce::ComboBox::outlineColourId, Colours::outline);
     }
 
@@ -358,6 +360,11 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     styleButton (closeButton);
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (closeButton);
+    styleButton (soundButton);
+    soundButton.setTooltip ("analyze any sound file and make it the room");
+    soundButton.onClick = [this] { if (onOpenSoundFile) onOpenSoundFile(); };
+    if (kind == Kind::room)
+        addAndMakeVisible (soundButton);
 
     // Sidebar
     styleLabel (packsLabel, "PACKS");
@@ -768,7 +775,8 @@ void PresetBrowser::paint (juce::Graphics& g)
     // Title
     g.setColour (Colours::text);
     g.setFont (uiFont (20.0f, true));
-    g.drawText (kind == Kind::room ? "ROOMS" : "STUDIOS", 20, 0, 120, 56, juce::Justification::centredLeft);
+    g.setFont (Fonts::sans (24.0f, Fonts::bold));
+    g.drawText (kind == Kind::room ? "rooms" : "studios", 20, 0, 120, 56, juce::Justification::centredLeft);
 
     // Panels
     g.setColour (Colours::panel);
@@ -883,6 +891,11 @@ void PresetBrowser::resized()
     top.removeFromLeft (110);
     closeButton.setBounds (top.removeFromRight (70));
     top.removeFromRight (10);
+    if (kind == Kind::room)
+    {
+        soundButton.setBounds (top.removeFromRight (160));
+        top.removeFromRight (10);
+    }
     countLabel.setBounds (top.removeFromRight (190));
     top.removeFromRight (10);
     search.setBounds (top);
@@ -940,13 +953,21 @@ void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
 
 PresetBar::PresetBar (const juce::String& l) : label (l)
 {
-    for (auto* b : { &prev, &next, &save })
+    for (auto* b : { &prev, &next })
     {
-        styleButton (*b);
+        b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        b->setColour (juce::TextButton::textColourOffId, Colours::screenText);
+        b->setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+        b->setButtonText ({});
         addAndMakeVisible (b);
     }
-    heart.setColour (juce::TextButton::buttonColourId, Colours::panel);
-    addAndMakeVisible (heart);
+    save.getProperties().set ("key", "light");
+    heart.getProperties().set ("key", "light");
+    save.setButtonText ({});
+    for (auto* b : { &save, &heart })
+        addAndMakeVisible (b);
+    save.setTooltip ("save this sound as a STUDIO (room + every knob + lfos)");
+    heart.setTooltip ("favorite");
     prev.onClick = [this] { if (onPrev) onPrev(); };
     next.onClick = [this] { if (onNext) onNext(); };
     save.onClick = [this] { if (onSave) onSave(); };
@@ -969,55 +990,45 @@ void PresetBar::setPreset (const juce::String& n, bool mod, bool fav, bool canFa
 juce::Rectangle<int> PresetBar::nameArea() const
 {
     auto r = getLocalBounds();
-    r.removeFromLeft (30);
-    r.removeFromRight (30 + 6 + 34 + 6 + 64);
-    return r.reduced (4, 0);
+    r.removeFromRight (2 * (40 + 10));
+    return r;
 }
 
 void PresetBar::paint (juce::Graphics& g)
 {
-    const auto r = nameArea().toFloat();
-    g.setColour (Colours::panel);
-    g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (Colours::outline);
-    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-
-    auto tr = nameArea().reduced (10, 0);
-    g.setColour (Colours::accent);
-    g.setFont (uiFont (11.0f, true));
-    const auto lw = juce::GlyphArrangement::getStringWidthInt (uiFont (11.0f, true), label) + 8;
-    g.drawText (label, tr.removeFromLeft (lw), juce::Justification::centredLeft);
-    g.setColour (Colours::outline);
-    g.drawVerticalLine (tr.getX(), r.getY() + 7.0f, r.getBottom() - 7.0f);
-    tr.removeFromLeft (10);
-    g.setColour (name.isEmpty() ? Colours::dim : Colours::text);
-    g.setFont (uiFont (14.0f, name.isNotEmpty()));
-    g.drawText ((name.isEmpty() ? juce::String ("Init") : name) + (modified && name.isNotEmpty() ? " *" : ""), tr.withTrimmedRight (16),
-                juce::Justification::centredLeft, true);
-    // little "open" chevron
-    juce::Path chev;
-    const auto cx = (float) tr.getRight() - 8.0f, cy = r.getCentreY();
-    chev.addTriangle (cx - 4.0f, cy - 2.0f, cx + 4.0f, cy - 2.0f, cx, cy + 3.0f);
-    g.setColour (Colours::dim);
-    g.fillPath (chev);
+    const auto win = nameArea().toFloat();
+    const auto glass = Hw::drawScreen (g, win);
+    g.setFont (Fonts::mono (14.0f));
+    g.setColour (Colours::screenText);
+    const auto shown = label + " / " + (name.isEmpty() ? juce::String ("init") : name) + (modified && name.isNotEmpty() ? " *" : "");
+    g.drawText (shown, glass.reduced (34.0f, 0.0f), juce::Justification::centred, true);
+    g.setColour (Colours::screenText.withAlpha (0.8f));
+    g.drawText ("<", prev.getBounds().toFloat(), juce::Justification::centred);
+    g.drawText (">", next.getBounds().toFloat(), juce::Justification::centred);
+    Hw::drawScreenOverlay (g, glass);
 }
 
 void PresetBar::paintOverChildren (juce::Graphics& g)
 {
-    // heart on top of its button
-    const auto hb = heart.getBounds().toFloat().reduced (9.0f, 8.0f);
-    drawHeart (g, hb, favorite, ! canFavorite ? Colours::outline : favorite ? Colours::reduction : Colours::dim);
+    // Heart and disk glyphs on their keys
+    const auto hb = heart.getBounds().toFloat().reduced (11.0f, 10.0f).translated (0.0f, -1.0f);
+    drawHeart (g, hb, favorite, ! canFavorite ? Colours::inkDim.withAlpha (0.5f) : favorite ? Colours::crimson : Colours::ink);
+    const auto sb = save.getBounds().toFloat().reduced (12.0f, 11.0f).translated (0.0f, -1.0f);
+    g.setColour (Colours::ink);
+    g.drawRoundedRectangle (sb, 2.0f, 1.6f);
+    g.fillRect (sb.getX() + sb.getWidth() * 0.25f, sb.getY(), sb.getWidth() * 0.5f, sb.getHeight() * 0.35f);
+    g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.58f, sb.getWidth() * 0.56f, sb.getHeight() * 0.42f, 1.2f);
 }
 
 void PresetBar::resized()
 {
     auto r = getLocalBounds();
-    prev.setBounds (r.removeFromLeft (30));
-    save.setBounds (r.removeFromRight (64));
-    r.removeFromRight (6);
-    heart.setBounds (r.removeFromRight (34));
-    r.removeFromRight (6);
-    next.setBounds (r.removeFromRight (30));
+    save.setBounds (r.removeFromRight (40));
+    r.removeFromRight (10);
+    heart.setBounds (r.removeFromRight (40));
+    r.removeFromRight (10);
+    prev.setBounds (r.removeFromLeft (34).reduced (0, 4));
+    next.setBounds (r.removeFromRight (34).reduced (0, 4));
 }
 
 void PresetBar::mouseUp (const juce::MouseEvent& e)

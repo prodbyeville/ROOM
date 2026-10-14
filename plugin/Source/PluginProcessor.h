@@ -101,6 +101,9 @@ public:
     /** Goes up by one every time the analysis changes, so the UI knows to redraw. */
     int getAnalysisVersion() const { return analysisVersion.load(); }
 
+    /** Peak level of the incoming audio, for the room screen (any thread). */
+    float getInputLevel() const { return inputLevel.load(); }
+
     /** Balance detected from the loaded room (used when Auto is on). */
     float getDetectedBalance() const { return detectedBalance.load(); }
 
@@ -214,6 +217,7 @@ private:
     std::atomic<int> analysisVersion { 0 };
     std::atomic<Status> status { Status::empty };
     std::atomic<float> detectedBalance { 0.5f };
+    std::atomic<float> inputLevel { 0.0f };
     std::atomic<double> currentSampleRate { 0.0 };
 
     std::atomic<float>* intensityParam = nullptr;

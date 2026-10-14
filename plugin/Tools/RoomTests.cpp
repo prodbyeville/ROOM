@@ -1099,8 +1099,16 @@ namespace
 
         {
             RoomAudioProcessorEditor ed (p);
-            auto* lfoPanel = findChild<LfoPanel> (ed);
-            check (lfoPanel != nullptr && lfoPanel->isVisible(), "Advanced opens on the MODULATION tab");
+            auto* adv = findChild<AdvancedPanel> (ed);
+            auto* card = findChild<LfoCard> (ed);
+            check (adv != nullptr && adv->isVisible() && card != nullptr && card->isVisible() && ! adv->isShowingLfos(),
+                   "advanced is always on screen, with the two lfo cards");
+            if (card != nullptr && adv != nullptr)
+            {
+                card->mouseUp (mouseAt (*card, { 20.0f, 20.0f }, { 20.0f, 20.0f }));
+                check (adv->isShowingLfos(), "clicking an lfo card opens its controls in place");
+                adv->showModulationTab (false);
+            }
         }
 
         // A knob's depth dot: drag up for more, down for less, double-click removes.
@@ -1283,11 +1291,10 @@ namespace
             }
         };
         findAndShow (ed);
-        if (mode == "advanced" || mode == "lfo" || mode == "info")
+        if (mode == "lfo")
             ed.setAdvanced (true);
         if (mode == "info")
-            if (auto* adv = findChild<AdvancedPanel> (ed))
-                adv->showModulationTab (false);
+            ed.showRoomInfo (true);
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
             ed.setSize (juce::roundToInt (RoomAudioProcessorEditor::baseWidth * args[5].getFloatValue()),
                         juce::roundToInt (RoomAudioProcessorEditor::baseHeight * args[5].getFloatValue()));
