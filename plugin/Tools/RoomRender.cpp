@@ -40,7 +40,9 @@ int main (int argc, char* argv[])
     {
         std::cerr << "usage: room_render SOURCE TARGET OUT [--intensity X] [--mix X] [--balance auto|X] [--tail S]\n"
                      "                   [--tape X] [--auto X] [--space X] [--eq band:freq:gain:q,...] [--raw]\n"
-                     "                   [--save-preset FILE.room --name N --type T --styles a,b --notes TEXT]\n";
+                     "                   [--room-name R]   (name the room itself)\n"
+                     "                   [--save-preset FILE.studio --name N --type T --styles a,b --made-for a,b --notes TEXT]\n"
+                     "                   [--save-room FILE.room --room-type T --room-styles a,b --room-notes TEXT]\n";
         return 1;
     }
 
@@ -96,7 +98,34 @@ int main (int argc, char* argv[])
         std::cout << " " << juce::String (p.freqHz, 1) << "Hz/+" << juce::String (p.gainDb, 1) << "dB/Q" << juce::String (p.q, 1);
     std::cout << "\n";
 
-    // Optional: also write these settings + this room as a ROOM preset.
+    // The room's own name (and, for the built-in content, where it came from).
+    const auto roomName = option ("--room-name", "");
+    if (roomName.isNotEmpty())
+    {
+        analysis.sourceName = roomName;
+        analysis.origin = "Factory";
+    }
+
+    // Optional: write just the room as a ROOM.
+    if (const auto roomPath = option ("--save-room", ""); roomPath.isNotEmpty())
+    {
+        presets::PresetMeta meta;
+        meta.name = roomName.isNotEmpty() ? roomName : juce::File (roomPath).getFileNameWithoutExtension();
+        meta.author = option ("--author", "Eville");
+        meta.type = option ("--room-type", "Room");
+        meta.styles = juce::StringArray::fromTokens (option ("--room-styles", ""), ",", "");
+        meta.notes = option ("--room-notes", "");
+        meta.created = juce::Time::getCurrentTime();
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (roomPath);
+        if (! presets::save (presets::makeRoom (meta, analysis.toValueTree()), file))
+        {
+            std::cerr << "Couldn't write room " << file.getFullPathName() << "\n";
+            return 1;
+        }
+        std::cout << "Saved room " << file.getFullPathName() << "\n";
+    }
+
+    // Optional: also write these settings + this room as a STUDIO.
     if (const auto presetPath = option ("--save-preset", ""); presetPath.isNotEmpty())
     {
         presets::PresetMeta meta;
@@ -105,6 +134,8 @@ int main (int argc, char* argv[])
         meta.type = option ("--type", "Room");
         meta.styles = juce::StringArray::fromTokens (option ("--styles", ""), ",", "");
         meta.notes = option ("--notes", "");
+        meta.madeFor = juce::StringArray::fromTokens (option ("--made-for", ""), ",", "");
+        meta.roomName = roomName;
         meta.created = juce::Time::getCurrentTime();
 
         std::map<juce::String, float> params {
@@ -120,7 +151,8 @@ int main (int argc, char* argv[])
             params["eq" + n + "Q"] = bands[b].q;
         }
         auto a = analysis;
-        a.sourceName = meta.name;
+        if (roomName.isEmpty())
+            a.sourceName = meta.name;
         const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (presetPath);
         if (! presets::save (presets::makePreset (meta, params, a.toValueTree()), file))
         {

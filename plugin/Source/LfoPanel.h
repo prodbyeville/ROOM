@@ -5,8 +5,10 @@
 
 // The two LFOs (Advanced screen, MODULATION tab). Each module:
 //   [:: LFO 1  drag me]  shape  [SYNC] rate-or-division  [RETRIG]
-//   live waveform with a moving dot, and the list of knobs it moves.
-// Drag the handle onto any knob to assign the LFO to it.
+//   live waveform with a moving dot, and a chip for every knob it moves.
+// Drag the handle onto any knob to assign the LFO to it. Drag a chip up/down
+// to change that amount (Shift = fine), double-click it to remove, right-click
+// for invert / remove.
 
 class LfoModule : public juce::Component,
                   private juce::Timer
@@ -18,11 +20,17 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+    struct TargetChip { int target; juce::Rectangle<int> bounds; };
+    /** One chip per knob this LFO moves (public for tests). */
+    std::vector<TargetChip> targetChips() const;
 
 private:
     void timerCallback() override;
     juce::Rectangle<int> handleArea() const;
-    juce::String targetsText() const;
+    int chipAt (juce::Point<int>) const;
 
     RoomAudioProcessor& proc;
     const int lfo;
@@ -34,6 +42,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rateAtt;
     juce::Rectangle<int> waveArea, targetsArea;
     std::vector<float> trail;   // recent LFO values for the scope
+    int dragTarget = -1;
+    float dragStartDepth = 0.0f;
 };
 
 class LfoPanel : public juce::Component

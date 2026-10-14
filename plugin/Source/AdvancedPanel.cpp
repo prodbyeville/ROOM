@@ -3,7 +3,7 @@
 
 AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
 {
-    for (auto* t : { &infoTab, &modTab })
+    for (auto* t : { &modTab, &infoTab })
     {
         t->setClickingTogglesState (true);
         t->setRadioGroupId (4711);
@@ -15,8 +15,14 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     }
     infoTab.onClick = [this] { showModulationTab (false); };
     modTab.onClick = [this] { showModulationTab (true); };
-    addChildComponent (lfoPanel);
-    infoTab.setToggleState (true, juce::dontSendNotification);
+    addAndMakeVisible (lfoPanel);
+    modTab.setToggleState (true, juce::dontSendNotification);
+
+    clearMod.setColour (juce::TextButton::buttonColourId, Colours::panel);
+    clearMod.setColour (juce::TextButton::textColourOffId, Colours::dim.brighter (0.2f));
+    clearMod.setTooltip ("Remove every LFO assignment and reset both LFOs. Your knobs stay where they are.");
+    clearMod.onClick = [this] { proc.clearModulation(); refreshModulation(); repaint(); };
+    addAndMakeVisible (clearMod);
 
     setupKnob (preDelay, ParamIDs::preDelay, "PRE-DELAY");
     setupKnob (size, ParamIDs::size, "SIZE");
@@ -66,6 +72,7 @@ void AdvancedPanel::showModulationTab (bool mod)
     modTab.setToggleState (mod, juce::dontSendNotification);
     infoTab.setToggleState (! mod, juce::dontSendNotification);
     lfoPanel.setVisible (mod);
+    clearMod.setVisible (mod);
     repaint();
 }
 
@@ -90,8 +97,9 @@ void AdvancedPanel::resized()
     freezeLabel.setBounds (col.removeFromTop (18));
     freeze.setBounds (col.withSizeKeepingCentre (std::min (col.getWidth(), 100), 40).translated (0, -8));
     auto tabs = r.removeFromTop (26);
-    infoTab.setBounds (tabs.removeFromLeft (110));
     modTab.setBounds (tabs.removeFromLeft (120));
+    infoTab.setBounds (tabs.removeFromLeft (110));
+    clearMod.setBounds (tabs.removeFromRight (96).reduced (0, 1));
     r.removeFromTop (4);
     infoArea = r;
     lfoPanel.setBounds (r);
@@ -181,12 +189,23 @@ void AdvancedPanel::paint (juce::Graphics& g)
         g.drawText ("none detected", r.removeFromTop (16), juce::Justification::centredLeft);
         return;
     }
-    juce::String s;
-    for (auto& pk : analysis.peaks)
-        s << (pk.freqHz >= 1000.0f ? juce::String (pk.freqHz / 1000.0f, 2) + " kHz" : juce::String (juce::roundToInt (pk.freqHz)) + " Hz")
-          << " +" << juce::String (pk.gainDb, 1) << " dB Q" << juce::String (pk.q, 1) << "     ";
+    // One cell per resonance, three to a row, so they never run together.
     g.setColour (Colours::text);
-    g.drawFittedText (s.trim(), r.removeFromTop (30), juce::Justification::topLeft, 2);
+    const auto peakW = r.getWidth() / 3;
+    auto rowR = r.removeFromTop (16);
+    int col = 0;
+    for (auto& pk : analysis.peaks)
+    {
+        if (col == 3)
+        {
+            rowR = r.removeFromTop (16);
+            col = 0;
+        }
+        const auto txt = (pk.freqHz >= 1000.0f ? juce::String (pk.freqHz / 1000.0f, 2) + " kHz" : juce::String (juce::roundToInt (pk.freqHz)) + " Hz")
+                         + "   +" + juce::String (pk.gainDb, 1) + " dB   Q " + juce::String (pk.q, 1);
+        g.drawText (txt, rowR.removeFromLeft (peakW), juce::Justification::centredLeft, true);
+        ++col;
+    }
 
     g.setColour (Colours::dim);
     g.setFont (juce::FontOptions (10.0f));

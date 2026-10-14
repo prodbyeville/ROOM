@@ -6,8 +6,8 @@
 
 // The ADVANCED screen. It takes the place of the EQ tier:
 //   top row:    PRE-DELAY  SIZE  DAMPING  DUCKING  RELEASE  [FREEZE]
-//   below:      [ROOM INFO | MODULATION] tabs: everything ROOM measured about
-//               the room, or the two LFOs
+//   below:      [MODULATION | ROOM INFO] tabs: the two LFOs (shown first), or
+//               everything ROOM measured about the room
 
 class AdvancedPanel : public juce::Component
 {
@@ -41,6 +41,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 
     juce::TextButton infoTab { "ROOM INFO" }, modTab { "MODULATION" };
+    juce::TextButton clearMod { "Clear LFOs" };
     LfoPanel lfoPanel;
 
     room::RoomAnalysis analysis;

@@ -3,7 +3,7 @@
 //
 //   room_tests                                           run all tests
 //   room_tests --screenshot OUT.png MODE ROOM_SRC TARGET  save a UI snapshot
-//        MODE = main | browser | save | advanced | record     [SCALE, e.g. 0.75]
+//        MODE = main | browser | save | rooms | roomsave | advanced | record | lfo   [SCALE, e.g. 0.75]
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -80,7 +80,8 @@ namespace
         check (lib.countInPack (PresetLibrary::factoryPack) >= 10, "factory presets are present");
         check (lib.getUnreadableCount() == 0, "all factory presets parse");
         check (lib.getPacks()[0] == "Factory" && lib.getPacks()[1] == "User", "pack order: Factory, User, ...");
-        check (root.getChildFile ("User").isDirectory(), "User pack folder is created");
+        const auto studios = root.getChildFile ("STUDIOS");
+        check (studios.getChildFile ("User").isDirectory(), "User pack folder is created");
 
         const auto factoryKey = lib.getEntries().front().key;
         check (! lib.remove (factoryKey), "factory presets can't be deleted");
@@ -147,12 +148,12 @@ namespace
         proc.getLibrary().setFavorite (factoryKey, false);
 
         // Damaged files are skipped, not fatal
-        root.getChildFile ("User").getChildFile ("broken.room").replaceWithText ("<ROOM_PRESET this is not xml");
-        root.getChildFile ("User").getChildFile ("wrong.room").replaceWithText ("<SOMETHING_ELSE/>");
+        studios.getChildFile ("User").getChildFile ("broken.studio").replaceWithText ("<ROOM_PRESET this is not xml");
+        studios.getChildFile ("User").getChildFile ("wrong.studio").replaceWithText ("<SOMETHING_ELSE/>");
         proc.getLibrary().rescan();
         check (proc.getLibrary().getUnreadableCount() == 2, "damaged / foreign files are counted as unreadable");
-        root.getChildFile ("User").getChildFile ("broken.room").deleteFile();
-        root.getChildFile ("User").getChildFile ("wrong.room").deleteFile();
+        studios.getChildFile ("User").getChildFile ("broken.studio").deleteFile();
+        studios.getChildFile ("User").getChildFile ("wrong.studio").deleteFile();
 
         // Pack names
         check (! PresetLibrary::isValidPackName ("Factory"), "can't create a pack called Factory");
@@ -192,7 +193,10 @@ namespace
         proc.loadRoomFile (roomSource);
         waitForAnalysis (proc);
         check (proc.getAnalysis().valid, "dropped room analysed");
-        check (proc.getCurrentPresetKey().isEmpty(), "dropping a sound starts a new, unsaved preset");
+        check (proc.getCurrentPresetKey() == "Factory/Big Hall" && proc.isPresetModified(),
+               "dropping a sound swaps the room: the STUDIO stays, marked modified");
+        check (proc.getAnalysis().sourceName == roomSource.getFileNameWithoutExtension() && proc.getAnalysis().origin == "File",
+               "a dropped room is named after the file");
 
         juce::Random rng (7);
         for (auto* p : proc.getParameters())
@@ -214,7 +218,7 @@ namespace
         juce::String key, err;
         check (lib.save (proc.capturePreset (meta), "User", false, key, err), "save: " + err);
         check (key == "User/My Test Room", "saved key");
-        check (root.getChildFile ("User/My Test Room.room").existsAsFile(), "file written");
+        check (root.getChildFile ("STUDIOS/User/My Test Room.studio").existsAsFile(), "file written");
         check (! lib.save (proc.capturePreset (meta), "User", false, key, err) && err.contains ("already exists"),
                "saving over an existing name needs overwrite");
         check (lib.save (proc.capturePreset (meta), "User", true, key, err), "overwrite works");
@@ -267,10 +271,10 @@ namespace
         const auto exportDir = root.getSiblingFile ("rooms_export");
         exportDir.deleteRecursively();
         check (lib.exportPack ("Eville", exportDir), "export pack");
-        check (exportDir.getChildFile ("Eville/Renamed Room.room").existsAsFile(), "exported file exists");
-        check (lib.exportPack ("Factory", exportDir) && exportDir.getChildFile ("Factory/Big Hall.room").existsAsFile(),
+        check (exportDir.getChildFile ("Eville/Renamed Room.studio").existsAsFile(), "exported file exists");
+        check (lib.exportPack ("Factory", exportDir) && exportDir.getChildFile ("Factory/Big Hall.studio").existsAsFile(),
                "factory pack can be exported");
-        const auto imported = lib.importFiles ({ exportDir.getChildFile ("Eville/Renamed Room.room") }, "Eville");
+        const auto imported = lib.importFiles ({ exportDir.getChildFile ("Eville/Renamed Room.studio") }, "Eville");
         check (imported == 1 && lib.countInPack ("Eville") == 2, "import with a name clash keeps both");
         exportDir.deleteRecursively();
 
@@ -703,7 +707,7 @@ namespace
         // Play the clap into the track while recording, then stop.
         p.startRecording();
         check (p.isRecording() && p.getStatus() == RoomAudioProcessor::Status::recording, "recording starts");
-        check (p.getCurrentPresetName().startsWith ("Recorded room"), "a recording starts a new, unsaved sound");
+        check (p.getCurrentRoomKey().isEmpty(), "a recording is a new, unsaved room");
         juce::AudioBuffer<float> io (2, 512);
         juce::MidiBuffer midi;
         for (int pos = 0; pos < clap.getNumSamples(); pos += 512)
@@ -880,6 +884,340 @@ namespace
     }
 
     //==========================================================================
+    // ROOMS (room only) and STUDIOS (full presets)
+
+    void testRoomsAndStudios (const juce::File& root, const juce::File& roomSource)
+    {
+        std::cout << "ROOMS + STUDIOS\n";
+        RoomAudioProcessor proc;
+        proc.setPresetRoot (root);
+        proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        auto& rooms = proc.getRoomLibrary();
+        auto& studios = proc.getLibrary();
+
+        check (rooms.getKind() == Kind::room && studios.getKind() == Kind::studio, "two libraries");
+        check (rooms.countInPack (PresetLibrary::factoryPack) >= 6, "factory ROOMS are present");
+        bool roomsKnown = true;
+        for (auto& e : studios.getEntries())
+            if (e.factory)
+                roomsKnown = roomsKnown && rooms.find ("Factory/" + e.meta.roomName) != nullptr && e.meta.madeFor.size() > 0;
+        check (roomsKnown, "every factory STUDIO names a factory ROOM and has Made for tags");
+        check (rooms.getUnreadableCount() == 0, "factory ROOMS parse");
+
+        // Auto tags
+        bool allTagged = true;
+        for (auto& e : rooms.getEntries())
+        {
+            allTagged = allTagged && allDecayTags().contains (e.tags.decay) && allToneTags().contains (e.tags.tone)
+                        && e.tags.source == "Factory";
+            std::cout << "    " << e.meta.name << ": " << e.tags.decay << " " << juce::String (e.tags.medianT60, 2)
+                      << " s, " << e.tags.tone << " (" << juce::String (e.tags.toneTiltDb, 1) << " dB)\n";
+        }
+        check (allTagged, "every factory ROOM has decay / tone / source tags");
+        if (auto* hall = rooms.find ("Factory/Clap Hall"))
+            check (hall->tags.decay == "Long" || hall->tags.decay == "Medium", "Clap Hall is not tagged Short");
+        // Tone tag follows the room's EQ: tilt a real room's spectrum and the tag follows.
+        if (auto* hall = rooms.find ("Factory/Clap Hall"))
+        {
+            const auto a = rooms.loadPreset (*hall).getChildWithName ("ROOM_ANALYSIS");
+            auto tilted = [&a] (float dbPerOct)
+            {
+                auto r = room::RoomAnalysis::fromValueTree (a);
+                for (size_t i = 0; i < r.toneCurveDb.size(); ++i)
+                    r.toneCurveDb[i] += dbPerOct * std::log2 (r.toneFreqsHz[i] / 1000.0f);
+                return autoTags (r.toValueTree(), "File").tone;
+            };
+            check (tilted (-8.0f) == "Dark" && tilted (6.0f) == "Bright", "tone tag: darker room = Dark, brighter = Bright");
+            check (hall->tags.source == "Factory", "factory ROOMS are tagged Factory");
+        }
+        PresetLibrary::Query q;
+        q.autoTags = { "Short" };
+        for (auto i : rooms.query (q))
+            check (rooms.getEntries()[(size_t) i].tags.decay == "Short", "decay filter");
+        q.autoTags = { "Short", "Long", "Dark" };
+        for (auto i : rooms.query (q))
+        {
+            const auto& t = rooms.getEntries()[(size_t) i].tags;
+            check ((t.decay == "Short" || t.decay == "Long") && t.tone == "Dark", "auto tag groups: any within, all across");
+        }
+        q = {};
+        q.sortBy = PresetLibrary::SortColumn::decay;
+        const auto byDecay = rooms.query (q);
+        bool decayOrdered = true;
+        for (size_t i = 1; i < byDecay.size(); ++i)
+            decayOrdered = decayOrdered && rooms.getEntries()[(size_t) byDecay[i - 1]].tags.medianT60
+                                               <= rooms.getEntries()[(size_t) byDecay[i]].tags.medianT60;
+        check (decayOrdered, "sort ROOMS by decay");
+
+        // Start from a STUDIO, then swap in a dropped room and save it as a ROOM.
+        proc.applyPreset (studios.loadPreset (*studios.find ("Factory/Big Hall")), "Factory/Big Hall");
+        setParam (proc, ParamIDs::tape, 0.66f);
+        setParam (proc, ParamIDs::intensity, 1.3f);
+        proc.modulation.assign (0, room::Modulation::targetIndex (ParamIDs::space), 0.4f);
+        proc.loadRoomFile (roomSource);
+        waitForAnalysis (proc);
+        const auto droppedRoom = analysisXml (proc);
+        check (proc.getAnalysis().origin == "File", "a dropped room's source is File");
+
+        PresetMeta meta;
+        meta.name = "Test Clap Room";
+        meta.type = "Small Space";
+        meta.styles = { "Tight", "Dirty" };
+        juce::String key, err;
+        check (rooms.save (proc.captureRoom (meta), "User", false, key, err), "save ROOM: " + err);
+        check (root.getChildFile ("ROOMS/User/Test Clap Room.room").existsAsFile(), "ROOM file written to ROOMS");
+        const auto roomTree = rooms.loadPreset (*rooms.find (key));
+        check (roomTree.hasType ("ROOM") && ! roomTree.getChildWithName ("PARAMS").isValid()
+                   && ! roomTree.getChildWithName ("MODULATION").isValid(),
+               "a ROOM holds only the room (no knobs, no LFOs)");
+        const auto* re = rooms.find (key);
+        check (re != nullptr && re->meta.type == "Small Space" && re->meta.styles.contains ("Dirty")
+                   && re->tags.source == "File" && re->tags.decay.isNotEmpty(),
+               "ROOM tags + auto tags stored");
+
+        // Load a different room, then the saved ROOM: only the room changes.
+        proc.applyRoom (rooms.loadPreset (*rooms.find ("Factory/Glass Bottle")), "Factory/Glass Bottle");
+        check (analysisXml (proc) != droppedRoom, "another ROOM swaps the room");
+        const auto knobsBefore = paramValue (proc, ParamIDs::tape) + paramValue (proc, ParamIDs::intensity);
+        proc.applyRoom (rooms.loadPreset (*rooms.find (key)), key);
+        check (analysisXml (proc) == droppedRoom, "loading a ROOM restores that room exactly");
+        check (std::abs (paramValue (proc, ParamIDs::tape) + paramValue (proc, ParamIDs::intensity) - knobsBefore) < 1e-4f,
+               "loading a ROOM leaves the knobs alone");
+        check (proc.modulation.isAssigned (0, room::Modulation::targetIndex (ParamIDs::space)), "loading a ROOM keeps the LFOs");
+        check (proc.getAnalysis().sourceName == "Test Clap Room" && proc.getCurrentRoomKey() == key, "room takes the ROOM's name");
+        check (proc.getCurrentPresetKey() == "Factory/Big Hall" && proc.isPresetModified(),
+               "the STUDIO stays loaded and shows as modified");
+
+        // Save the whole thing as a STUDIO: it remembers the room's name and Made for tags.
+        PresetMeta sm;
+        sm.name = "Clap Vox";
+        sm.madeFor = { "Vocals", "Drums" };
+        sm.styles = { "Warm" };
+        check (studios.save (proc.capturePreset (sm), "User", false, key, err), "save STUDIO: " + err);
+        check (root.getChildFile ("STUDIOS/User/Clap Vox.studio").existsAsFile(), "STUDIO file written to STUDIOS");
+        const auto* se = studios.find (key);
+        check (se != nullptr && se->meta.roomName == "Test Clap Room" && se->meta.madeFor == juce::StringArray { "Vocals", "Drums" },
+               "STUDIO stores its room's name and Made for");
+        proc.setCurrentPreset (key, sm.name);
+        check (! proc.isPresetModified(), "saved STUDIO is clean");
+        q = {};
+        q.madeFor = { "Vocals" };
+        bool foundVox = false;
+        for (auto i : studios.query (q))
+            foundVox = foundVox || studios.getEntries()[(size_t) i].key == key;
+        check (foundVox, "Made for filter");
+        proc.applyPreset (studios.loadPreset (*studios.find ("Factory/Glass Bottle")), "Factory/Glass Bottle");
+        proc.applyPreset (studios.loadPreset (*se), key);
+        check (analysisXml (proc) == droppedRoom && proc.getAnalysis().sourceName == "Test Clap Room",
+               "loading the STUDIO brings back its room and room name");
+
+        // Project state remembers the ROOM key and the randomize choices.
+        proc.setCurrentRoomKey ("User/Test Clap Room");
+        proc.randomizeMask = RoomAudioProcessor::randomLfos | RoomAudioProcessor::randomEq;
+        juce::MemoryBlock state;
+        proc.getStateInformation (state);
+        RoomAudioProcessor proc2;
+        proc2.setPresetRoot (root);
+        proc2.setStateInformation (state.getData(), (int) state.getSize());
+        check (proc2.getCurrentRoomKey() == "User/Test Clap Room", "project remembers the ROOM");
+        check (proc2.randomizeMask == (RoomAudioProcessor::randomLfos | RoomAudioProcessor::randomEq),
+               "project remembers what Randomize touches");
+
+        rooms.remove ("User/Test Clap Room");
+        studios.remove (key);
+
+        // Migration: an old ROOMS folder full of full presets.
+        const auto oldBase = root.getSiblingFile ("legacy");
+        oldBase.deleteRecursively();
+        auto legacyPreset = studios.loadPreset (*studios.find ("Factory/Dark Hall"));
+        auto lm = readMeta (legacyPreset);
+        lm.name = "My Old Hall";
+        lm.roomName = {};
+        writeMeta (legacyPreset, lm);
+        check (save (legacyPreset, oldBase.getChildFile ("ROOMS/User/My Old Hall.room")), "write an old-style preset");
+        auto noRoom = legacyPreset.createCopy();
+        noRoom.removeChild (noRoom.getChildWithName ("ROOM_ANALYSIS"), nullptr);
+        lm.name = "Knobs Only";
+        writeMeta (noRoom, lm);
+        save (noRoom, oldBase.getChildFile ("ROOMS/Eville/Knobs Only.room"));
+        oldBase.getChildFile ("ROOMS/favorites.xml").replaceWithText (
+            "<ROOMS_FAVORITES><FAVORITE key=\"User/My Old Hall\"/></ROOMS_FAVORITES>");
+
+        RoomAudioProcessor old;
+        old.setPresetRoot (oldBase);
+        auto& oldStudios = old.getLibrary();
+        auto& oldRooms = old.getRoomLibrary();
+        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("Eville/Knobs Only") != nullptr,
+               "old presets became STUDIOS");
+        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("User/My Old Hall")->favorite,
+               "favorites carried over to STUDIOS");
+        check (oldRooms.find ("User/My Old Hall") != nullptr && oldRooms.find ("User/My Old Hall")->favorite
+                   && oldRooms.find ("User/My Old Hall")->meta.type == readMeta (legacyPreset).type,
+               "their rooms became ROOMS (same name, type, favorite)");
+        check (oldRooms.find ("Eville/Knobs Only") == nullptr && oldRooms.getUnreadableCount() == 0,
+               "a preset without a room only becomes a STUDIO");
+        const auto studioCount = oldStudios.getEntries().size();
+        check (PresetLibrary::migrateLegacy (oldBase.getChildFile ("ROOMS"), oldBase.getChildFile ("STUDIOS")) == 0,
+               "migration runs once (nothing left to convert)");
+        old.setPresetRoot (oldBase);
+        check (old.getLibrary().getEntries().size() == studioCount, "no duplicates after a second run");
+        oldBase.deleteRecursively();
+    }
+
+    //==========================================================================
+    // Modulation UI: default tab, depth dots, LFO chips, Clear, Randomize groups
+
+    juce::MouseEvent mouseAt (juce::Component& c, juce::Point<float> pos, juce::Point<float> downPos,
+                              juce::ModifierKeys mods = juce::ModifierKeys::leftButtonModifier, int clicks = 1)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), pos, mods,
+                                 juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &c, &c, now, downPos, now, clicks, pos != downPos);
+    }
+
+    template <typename T>
+    T* findChild (juce::Component& root)
+    {
+        for (auto* c : root.getChildren())
+        {
+            if (auto* t = dynamic_cast<T*> (c))
+                return t;
+            if (auto* t = findChild<T> (*c))
+                return t;
+        }
+        return nullptr;
+    }
+
+    void testModulationUi (const juce::File& root)
+    {
+        std::cout << "Modulation UI + Randomize\n";
+        using M = room::Modulation;
+        RoomAudioProcessor p;
+        p.setPresetRoot (root);
+
+        {
+            RoomAudioProcessorEditor ed (p);
+            auto* lfoPanel = findChild<LfoPanel> (ed);
+            check (lfoPanel != nullptr && lfoPanel->isVisible(), "Advanced opens on the MODULATION tab");
+        }
+
+        // A knob's depth dot: drag up for more, down for less, double-click removes.
+        ModSlider knob;
+        knob.setBounds (0, 0, 190, 130);
+        const auto t = M::targetIndex (ParamIDs::tail);
+        knob.setModTarget (&p.modulation, t);
+        check (knob.depthDotBounds (0).isEmpty(), "no dot before an LFO is assigned");
+        p.modulation.assign (0, t, 0.25f);
+        p.modulation.assign (1, t, 0.5f);
+        const auto dot = knob.depthDotBounds (0).getCentre();
+        const auto dot2 = knob.depthDotBounds (1).getCentre();
+        check (! knob.depthDotBounds (0).isEmpty() && dot2.y > dot.y, "a dot per assigned LFO, stacked");
+        const auto knobValue = knob.getValue();
+        knob.mouseDown (mouseAt (knob, dot, dot));
+        knob.mouseDrag (mouseAt (knob, dot.translated (0.0f, -30.0f), dot));
+        knob.mouseUp (mouseAt (knob, dot.translated (0.0f, -30.0f), dot));
+        check (std::abs (p.modulation.depthOf (0, t) - 0.45f) < 0.01f, "dragging the dot up 30 px adds 20%");
+        check (std::abs (knob.getValue() - knobValue) < 1e-9, "dragging a dot doesn't move the knob");
+        knob.mouseDown (mouseAt (knob, dot, dot, juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier));
+        knob.mouseDrag (mouseAt (knob, dot.translated (0.0f, 60.0f), dot, juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier));
+        knob.mouseUp (mouseAt (knob, dot.translated (0.0f, 60.0f), dot));
+        check (std::abs (p.modulation.depthOf (0, t) - 0.35f) < 0.01f, "Shift-drag is finer (60 px = 10%)");
+        knob.mouseDown (mouseAt (knob, dot, dot));
+        knob.mouseDrag (mouseAt (knob, dot.translated (0.0f, 400.0f), dot));
+        knob.mouseUp (mouseAt (knob, dot.translated (0.0f, 400.0f), dot));
+        check (std::abs (p.modulation.depthOf (0, t) + 1.0f) < 1e-4f, "depth stops at -100%");
+        knob.mouseDoubleClick (mouseAt (knob, dot2, dot2, juce::ModifierKeys::leftButtonModifier, 2));
+        check (! p.modulation.isAssigned (1, t) && p.modulation.isAssigned (0, t), "double-click a dot removes that LFO");
+
+        ModSlider tiny;
+        tiny.setBounds (0, 0, 38, 38);
+        tiny.setModTarget (&p.modulation, t);
+        check (tiny.depthDotBounds (0).isEmpty(), "tiny knobs (top bar) skip the dot");
+
+        // LFO panel chips
+        {
+            LfoModule module (p, 0);
+            module.setBounds (0, 0, 420, 150);
+            p.modulation.assign (0, M::targetIndex (ParamIDs::mix), 0.3f);
+            const auto chips = module.targetChips();
+            check (chips.size() == 2, "a chip per knob the LFO moves");
+            juce::Point<float> c;
+            for (auto& ch : chips)
+                if (ch.target == M::targetIndex (ParamIDs::mix))
+                    c = ch.bounds.getCentre().toFloat();
+            module.mouseDown (mouseAt (module, c, c));
+            module.mouseDrag (mouseAt (module, c.translated (0.0f, -15.0f), c));
+            module.mouseUp (mouseAt (module, c.translated (0.0f, -15.0f), c));
+            check (std::abs (p.modulation.depthOf (0, M::targetIndex (ParamIDs::mix)) - 0.4f) < 0.01f,
+                   "dragging a chip changes that amount");
+        }
+
+        // Clear: assignments gone, LFOs back to default, room knobs untouched.
+        setParam (p, ParamIDs::tail, 3.3f);
+        setParam (p, ParamIDs::lfoShape (1), 4.0f);
+        setParam (p, ParamIDs::lfoRate (0), 7.0f);
+        setParam (p, ParamIDs::lfoSync (1), 1.0f);
+        p.clearModulation();
+        check (! p.modulation.anyAssigned(), "Clear removes every assignment");
+        bool lfoDefaults = true;
+        for (int l = 0; l < M::numLfos; ++l)
+            for (const auto& id : { ParamIDs::lfoRate (l), ParamIDs::lfoSync (l), ParamIDs::lfoDiv (l),
+                                    ParamIDs::lfoShape (l), ParamIDs::lfoRetrig (l) })
+                lfoDefaults = lfoDefaults && std::abs (p.apvts.getParameter (id)->getValue()
+                                                       - p.apvts.getParameter (id)->getDefaultValue()) < 1e-6f;
+        check (lfoDefaults, "Clear resets both LFOs to default");
+        check (std::abs (paramValue (p, ParamIDs::tail) - 3.3f) < 0.02f, "Clear leaves the room knobs alone");
+
+        // Randomize groups: each only touches its own knobs.
+        auto snapshot = [&p]
+        {
+            std::map<juce::String, float> m;
+            for (auto* prm : p.getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                    m[rp->paramID] = rp->getValue();
+            return m;
+        };
+        const std::map<int, juce::StringArray> owns {
+            { RoomAudioProcessor::randomRoom, { "intensity", "balanceAuto", "balance", "tail", "space" } },
+            { RoomAudioProcessor::randomAdvanced, { "preDelay", "size", "damping", "duck", "duckRelease" } },
+            { RoomAudioProcessor::randomEq, { "eq1Gain", "eq2Gain", "eq3Gain", "eq4Gain", "eq5Gain" } },
+            { RoomAudioProcessor::randomFinish, { "tape", "autoEq" } },
+            { RoomAudioProcessor::randomLfos, { "lfo1Shape", "lfo1Sync", "lfo1Div", "lfo1Rate", "lfo2Shape", "lfo2Sync", "lfo2Div", "lfo2Rate" } },
+        };
+        juce::Random r (5);
+        for (auto& [bit, ids] : owns)
+        {
+            p.randomizeMask = bit;
+            bool onlyOwn = true, movedAny = false;
+            for (int k = 0; k < 6; ++k)
+            {
+                const auto before = snapshot();
+                p.randomizeKnobs (r);
+                for (auto& [id, v] : snapshot())
+                {
+                    const auto moved = std::abs (v - before.at (id)) > 1e-6f;
+                    if (moved && ! ids.contains (id))
+                    {
+                        onlyOwn = false;
+                        std::cout << "    group " << bit << " moved " << id << "\n";
+                    }
+                    movedAny = movedAny || moved;
+                }
+            }
+            check (onlyOwn && movedAny, "Randomize group " + juce::String (bit) + " only moves its own knobs");
+        }
+        p.randomizeMask = 0;
+        const auto before = snapshot();
+        p.randomizeKnobs (r);
+        check (snapshot() == before, "Randomize with nothing ticked does nothing");
+        check (RoomAudioProcessor().randomizeMask == RoomAudioProcessor::randomDefault
+                   && (RoomAudioProcessor::randomDefault & RoomAudioProcessor::randomLfos) == 0,
+               "by default Randomize leaves the LFOs alone");
+    }
+
+    //==========================================================================
 
     int screenshot (const juce::StringArray& args)
     {
@@ -894,6 +1232,7 @@ namespace
             p.applyPreset (lib.loadPreset (*e), e->key);
         lib.setFavorite ("Factory/Dark Hall", true);
         lib.setFavorite ("Factory/Glass Bottle", true);
+        p.getRoomLibrary().setFavorite ("Factory/Clap Hall", true);
         waitForAnalysis (p);
         juce::Thread::sleep (300);
 
@@ -911,6 +1250,8 @@ namespace
             p.modulation.assign (1, M::targetIndex (ParamIDs::size), 0.25f);
             p.modulation.assign (1, M::targetIndex (ParamIDs::intensity), -0.2f);
             setParam (p, ParamIDs::lfoShape (1), 6.0f);
+            p.modulation.assign (0, M::targetIndex (ParamIDs::preDelay), 0.5f);
+            p.modulation.assign (1, M::targetIndex (ParamIDs::preDelay), -0.3f);
         }
         juce::MidiBuffer midi;
         juce::AudioBuffer<float> io (2, 512);
@@ -928,18 +1269,25 @@ namespace
         {
             for (auto* child : c.getChildren())
             {
-                if (mode == "browser")
-                    if (auto* b = dynamic_cast<PresetBrowser*> (child)) { b->setVisible (true); b->toFront (false); }
+                if (mode == "browser" || mode == "rooms")
+                    if (auto* b = dynamic_cast<PresetBrowser*> (child))
+                        if ((b->getKind() == Kind::room) == (mode == "rooms")) { b->setVisible (true); b->toFront (false); }
                 if (mode == "save")
                     if (auto* bar = dynamic_cast<PresetBar*> (child)) if (bar->onSave) bar->onSave();
+                if (mode == "roomsave")
+                    if (auto* ib = dynamic_cast<IconButton*> (child))
+                        if (ib->getTooltip().startsWith ("Save this room") && ib->onClick) ib->onClick();
                 if (mode == "lfo")
                     if (auto* adv = dynamic_cast<AdvancedPanel*> (child)) adv->showModulationTab (true);
                 findAndShow (*child);
             }
         };
         findAndShow (ed);
-        if (mode == "advanced" || mode == "lfo")
+        if (mode == "advanced" || mode == "lfo" || mode == "info")
             ed.setAdvanced (true);
+        if (mode == "info")
+            if (auto* adv = findChild<AdvancedPanel> (ed))
+                adv->showModulationTab (false);
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
             ed.setSize (juce::roundToInt (RoomAudioProcessorEditor::baseWidth * args[5].getFloatValue()),
                         juce::roundToInt (RoomAudioProcessorEditor::baseHeight * args[5].getFloatValue()));
@@ -991,6 +1339,8 @@ int main (int argc, char* argv[])
     testAdvanced (root);
     testRecord (root, roomSource);
     testLfo (root);
+    testRoomsAndStudios (root, roomSource);
+    testModulationUi (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

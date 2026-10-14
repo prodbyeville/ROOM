@@ -1,33 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<ROOM_PRESET version="1" name="Small Room" author="Eville" type="Small Space"
-             styles="Tight,Clean" notes="A small, fairly dead room." created="2026-10-11T02:40:43.048Z">
-  <PARAMS>
-    <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
-    <PARAM id="eq1Freq" value="100.0"/>
-    <PARAM id="eq1Gain" value="0.0"/>
-    <PARAM id="eq1Q" value="0.7099999785423279"/>
-    <PARAM id="eq2Freq" value="300.0"/>
-    <PARAM id="eq2Gain" value="0.0"/>
-    <PARAM id="eq2Q" value="1.0"/>
-    <PARAM id="eq3Freq" value="1000.0"/>
-    <PARAM id="eq3Gain" value="0.0"/>
-    <PARAM id="eq3Q" value="1.0"/>
-    <PARAM id="eq4Freq" value="3500.0"/>
-    <PARAM id="eq4Gain" value="0.0"/>
-    <PARAM id="eq4Q" value="1.0"/>
-    <PARAM id="eq5Freq" value="8000.0"/>
-    <PARAM id="eq5Gain" value="0.0"/>
-    <PARAM id="eq5Q" value="0.7099999785423279"/>
-    <PARAM id="intensity" value="1.0"/>
-    <PARAM id="mix" value="0.3499999940395355"/>
-    <PARAM id="space" value="1.0"/>
-    <PARAM id="tail" value="2.5"/>
-    <PARAM id="tape" value="0.0"/>
-  </PARAMS>
-  <ROOM_ANALYSIS valid="1" sourceName="Small Room" durationS="1.5" bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
+<ROOM version="2" name="Small Room" author="Eville" type="Small Space"
+      styles="Tight,Clean" notes="A clap in a small, fairly dead room."
+      created="2026-10-14T11:32:38.561Z">
+  <ROOM_ANALYSIS valid="1" sourceName="Small Room" origin="Factory" durationS="1.5"
+                 bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
                  bandCentersHz="71.4435,101.2945,143.6180,203.6254,288.7054,409.3342,580.3648,822.8565,1166.6676,1654.1321,2345.2720,3325.1885,4714.5400,6684.3989,9477.3174,13437.1904"
                  bandT60s="0.4570,0.4793,0.4989,0.4920,0.4128,0.3629,0.3497,0.3525,0.3234,0.2962,0.2939,0.2856,0.2440,0.2498,0.2337,0.2122"
                  bandConfident="1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000"
@@ -38,4 +15,4 @@
                  lateEnergyFraction="0.06675029546022415" steady="0" balance="0.242701381444931"
                  spatialEvidence="0.1844873428344727" tonalEvidence="0.5756539702415466"
                  medianT60="0.3365182876586914"/>
-</ROOM_PRESET>
+</ROOM>

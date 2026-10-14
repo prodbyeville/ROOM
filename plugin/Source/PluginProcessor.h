@@ -116,12 +116,24 @@ public:
     double getCurrentSampleRate() const { return currentSampleRate.load(); }
 
     //==========================================================================
-    // ROOMS presets (message thread)
+    // ROOMS (the room only) and STUDIOS (room + knobs + LFOs). Message thread.
 
+    /** STUDIOS: full presets. */
     room::presets::PresetLibrary& getLibrary();
+    /** ROOMS: just rooms. */
+    room::presets::PresetLibrary& getRoomLibrary();
 
-    /** Use a different ROOMS folder (tests). Rebuilds the library. */
-    void setPresetRoot (const juce::File&);
+    /** Use a different base folder (tests): ROOMS and STUDIOS go inside it. */
+    void setPresetRoot (const juce::File& base);
+
+    /** The current room as a ROOM file. */
+    juce::ValueTree captureRoom (const room::presets::PresetMeta&) const;
+
+    /** Swap in a ROOM: only the room changes, every knob and LFO stays. */
+    void applyRoom (const juce::ValueTree& roomTree, const juce::String& key);
+
+    juce::String getCurrentRoomKey() const { return currentRoomKey; }
+    void setCurrentRoomKey (const juce::String& key) { currentRoomKey = key; }
 
     /** The current sound as a preset: every parameter except Output, plus the room. */
     juce::ValueTree capturePreset (const room::presets::PresetMeta&) const;
@@ -141,9 +153,25 @@ public:
     /** True if any knob moved since the preset was loaded or saved. */
     bool isPresetModified() const;
 
-    /** Randomize the sound-shaping knobs within musical ranges (message thread).
-        Leaves the room itself, Dry/Wet, Output, Bypass and Freeze alone. */
+    /** What Randomize touches (right-click the Randomize button to choose). */
+    enum RandomizeGroup
+    {
+        randomRoom     = 1 << 0,   // Intensity, Balance, Tail, Space
+        randomAdvanced = 1 << 1,   // Pre-delay, Size, Damping, Ducking, Release
+        randomEq       = 1 << 2,   // EQ band gains
+        randomFinish   = 1 << 3,   // Tape, Auto EQ
+        randomLfos     = 1 << 4,   // LFO shape / rate / sync / division (not what they're assigned to)
+        randomDefault  = randomRoom | randomAdvanced | randomEq | randomFinish,
+        randomAll      = randomDefault | randomLfos
+    };
+    int randomizeMask = randomDefault;   // saved with the project
+
+    /** Randomize the knobs in randomizeMask within musical ranges (message thread).
+        Never touches the room itself, Dry/Wet, Output, Bypass or Freeze. */
     void randomizeKnobs (juce::Random&);
+
+    /** Remove every LFO assignment and put both LFOs back to their defaults. */
+    void clearModulation();
 
     /** LFO -> knob assignments (edited by the UI, read by the audio thread). */
     room::Modulation modulation;
@@ -163,7 +191,8 @@ private:
     std::unique_ptr<Worker> worker;
 
     void analyseFile (const juce::File&);   // worker thread
-    void analyseAudio (const juce::AudioBuffer<float>&, double sampleRate, const juce::String& name); // worker thread
+    void analyseAudio (const juce::AudioBuffer<float>&, double sampleRate, const juce::String& name,
+                       const juce::String& origin);   // worker thread
     void finishRecording();                 // worker thread
     void rebuildRoom();                     // worker thread
     void setAnalysis (room::RoomAnalysis);  // any non-audio thread
@@ -234,11 +263,12 @@ private:
     std::map<juce::String, float> currentParamValues() const;
     void snapshotPreset();
 
-    juce::File presetRoot = room::presets::PresetLibrary::defaultRoot();
-    std::unique_ptr<room::presets::PresetLibrary> library;
-    juce::String currentPresetKey, currentPresetName;
+    void ensureLibraries();
+    juce::File presetBase = room::presets::PresetLibrary::defaultBase();
+    std::unique_ptr<room::presets::PresetLibrary> library, roomLibrary;
+    juce::String currentPresetKey, currentPresetName, currentRoomKey;
     std::map<juce::String, float> presetSnapshot;
-    juce::String modulationSnapshot;
+    juce::String modulationSnapshot, roomSnapshot;
     bool restoredAsModified = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoomAudioProcessor)

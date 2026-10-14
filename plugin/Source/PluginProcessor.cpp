@@ -579,20 +579,60 @@ void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
     auto maybe = [&r] (float chance) { return r.nextFloat() < chance; };
 
     // Musical ranges, not the full extremes.
-    set (ParamIDs::intensity, between (0.5f, 1.6f));
-    set (ParamIDs::balanceAuto, maybe (0.5f) ? 1.0f : 0.0f);
-    set (ParamIDs::balance, between (0.1f, 0.9f));
-    set (ParamIDs::tail, between (0.6f, 4.0f));
-    set (ParamIDs::space, between (0.7f, 1.6f));
-    set (ParamIDs::tape, maybe (0.5f) ? between (0.1f, 0.8f) : 0.0f);
-    set (ParamIDs::autoEq, maybe (0.5f) ? between (0.1f, 0.6f) : 0.0f);
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-        set (ParamIDs::eqGain (b), maybe (0.4f) ? between (-4.0f, 4.0f) : 0.0f);
-    set (ParamIDs::preDelay, maybe (0.5f) ? between (5.0f, 120.0f) : 0.0f);
-    set (ParamIDs::size, between (0.7f, 1.5f));
-    set (ParamIDs::damping, between (-0.5f, 0.7f));
-    set (ParamIDs::duck, maybe (0.3f) ? between (0.2f, 0.7f) : 0.0f);
-    set (ParamIDs::duckRelease, between (120.0f, 600.0f));
+    const auto mask = randomizeMask;
+    if (mask & randomRoom)
+    {
+        set (ParamIDs::intensity, between (0.5f, 1.6f));
+        set (ParamIDs::balanceAuto, maybe (0.5f) ? 1.0f : 0.0f);
+        set (ParamIDs::balance, between (0.1f, 0.9f));
+        set (ParamIDs::tail, between (0.6f, 4.0f));
+        set (ParamIDs::space, between (0.7f, 1.6f));
+    }
+    if (mask & randomFinish)
+    {
+        set (ParamIDs::tape, maybe (0.5f) ? between (0.1f, 0.8f) : 0.0f);
+        set (ParamIDs::autoEq, maybe (0.5f) ? between (0.1f, 0.6f) : 0.0f);
+    }
+    if (mask & randomEq)
+        for (int b = 0; b < room::tone::numEqBands; ++b)
+            set (ParamIDs::eqGain (b), maybe (0.4f) ? between (-4.0f, 4.0f) : 0.0f);
+    if (mask & randomAdvanced)
+    {
+        set (ParamIDs::preDelay, maybe (0.5f) ? between (5.0f, 120.0f) : 0.0f);
+        set (ParamIDs::size, between (0.7f, 1.5f));
+        set (ParamIDs::damping, between (-0.5f, 0.7f));
+        set (ParamIDs::duck, maybe (0.3f) ? between (0.2f, 0.7f) : 0.0f);
+        set (ParamIDs::duckRelease, between (120.0f, 600.0f));
+    }
+    if (mask & randomLfos)
+    {
+        const auto numShapes = room::Lfo::shapeNames().size();
+        const auto numDivs = room::Lfo::divisionNames().size();
+        for (int l = 0; l < room::Modulation::numLfos; ++l)
+        {
+            set (ParamIDs::lfoShape (l), (float) r.nextInt (numShapes));
+            const auto synced = maybe (0.5f);
+            set (ParamIDs::lfoSync (l), synced ? 1.0f : 0.0f);
+            if (synced)
+                set (ParamIDs::lfoDiv (l), (float) r.nextInt (numDivs));
+            else
+                set (ParamIDs::lfoRate (l), std::exp (between (std::log (0.05f), std::log (6.0f))));
+        }
+    }
+}
+
+void RoomAudioProcessor::clearModulation()
+{
+    modulation.clear();
+    for (int l = 0; l < room::Modulation::numLfos; ++l)
+        for (const auto& id : { ParamIDs::lfoRate (l), ParamIDs::lfoSync (l), ParamIDs::lfoDiv (l),
+                                ParamIDs::lfoShape (l), ParamIDs::lfoRetrig (l) })
+            if (auto* p = apvts.getParameter (id))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->getDefaultValue());
+                p->endChangeGesture();
+            }
 }
 
 double RoomAudioProcessor::getTailLengthSeconds() const
@@ -610,10 +650,9 @@ void RoomAudioProcessor::parameterChanged (const juce::String&, float)
 
 void RoomAudioProcessor::loadRoomFile (const juce::File& file)
 {
-    // A dropped sound replaces the preset's room: it's a new, unsaved sound.
-    currentPresetKey = {};
-    currentPresetName = file.getFileNameWithoutExtension();
-    snapshotPreset();
+    // A dropped sound replaces the room. The STUDIO stays loaded and shows as
+    // modified once the new room is in.
+    currentRoomKey = {};
     {
         const juce::ScopedLock sl (analysisLock);
         statusMessage = "Analyzing " + file.getFileName() + "...";
@@ -627,9 +666,7 @@ void RoomAudioProcessor::startRecording()
 {
     if (recordArmed.load() || recordBuf.getNumSamples() == 0)
         return;
-    currentPresetKey = {};
-    currentPresetName = "Recorded room " + juce::String (recordCount + 1);
-    snapshotPreset();
+    currentRoomKey = {};
     {
         const juce::ScopedLock sl (analysisLock);
         statusMessage = "Recording...";
@@ -686,7 +723,7 @@ void RoomAudioProcessor::finishRecording()
     }
     status = Status::analyzing;
     ++analysisVersion;
-    analyseAudio (take, currentSampleRate.load(), "Recorded room " + juce::String (recordCount));
+    analyseAudio (take, currentSampleRate.load(), "Recorded room " + juce::String (recordCount), "Recorded");
 }
 
 void RoomAudioProcessor::clearRoom()
@@ -713,10 +750,11 @@ void RoomAudioProcessor::analyseFile (const juce::File& file)
     const auto len = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (60.0 * reader->sampleRate));
     juce::AudioBuffer<float> audio ((int) std::min (2u, reader->numChannels), len);
     reader->read (&audio, 0, len, 0, true, audio.getNumChannels() > 1);
-    analyseAudio (audio, reader->sampleRate, file.getFileName());
+    analyseAudio (audio, reader->sampleRate, file.getFileNameWithoutExtension(), "File");
 }
 
-void RoomAudioProcessor::analyseAudio (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::String& name)
+void RoomAudioProcessor::analyseAudio (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::String& name,
+                                       const juce::String& origin)
 {
     auto result = room::analyzeRoom (audio, sampleRate);
     if (! result.valid)
@@ -731,6 +769,7 @@ void RoomAudioProcessor::analyseAudio (const juce::AudioBuffer<float>& audio, do
     }
 
     result.sourceName = name;
+    result.origin = origin;
     setAnalysis (std::move (result));
     rebuildRoom();
 }
@@ -800,6 +839,8 @@ void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("presetModified", isPresetModified(), nullptr);
     state.setProperty ("editorScale", editorScale, nullptr);
     state.setProperty ("advancedOpen", advancedOpen, nullptr);
+    state.setProperty ("randomizeMask", randomizeMask, nullptr);
+    state.setProperty ("roomKey", currentRoomKey, nullptr);
     state.appendChild (apvts.copyState(), nullptr);
     state.appendChild (getAnalysis().toValueTree(), nullptr);
     state.appendChild (modulation.toValueTree(), nullptr);
@@ -835,6 +876,8 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
     modulation.fromValueTree (state.getChildWithName ("MODULATION"));
     editorScale = juce::jlimit (0.75f, 1.75f, (float) state.getProperty ("editorScale", 1.0f));
     advancedOpen = (bool) state.getProperty ("advancedOpen", false);
+    randomizeMask = (int) state.getProperty ("randomizeMask", (int) randomDefault) & randomAll;
+    currentRoomKey = state["roomKey"].toString();
     currentPresetKey = state["presetKey"].toString();
     currentPresetName = state["presetName"].toString();
     snapshotPreset();
@@ -844,26 +887,68 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
 //==============================================================================
 // ROOMS presets
 
+void RoomAudioProcessor::ensureLibraries()
+{
+    if (library != nullptr && roomLibrary != nullptr)
+        return;
+    using room::presets::PresetLibrary;
+    using room::presets::Kind;
+
+    // Built-in content: .room files are factory ROOMS, .studio files factory STUDIOS.
+    std::vector<juce::String> studios, rooms;
+    for (int i = 0; i < FactoryPresets::namedResourceListSize; ++i)
+    {
+        int size = 0;
+        const auto* name = FactoryPresets::namedResourceList[i];
+        if (auto* data = FactoryPresets::getNamedResource (name, size))
+        {
+            const auto file = juce::String (FactoryPresets::getNamedResourceOriginalFilename (name));
+            (file.endsWithIgnoreCase (room::presets::roomExtension) ? rooms : studios)
+                .push_back (juce::String::fromUTF8 (data, size));
+        }
+    }
+
+    const auto roomsRoot = PresetLibrary::rootFor (presetBase, Kind::room);
+    const auto studiosRoot = PresetLibrary::rootFor (presetBase, Kind::studio);
+    PresetLibrary::migrateLegacy (roomsRoot, studiosRoot);
+    library = std::make_unique<PresetLibrary> (studiosRoot, std::move (studios), Kind::studio);
+    roomLibrary = std::make_unique<PresetLibrary> (roomsRoot, std::move (rooms), Kind::room);
+}
+
 room::presets::PresetLibrary& RoomAudioProcessor::getLibrary()
 {
-    if (library == nullptr)
-    {
-        std::vector<juce::String> factory;
-        for (int i = 0; i < FactoryPresets::namedResourceListSize; ++i)
-        {
-            int size = 0;
-            if (auto* data = FactoryPresets::getNamedResource (FactoryPresets::namedResourceList[i], size))
-                factory.push_back (juce::String::fromUTF8 (data, size));
-        }
-        library = std::make_unique<room::presets::PresetLibrary> (presetRoot, std::move (factory));
-    }
+    ensureLibraries();
     return *library;
 }
 
-void RoomAudioProcessor::setPresetRoot (const juce::File& root)
+room::presets::PresetLibrary& RoomAudioProcessor::getRoomLibrary()
 {
-    presetRoot = root;
+    ensureLibraries();
+    return *roomLibrary;
+}
+
+void RoomAudioProcessor::setPresetRoot (const juce::File& base)
+{
+    presetBase = base;
     library.reset();
+    roomLibrary.reset();
+}
+
+juce::ValueTree RoomAudioProcessor::captureRoom (const room::presets::PresetMeta& meta) const
+{
+    const auto a = getAnalysis();
+    return a.valid ? room::presets::makeRoom (meta, a.toValueTree()) : juce::ValueTree();
+}
+
+void RoomAudioProcessor::applyRoom (const juce::ValueTree& roomTree, const juce::String& key)
+{
+    auto a = room::RoomAnalysis::fromValueTree (roomTree.getChildWithName ("ROOM_ANALYSIS"));
+    if (! a.valid)
+        return;
+    a.sourceName = room::presets::readMeta (roomTree).name;   // the room's own name
+    setAnalysis (std::move (a));
+    worker->requestRebuild();
+    currentRoomKey = key;   // the STUDIO now shows as modified (its room changed)
 }
 
 std::map<juce::String, float> RoomAudioProcessor::currentParamValues() const
@@ -879,7 +964,9 @@ std::map<juce::String, float> RoomAudioProcessor::currentParamValues() const
 juce::ValueTree RoomAudioProcessor::capturePreset (const room::presets::PresetMeta& meta) const
 {
     const auto a = getAnalysis();
-    auto preset = room::presets::makePreset (meta, currentParamValues(),
+    auto m = meta;
+    m.roomName = a.valid ? a.sourceName : juce::String();
+    auto preset = room::presets::makePreset (m, currentParamValues(),
                                              a.valid ? a.toValueTree() : juce::ValueTree());
     preset.appendChild (modulation.toValueTree(), nullptr);
     return preset;
@@ -906,10 +993,21 @@ void RoomAudioProcessor::applyPreset (const juce::ValueTree& preset, const juce:
     modulation.fromValueTree (preset.getChildWithName ("MODULATION"));
 
     auto a = room::RoomAnalysis::fromValueTree (preset.getChildWithName ("ROOM_ANALYSIS"));
+    currentRoomKey = {};
     if (a.valid)
     {
-        if (a.sourceName.isEmpty())
-            a.sourceName = room::presets::readMeta (preset).name;
+        const auto meta = room::presets::readMeta (preset);
+        if (meta.roomName.isNotEmpty())
+        {
+            a.sourceName = meta.roomName;
+            // If that room is in ROOMS (same pack first, then Factory, then User), it's the current ROOM.
+            const auto file = room::presets::toFileName (meta.roomName);
+            for (auto pack : { key.upToFirstOccurrenceOf ("/", false, false), juce::String ("Factory"), juce::String ("User") })
+                if (currentRoomKey.isEmpty() && getRoomLibrary().find (pack + "/" + file) != nullptr)
+                    currentRoomKey = pack + "/" + file;
+        }
+        else if (a.sourceName.isEmpty())
+            a.sourceName = meta.name;
         setAnalysis (std::move (a));
         worker->requestRebuild();
     }
@@ -932,6 +1030,7 @@ void RoomAudioProcessor::snapshotPreset()
 {
     presetSnapshot = currentParamValues();
     modulationSnapshot = modulation.toValueTree().toXmlString();
+    roomSnapshot = getAnalysis().toValueTree().toXmlString();
     restoredAsModified = false;
 }
 
@@ -939,6 +1038,8 @@ bool RoomAudioProcessor::isPresetModified() const
 {
     if (restoredAsModified || modulation.toValueTree().toXmlString() != modulationSnapshot)
         return true;
+    if (getAnalysis().toValueTree().toXmlString() != roomSnapshot)
+        return true;   // a different room was loaded, dropped or recorded
     const auto now = currentParamValues();
     for (auto& [id, v] : now)
     {

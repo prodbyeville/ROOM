@@ -30,6 +30,7 @@ struct RoomAnalysis
 {
     bool valid = false;
     juce::String sourceName;
+    juce::String origin;               // "File", "Recorded" or "Factory" (empty = unknown)
     double durationS = 0.0;
 
     std::vector<float> bandEdgesHz;    // numBands + 1

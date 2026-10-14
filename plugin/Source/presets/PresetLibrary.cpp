@@ -3,16 +3,73 @@
 namespace room::presets
 {
 
-PresetLibrary::PresetLibrary (juce::File rootFolder, std::vector<juce::String> factory)
-    : root (std::move (rootFolder)), factoryXml (std::move (factory))
+PresetLibrary::PresetLibrary (juce::File rootFolder, std::vector<juce::String> factory, Kind k)
+    : root (std::move (rootFolder)), kind (k), factoryXml (std::move (factory))
 {
     rescan();
 }
 
-juce::File PresetLibrary::defaultRoot()
+juce::File PresetLibrary::defaultBase()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-        .getChildFile ("Eville").getChildFile ("ROOMS");
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Eville");
+}
+
+static juce::StringArray readFavoriteKeys (const juce::File& f)
+{
+    juce::StringArray keys;
+    if (auto xml = juce::parseXML (f))
+        for (auto* e : xml->getChildWithTagNameIterator ("FAVORITE"))
+            keys.addIfNotAlreadyThere (e->getStringAttribute ("key"));
+    return keys;
+}
+
+static void writeFavoriteKeys (const juce::File& f, const juce::StringArray& keys)
+{
+    juce::XmlElement xml ("ROOMS_FAVORITES");
+    for (auto& k : keys)
+        xml.createNewChildElement ("FAVORITE")->setAttribute ("key", k);
+    f.getParentDirectory().createDirectory();
+    juce::TemporaryFile temp (f);
+    if (xml.writeTo (temp.getFile()))
+        temp.overwriteTargetFileWithTemporary();
+}
+
+int PresetLibrary::migrateLegacy (const juce::File& roomsRoot, const juce::File& studiosRoot)
+{
+    if (! roomsRoot.isDirectory())
+        return 0;
+    const auto roomFavs = readFavoriteKeys (roomsRoot.getChildFile ("favorites.xml"));
+    auto studioFavs = readFavoriteKeys (studiosRoot.getChildFile ("favorites.xml"));
+    int converted = 0;
+
+    for (const auto& dir : roomsRoot.findChildFiles (juce::File::findDirectories, false))
+    {
+        if (dir.isHidden() || dir.getFileName().startsWithChar ('.'))
+            continue;
+        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, juce::String ("*") + roomExtension))
+        {
+            const auto preset = load (f, Kind::studio);   // only old-style full presets match
+            if (! preset.isValid())
+                continue;
+            const auto key = dir.getFileName() + "/" + f.getFileNameWithoutExtension();
+            const auto studio = studiosRoot.getChildFile (dir.getFileName())
+                                    .getChildFile (f.getFileNameWithoutExtension() + studioExtension);
+            if (! studio.existsAsFile() && ! presets::save (preset, studio))
+                continue;   // leave the old file alone if the copy failed
+            if (roomFavs.contains (key))
+                studioFavs.addIfNotAlreadyThere (key);
+
+            const auto room = roomFromPreset (preset, "File");
+            if (room.isValid())
+                presets::save (room, f);
+            else
+                f.deleteFile();   // a preset with no room: it lives on as a STUDIO only
+            ++converted;
+        }
+    }
+    if (converted > 0)
+        writeFavoriteKeys (studiosRoot.getChildFile ("favorites.xml"), studioFavs);
+    return converted;
 }
 
 bool PresetLibrary::isValidPackName (const juce::String& name)
@@ -34,7 +91,7 @@ void PresetLibrary::rescan()
     // Built-in presets
     for (auto& xml : factoryXml)
     {
-        const auto tree = parse (xml);
+        const auto tree = parse (xml, kind);
         if (! tree.isValid())
         {
             ++unreadable;
@@ -42,6 +99,8 @@ void PresetLibrary::rescan()
         }
         Entry e;
         e.meta = readMeta (tree);
+        if (kind == Kind::room)
+            e.tags = autoTags (tree.getChildWithName ("ROOM_ANALYSIS"), "Factory");
         e.pack = factoryPack;
         e.key = juce::String (factoryPack) + "/" + toFileName (e.meta.name);
         e.factory = true;
@@ -54,16 +113,18 @@ void PresetLibrary::rescan()
     {
         if (dir.isHidden() || dir.getFileName().startsWithChar ('.'))
             continue;
-        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension))
+        for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, juce::String ("*") + extensionFor (kind)))
         {
-            const auto tree = load (f);
+            const auto tree = load (f, kind);
             if (! tree.isValid())
             {
-                ++unreadable;   // damaged or not a ROOM preset: skip it, never crash
+                ++unreadable;   // damaged or not the right kind of file: skip it, never crash
                 continue;
             }
             Entry e;
             e.meta = readMeta (tree);
+            if (kind == Kind::room)
+                e.tags = autoTags (tree.getChildWithName ("ROOM_ANALYSIS"), "File");
             e.pack = dir.getFileName();
             e.key = e.pack + "/" + f.getFileNameWithoutExtension();
             e.file = f;
@@ -106,10 +167,35 @@ std::vector<int> PresetLibrary::query (const Query& q) const
         if (! stylesOk)
             continue;
 
+        if (! q.madeFor.isEmpty())
+        {
+            bool any = false;
+            for (auto& m : q.madeFor)
+                any = any || e.meta.madeFor.contains (m);
+            if (! any)
+                continue;
+        }
+
+        // Auto tags: any of the picked ones within a group (decay / tone / source), every group.
+        bool autoOk = true;
+        for (auto* group : { &allDecayTags(), &allToneTags(), &allSources() })
+        {
+            juce::StringArray picked;
+            for (auto& t : q.autoTags)
+                if (group->contains (t))
+                    picked.add (t);
+            const auto value = group == &allDecayTags() ? e.tags.decay : group == &allToneTags() ? e.tags.tone : e.tags.source;
+            autoOk = autoOk && (picked.isEmpty() || picked.contains (value));
+        }
+        if (! autoOk)
+            continue;
+
         if (! words.isEmpty())
         {
             const auto haystack = (e.meta.name + " " + e.meta.author + " " + e.meta.type + " "
-                                   + e.meta.styles.joinIntoString (" ") + " " + e.meta.notes + " " + e.pack)
+                                   + e.meta.styles.joinIntoString (" ") + " " + e.meta.madeFor.joinIntoString (" ") + " "
+                                   + e.meta.roomName + " " + e.tags.decay + " " + e.tags.tone + " " + e.tags.source + " "
+                                   + e.meta.notes + " " + e.pack)
                                       .toLowerCase();
             bool all = true;
             for (auto& w : words)
@@ -135,6 +221,11 @@ std::vector<int> PresetLibrary::query (const Query& q) const
             case SortColumn::pack:     c = cmpText (a.pack, b.pack); break;
             case SortColumn::date:     c = a.meta.created < b.meta.created ? -1 : (b.meta.created < a.meta.created ? 1 : 0); break;
             case SortColumn::favorite: c = (int) b.favorite - (int) a.favorite; break;   // hearted first
+            case SortColumn::decay:    c = a.tags.medianT60 < b.tags.medianT60 ? -1 : (b.tags.medianT60 < a.tags.medianT60 ? 1 : 0); break;
+            case SortColumn::tone:     c = allToneTags().indexOf (a.tags.tone) - allToneTags().indexOf (b.tags.tone); break;
+            case SortColumn::source:   c = cmpText (a.tags.source, b.tags.source); break;
+            case SortColumn::madeFor:  c = cmpText (a.meta.madeFor.joinIntoString (","), b.meta.madeFor.joinIntoString (",")); break;
+            case SortColumn::room:     c = cmpText (a.meta.roomName, b.meta.roomName); break;
         }
         if (c == 0)
             c = cmpText (a.meta.name, b.meta.name);   // ties: by name
@@ -174,7 +265,7 @@ int PresetLibrary::countFavorites() const
 
 juce::ValueTree PresetLibrary::loadPreset (const Entry& e) const
 {
-    return e.factory ? parse (e.factoryXml) : load (e.file);
+    return e.factory ? parse (e.factoryXml, kind) : load (e.file, kind);
 }
 
 bool PresetLibrary::nameExists (const juce::String& pack, const juce::String& name) const
@@ -191,7 +282,7 @@ bool PresetLibrary::save (const juce::ValueTree& preset, const juce::String& pac
     const auto meta = readMeta (preset);
     if (meta.name.trim().isEmpty())
     {
-        errorOut = "Give the preset a name.";
+        errorOut = juce::String ("Give the ") + noun() + " a name.";
         return false;
     }
     if (! isValidPackName (pack))
@@ -200,10 +291,10 @@ bool PresetLibrary::save (const juce::ValueTree& preset, const juce::String& pac
         return false;
     }
 
-    const auto file = packFolder (pack).getChildFile (toFileName (meta.name) + fileExtension);
+    const auto file = packFolder (pack).getChildFile (toFileName (meta.name) + extensionFor (kind));
     if (file.existsAsFile() && ! overwrite)
     {
-        errorOut = "A preset called \"" + meta.name + "\" already exists in " + pack + ".";
+        errorOut = juce::String ("A ") + noun() + " called \"" + meta.name + "\" already exists in " + pack + ".";
         return false;
     }
     if (! presets::save (preset, file))
@@ -223,19 +314,19 @@ bool PresetLibrary::updateMeta (const juce::String& key, const PresetMeta& meta,
     const auto* e = find (key);
     if (e == nullptr || e->factory)
     {
-        errorOut = "Factory presets can't be changed. Save a copy instead.";
+        errorOut = "Factory ones can't be changed. Save a copy instead.";
         return false;
     }
     if (meta.name.trim().isEmpty() || ! isValidPackName (newPack))
     {
-        errorOut = "Give the preset a name and a pack.";
+        errorOut = "Give it a name and a pack.";
         return false;
     }
 
-    auto tree = load (e->file);
+    auto tree = load (e->file, kind);
     if (! tree.isValid())
     {
-        errorOut = "Couldn't read the preset file.";
+        errorOut = "Couldn't read the file.";
         return false;
     }
 
@@ -244,11 +335,11 @@ bool PresetLibrary::updateMeta (const juce::String& key, const PresetMeta& meta,
     writeMeta (tree, m);
 
     const auto oldFile = e->file;
-    const auto newFile = packFolder (newPack).getChildFile (toFileName (m.name) + fileExtension);
+    const auto newFile = packFolder (newPack).getChildFile (toFileName (m.name) + extensionFor (kind));
     const auto moving = newFile != oldFile;
     if (moving && newFile.existsAsFile())
     {
-        errorOut = "A preset called \"" + m.name + "\" already exists in " + newPack + ".";
+        errorOut = juce::String ("A ") + noun() + " called \"" + m.name + "\" already exists in " + newPack + ".";
         return false;
     }
     if (! presets::save (tree, newFile))
@@ -317,11 +408,13 @@ int PresetLibrary::importFiles (const juce::Array<juce::File>& files, const juce
     int count = 0;
     for (auto& f : files)
     {
-        const auto tree = load (f);
+        auto tree = load (f, kind);
+        if (! tree.isValid() && kind == Kind::room)
+            tree = roomFromPreset (load (f, Kind::studio), "File");   // an old-style full preset: take its room
         if (! tree.isValid())
             continue;
         // Never overwrite on import: add " 2", " 3"... if the name is taken.
-        auto dest = packFolder (pack).getChildFile (f.getFileName());
+        auto dest = packFolder (pack).getChildFile (f.getFileNameWithoutExtension() + extensionFor (kind));
         if (dest.existsAsFile())
             dest = dest.getNonexistentSibling (true);
         if (presets::save (tree, dest))
@@ -340,8 +433,8 @@ bool PresetLibrary::exportPack (const juce::String& pack, const juce::File& dest
             continue;
         const auto folder = destination.getChildFile (e.pack);
         ok = folder.createDirectory() && ok;
-        const auto target = folder.getChildFile (toFileName (e.meta.name) + fileExtension);
-        ok = (e.factory ? presets::save (parse (e.factoryXml), target) : e.file.copyFileTo (target)) && ok;
+        const auto target = folder.getChildFile (toFileName (e.meta.name) + extensionFor (kind));
+        ok = (e.factory ? presets::save (parse (e.factoryXml, kind), target) : e.file.copyFileTo (target)) && ok;
     }
     return ok;
 }
@@ -350,21 +443,12 @@ bool PresetLibrary::exportPack (const juce::String& pack, const juce::File& dest
 
 void PresetLibrary::loadFavorites()
 {
-    favoriteKeys.clear();
-    if (auto xml = juce::parseXML (favoritesFile()))
-        for (auto* e : xml->getChildWithTagNameIterator ("FAVORITE"))
-            favoriteKeys.addIfNotAlreadyThere (e->getStringAttribute ("key"));
+    favoriteKeys = readFavoriteKeys (favoritesFile());
 }
 
 void PresetLibrary::saveFavorites() const
 {
-    juce::XmlElement xml ("ROOMS_FAVORITES");
-    for (auto& k : favoriteKeys)
-        xml.createNewChildElement ("FAVORITE")->setAttribute ("key", k);
-    root.createDirectory();
-    juce::TemporaryFile temp (favoritesFile());
-    if (xml.writeTo (temp.getFile()))
-        temp.overwriteTargetFileWithTemporary();
+    writeFavoriteKeys (favoritesFile(), favoriteKeys);
 }
 
 } // namespace room::presets

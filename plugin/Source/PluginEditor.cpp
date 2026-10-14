@@ -64,7 +64,7 @@ void DropZone::paint (juce::Graphics& g)
     if (status == RoomAudioProcessor::Status::recording)
     {
         // Recording: time, a level meter, and how to stop.
-        auto area = getLocalBounds().reduced (24, 10).withTrimmedRight (110).withTrimmedLeft (46);
+        auto area = getLocalBounds().reduced (24, 10).withTrimmedRight (110).withTrimmedLeft (126);
         const auto secs = proc.getRecordedSeconds();
         const auto blink = (juce::Time::getMillisecondCounter() / 500) % 2 == 0;
         g.setColour (Colours::reduction.withAlpha (blink ? 1.0f : 0.4f));
@@ -91,7 +91,7 @@ void DropZone::paint (juce::Graphics& g)
         case RoomAudioProcessor::Status::recording:
         case RoomAudioProcessor::Status::empty:
             title = "Drop any sound here";
-            sub = "or click to browse. A clap, room tone, a one-shot, found sound...";
+            sub = "or click to browse, record one, or load a saved ROOM";
             break;
         case RoomAudioProcessor::Status::analyzing:
             title = proc.getStatusMessage();
@@ -106,7 +106,7 @@ void DropZone::paint (juce::Graphics& g)
             sub << "Balance " << juce::String (a.balance, 2) << " " << lean
                 << "   \xc2\xb7   " << (a.steady ? juce::String ("steady sound") : "decay " + juce::String (a.medianT60, 2) + " s")
                 << "   \xc2\xb7   " << (int) a.peaks.size() << " resonance" << (a.peaks.size() == 1 ? "" : "s")
-                << "        drop or click to replace";
+                << "      drop to replace";
             break;
         }
         case RoomAudioProcessor::Status::failed:
@@ -115,7 +115,7 @@ void DropZone::paint (juce::Graphics& g)
             break;
     }
 
-    auto textArea = getLocalBounds().reduced (16, 0).withTrimmedRight (110).withTrimmedLeft (60);
+    auto textArea = getLocalBounds().reduced (16, 0).withTrimmedRight (70).withTrimmedLeft (130);
     g.setColour (status == RoomAudioProcessor::Status::failed ? juce::Colours::indianred : Colours::text);
     g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     g.drawFittedText (title, textArea.withTrimmedBottom (getHeight() / 2 - 2), juce::Justification::centredBottom, 1);
@@ -222,8 +222,18 @@ void RoomDisplay::paint (juce::Graphics& g)
 IconButton::IconButton (Icon i, const juce::String& tip) : juce::Button (tip), icon (i)
 {
     setTooltip (tip);
-    if (icon != Icon::randomize)
+    if (icon != Icon::randomize && icon != Icon::load && icon != Icon::save)
         setClickingTogglesState (true);
+}
+
+void IconButton::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onRightClick != nullptr)
+    {
+        onRightClick();
+        return;
+    }
+    juce::Button::mouseDown (e);
 }
 
 void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
@@ -280,6 +290,34 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
                 g.fillEllipse (juce::Rectangle<float> (s * 0.9f, s * 0.9f).withCentre ({ cx, cy }));
             return;
         }
+        case Icon::load:
+        {
+            // folder
+            const auto w = s * 1.5f, h = s * 1.1f;
+            const auto x = cx - w * 0.5f, y = cy - h * 0.4f;
+            p.startNewSubPath (x, y + h);
+            p.lineTo (x, y - h * 0.2f);
+            p.lineTo (x + w * 0.38f, y - h * 0.2f);
+            p.lineTo (x + w * 0.48f, y);
+            p.lineTo (x + w, y);
+            p.lineTo (x + w, y + h);
+            p.closeSubPath();
+            break;
+        }
+        case Icon::save:
+        {
+            // arrow down into a tray
+            p.startNewSubPath (cx, cy - s * 0.75f);
+            p.lineTo (cx, cy + s * 0.2f);
+            p.startNewSubPath (cx - s * 0.38f, cy - s * 0.15f);
+            p.lineTo (cx, cy + s * 0.22f);
+            p.lineTo (cx + s * 0.38f, cy - s * 0.15f);
+            p.startNewSubPath (cx - s * 0.72f, cy + s * 0.15f);
+            p.lineTo (cx - s * 0.72f, cy + s * 0.62f);
+            p.lineTo (cx + s * 0.72f, cy + s * 0.62f);
+            p.lineTo (cx + s * 0.72f, cy + s * 0.15f);
+            break;
+        }
         case Icon::advanced:
         {
             // three sliders ("settings")
@@ -333,6 +371,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         content.addAndMakeVisible (b);
     advancedButton.onClick = [this] { setAdvanced (advancedButton.getToggleState()); };
     randomButton.onClick = [this] { proc.randomizeKnobs (random); };
+    randomButton.onRightClick = [this] { showRandomizeMenu(); };
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::bypass, bypassButton);
     setupKnob (mix, ParamIDs::mix, "DRY/WET", true);
     setupKnob (output, ParamIDs::output, "OUT", true);
@@ -348,6 +387,10 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         if (proc.isRecording()) proc.stopRecording();
         else                    proc.startRecording();
     };
+    for (auto* b : { &roomLoadButton, &roomSaveButton })
+        content.addAndMakeVisible (b);
+    roomLoadButton.onClick = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
+    roomSaveButton.onClick = [this] { openRoomSaveDialog(); };
 
     // --- Tier 2 ---
     content.addAndMakeVisible (decayDisplay);
@@ -399,10 +442,27 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         saveDialog.open (room::presets::SaveDialog::Mode::edit, meta, proc.getLibrary().getPacks(), pack);
     };
 
+    content.addChildComponent (roomBrowser);
+    roomBrowser.onClose = [this] { roomBrowser.setVisible (false); };
+    roomBrowser.onLoad = [this] (const juce::String& key) { loadRoom (key); roomBrowser.setVisible (false); };
+    roomBrowser.onEdit = [this] (const juce::String& key, const room::presets::PresetMeta& meta, const juce::String& pack)
+    {
+        editingRoomKey = key;
+        juce::String info;
+        if (auto* e = proc.getRoomLibrary().find (key))
+            info = "Auto tags:  " + juce::StringArray { e->tags.decay, e->tags.tone, e->tags.source }.joinIntoString ("  \xc2\xb7  ");
+        roomSaveDialog.open (room::presets::SaveDialog::Mode::edit, meta, proc.getRoomLibrary().getPacks(), pack, info);
+    };
+
     content.addChildComponent (saveDialog);
     saveDialog.onSubmit = [this] (auto mode, const auto& meta, const auto& pack, bool overwrite)
     {
         return submitSaveDialog (mode, meta, pack, overwrite);
+    };
+    content.addChildComponent (roomSaveDialog);
+    roomSaveDialog.onSubmit = [this] (auto mode, const auto& meta, const auto& pack, bool overwrite)
+    {
+        return submitRoomSaveDialog (mode, meta, pack, overwrite);
     };
 
     content.setBounds (0, 0, baseWidth, baseHeight);
@@ -514,6 +574,8 @@ void RoomAudioProcessorEditor::refreshAnalysis()
     advancedPanel.setAnalysis (a);
     dropZone.repaint();
     clearButton.setVisible (a.valid);
+    roomSaveButton.setEnabled (a.valid);
+    roomSaveButton.setAlpha (a.valid ? 1.0f : 0.4f);
 }
 
 void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
@@ -553,7 +615,9 @@ void RoomAudioProcessorEditor::layoutContent()
 {
     const auto full = juce::Rectangle<int> (0, 0, baseWidth, baseHeight);
     browser.setBounds (full);
+    roomBrowser.setBounds (full);
     saveDialog.setBounds (full);
+    roomSaveDialog.setBounds (full);
 
     // --- Top bar ---
     auto bar = juce::Rectangle<int> (20, 0, baseWidth - 40, 56);
@@ -587,7 +651,12 @@ void RoomAudioProcessorEditor::layoutContent()
     tierLabels[0] = { gutterX, t1.getY() + 4, 12, 20 };
     dropZone.setBounds (t1);
     clearButton.setBounds (t1.removeFromRight (70).reduced (10, 18));
-    recordButton.setBounds (t1.removeFromLeft (52).withSizeKeepingCentre (36, 34).translated (10, 0));
+    t1.removeFromLeft (12);
+    recordButton.setBounds (t1.removeFromLeft (36).withSizeKeepingCentre (36, 34));
+    t1.removeFromLeft (6);
+    roomLoadButton.setBounds (t1.removeFromLeft (36).withSizeKeepingCentre (36, 34));
+    t1.removeFromLeft (6);
+    roomSaveButton.setBounds (t1.removeFromLeft (36).withSizeKeepingCentre (36, 34));
 
     // --- Tier 2: shape the room ---
     area.removeFromTop (12);
@@ -628,7 +697,131 @@ void RoomAudioProcessorEditor::layoutContent()
 }
 
 //==============================================================================
-// ROOMS presets
+// Randomize menu (right-click the Randomize button)
+
+void RoomAudioProcessorEditor::showRandomizeMenu()
+{
+    using P = RoomAudioProcessor;
+    const std::pair<int, const char*> groups[] = {
+        { P::randomRoom,     "Room knobs  (Intensity, Balance, Tail, Space)" },
+        { P::randomAdvanced, "Advanced  (Pre-delay, Size, Damping, Ducking)" },
+        { P::randomEq,       "EQ bands" },
+        { P::randomFinish,   "Tape + Auto EQ" },
+        { P::randomLfos,     "LFO settings  (shape, rate)" },
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("RANDOMIZE");
+    menu.addItem ("Randomize now", proc.randomizeMask != 0, false, [this] { proc.randomizeKnobs (random); });
+    menu.addSeparator();
+    for (auto& [bit, name] : groups)
+        menu.addItem (name, true, (proc.randomizeMask & bit) != 0, [this, bit = bit]
+        {
+            proc.randomizeMask ^= bit;
+            showRandomizeMenu();   // stay open so several can be ticked in one go
+        });
+    menu.addSeparator();
+    menu.addItem ("All", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomAll; showRandomizeMenu(); });
+    menu.addItem ("None", true, false, [this] { proc.randomizeMask = 0; showRandomizeMenu(); });
+    menu.addItem ("Reset to default", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomDefault; showRandomizeMenu(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&randomButton));
+}
+
+//==============================================================================
+// STUDIOS (full presets, top bar) and ROOMS (the room only, tier 1)
+
+void RoomAudioProcessorEditor::loadRoom (const juce::String& key)
+{
+    auto& lib = proc.getRoomLibrary();
+    const auto* e = lib.find (key);
+    if (e == nullptr)
+        return;
+    const auto tree = lib.loadPreset (*e);
+    if (! tree.isValid())
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("ROOMS")
+                                          .withMessage ("\"" + e->meta.name + "\" couldn't be read.").withButton ("OK"), nullptr);
+        return;
+    }
+    proc.applyRoom (tree, key);
+}
+
+void RoomAudioProcessorEditor::openRoomSaveDialog()
+{
+    const auto a = proc.getAnalysis();
+    if (! a.valid)
+        return;
+    auto& lib = proc.getRoomLibrary();
+    room::presets::PresetMeta meta;
+    juce::String pack = room::presets::PresetLibrary::userPack;
+    if (const auto* e = lib.find (proc.getCurrentRoomKey()))
+    {
+        meta = e->meta;
+        meta.created = {};
+        if (e->factory)
+            meta.author = {};
+        else
+            pack = e->pack;
+    }
+    else
+    {
+        meta.name = a.sourceName;
+        // A room that came with a STUDIO keeps that STUDIO's room type as a starting point.
+        if (const auto* s = proc.getLibrary().find (proc.getCurrentPresetKey()))
+            meta.type = s->meta.type;
+    }
+
+    const auto tags = room::presets::autoTags (a.toValueTree(), "File");
+    editingRoomKey.clear();
+    roomSaveDialog.open (room::presets::SaveDialog::Mode::save, meta, lib.getPacks(), pack,
+                         "Auto tags:  " + juce::StringArray { tags.decay, tags.tone, tags.source }.joinIntoString ("  \xc2\xb7  "));
+}
+
+juce::String RoomAudioProcessorEditor::submitRoomSaveDialog (room::presets::SaveDialog::Mode mode,
+                                                             const room::presets::PresetMeta& metaIn,
+                                                             const juce::String& pack, bool overwrite)
+{
+    using room::presets::PresetLibrary;
+    auto& lib = proc.getRoomLibrary();
+    auto meta = metaIn;
+
+    if (meta.name.isEmpty())
+        return "Give the ROOM a name.";
+    if (meta.type.isEmpty())
+        return "Pick a type.";
+    if (! PresetLibrary::isValidPackName (pack))
+        return "Choose or name a pack (not Factory).";
+
+    juce::String err;
+    if (! lib.getPacks().contains (pack) && ! lib.createPack (pack, err))
+        return err;
+
+    juce::String key;
+    if (mode == room::presets::SaveDialog::Mode::save)
+    {
+        if (meta.author.isEmpty())
+            meta.author = "User";
+        meta.created = juce::Time::getCurrentTime();
+        const auto tree = proc.captureRoom (meta);
+        if (! tree.isValid())
+            return "There's no room to save. Drop, record or load one first.";
+        if (! lib.save (tree, pack, overwrite, key, err))
+            return err;
+        // The room now goes by its saved name.
+        proc.applyRoom (lib.loadPreset (*lib.find (key)), key);
+    }
+    else
+    {
+        if (! lib.updateMeta (editingRoomKey, meta, pack, key, err))
+            return err;
+        if (editingRoomKey == proc.getCurrentRoomKey())
+            proc.setCurrentRoomKey (key);
+    }
+
+    if (roomBrowser.isVisible())
+        roomBrowser.refresh();
+    return {};
+}
 
 void RoomAudioProcessorEditor::loadPreset (const juce::String& key)
 {
@@ -639,7 +832,7 @@ void RoomAudioProcessorEditor::loadPreset (const juce::String& key)
     const auto tree = lib.loadPreset (*e);
     if (! tree.isValid())
     {
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("ROOMS")
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("STUDIOS")
                                           .withMessage ("\"" + e->meta.name + "\" couldn't be read.").withButton ("OK"), nullptr);
         return;
     }
@@ -674,12 +867,15 @@ void RoomAudioProcessorEditor::openSaveDialog()
         meta = e->meta;
         meta.created = {};
         if (e->factory)
-            meta.author = {};   // a copy of a factory ROOM becomes yours
+            meta.author = {};   // a copy of a factory STUDIO becomes yours
         else
             pack = e->pack;
     }
     else
-        meta.name = proc.getCurrentPresetName();
+        meta.name = proc.getCurrentPresetName().isNotEmpty() ? proc.getCurrentPresetName() : proc.getAnalysis().sourceName;
+    // The STUDIO remembers its room's type (from the ROOM it came from, if it was loaded from ROOMS).
+    if (const auto* r = proc.getRoomLibrary().find (proc.getCurrentRoomKey()))
+        meta.type = r->meta.type;
 
     editingKey.clear();
     saveDialog.open (room::presets::SaveDialog::Mode::save, meta, lib.getPacks(), pack);
@@ -694,9 +890,7 @@ juce::String RoomAudioProcessorEditor::submitSaveDialog (room::presets::SaveDial
     auto meta = metaIn;
 
     if (meta.name.isEmpty())
-        return "Give the ROOM a name.";
-    if (meta.type.isEmpty())
-        return "Pick a type.";
+        return "Give the STUDIO a name.";
     if (! PresetLibrary::isValidPackName (pack))
         return "Choose or name a pack (not Factory).";
 

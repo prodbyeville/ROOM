@@ -1,34 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<ROOM_PRESET version="1" name="Glass Bottle" author="Eville" type="Object"
-             styles="Bright,Metallic" notes="Rings at the bottle's notes."
-             created="2026-10-11T02:40:45.360Z">
-  <PARAMS>
-    <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
-    <PARAM id="eq1Freq" value="100.0"/>
-    <PARAM id="eq1Gain" value="0.0"/>
-    <PARAM id="eq1Q" value="0.7099999785423279"/>
-    <PARAM id="eq2Freq" value="300.0"/>
-    <PARAM id="eq2Gain" value="0.0"/>
-    <PARAM id="eq2Q" value="1.0"/>
-    <PARAM id="eq3Freq" value="1000.0"/>
-    <PARAM id="eq3Gain" value="0.0"/>
-    <PARAM id="eq3Q" value="1.0"/>
-    <PARAM id="eq4Freq" value="3500.0"/>
-    <PARAM id="eq4Gain" value="0.0"/>
-    <PARAM id="eq4Q" value="1.0"/>
-    <PARAM id="eq5Freq" value="8000.0"/>
-    <PARAM id="eq5Gain" value="0.0"/>
-    <PARAM id="eq5Q" value="0.7099999785423279"/>
-    <PARAM id="intensity" value="1.0"/>
-    <PARAM id="mix" value="0.5"/>
-    <PARAM id="space" value="1.0"/>
-    <PARAM id="tail" value="2.5"/>
-    <PARAM id="tape" value="0.0"/>
-  </PARAMS>
-  <ROOM_ANALYSIS valid="1" sourceName="Glass Bottle" durationS="2.0" bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
+<ROOM version="2" name="Glass Bottle" author="Eville" type="Object"
+      styles="Bright,Metallic" notes="A tapped bottle: rings at its notes."
+      created="2026-10-14T11:32:39.745Z">
+  <ROOM_ANALYSIS valid="1" sourceName="Glass Bottle" origin="Factory" durationS="2.0"
+                 bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
                  bandCentersHz="71.4435,101.2945,143.6180,203.6254,288.7054,409.3342,580.3648,822.8565,1166.6676,1654.1321,2345.2720,3325.1885,4714.5400,6684.3989,9477.3174,13437.1904"
                  bandT60s="0.0500,0.0500,0.8996,0.8998,0.8997,0.8997,0.8995,0.7049,0.6998,0.6591,0.5001,0.4221,0.3507,0.3511,0.2424,0.0500"
                  bandConfident="1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000"
@@ -38,4 +14,4 @@
                  peakGains="47.1438,8.0320,58.2732,5.7005,45.1253,22.7133" peakQs="10.0094,2.3785,15.8690,5.3389,24.2762,26.0518"
                  lateEnergyFraction="0.4293780028820038" steady="0" balance="0.1496871411800385"
                  spatialEvidence="0.2640565931797028" tonalEvidence="1.5" medianT60="0.5796136856079102"/>
-</ROOM_PRESET>
+</ROOM>

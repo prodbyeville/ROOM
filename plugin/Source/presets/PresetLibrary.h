@@ -4,12 +4,12 @@
 #include <juce_core/juce_core.h>
 #include <vector>
 
-// ROOMS: the preset library.
+// A library of ROOMS (rooms only) or STUDIOS (full presets). Same layout for both:
 //
-//   Documents/Eville/ROOMS/
-//       favorites.xml         which presets are hearted (factory ones too)
-//       User/My Room.room     each sub-folder is a "pack"
-//       Eville/...
+//   Documents/Eville/ROOMS/              Documents/Eville/STUDIOS/
+//       favorites.xml                        favorites.xml    which are hearted (factory too)
+//       User/Dark Hall.room                  User/Vox Hall.studio   each sub-folder is a "pack"
+//       Eville/...                           Eville/...
 //
 // Plus the built-in "Factory" pack, which is read-only.
 //
@@ -33,9 +33,10 @@ public:
         juce::String factoryXml;   // factory presets: the preset itself
         bool factory = false;
         bool favorite = false;
+        AutoTags tags;             // ROOMS: decay / tone / source, worked out from the room
     };
 
-    enum class SortColumn { name, type, style, author, pack, date, favorite };
+    enum class SortColumn { name, type, style, author, pack, date, favorite, decay, tone, source, madeFor, room };
 
     struct Query
     {
@@ -44,15 +45,28 @@ public:
         bool favoritesOnly = false;
         juce::StringArray types;      // any of these (empty = all)
         juce::StringArray styles;     // must have all of these (empty = all)
+        juce::StringArray madeFor;    // STUDIOS: any of these
+        juce::StringArray autoTags;   // ROOMS: decay / tone / source tags; any within a group, all groups
         SortColumn sortBy = SortColumn::name;
         bool ascending = true;
     };
 
-    /** factory: (name, xml) pairs for the built-in presets. */
-    PresetLibrary (juce::File rootFolder, std::vector<juce::String> factoryPresetsXml);
+    /** factory: the built-in files' XML (ROOM files for a room library). */
+    PresetLibrary (juce::File rootFolder, std::vector<juce::String> factoryXml, Kind = Kind::studio);
 
-    static juce::File defaultRoot();
+    /** Documents/Eville: ROOMS and STUDIOS live in here. */
+    static juce::File defaultBase();
+    static juce::File rootFor (const juce::File& base, Kind k) { return base.getChildFile (k == Kind::room ? "ROOMS" : "STUDIOS"); }
+
     juce::File getRoot() const { return root; }
+    Kind getKind() const { return kind; }
+    const char* noun() const { return kind == Kind::room ? "ROOM" : "STUDIO"; }
+
+    /** Before STUDIOS existed, full presets were saved as .room files in ROOMS.
+        Copies each into STUDIOS (as a .studio) and rewrites the .room as a
+        room-only file. Favorites carry over. Safe to run every time. Returns how
+        many were converted. */
+    static int migrateLegacy (const juce::File& roomsRoot, const juce::File& studiosRoot);
 
     /** Re-reads the folder. Call after files may have changed outside the plugin. */
     void rescan();
@@ -100,6 +114,7 @@ private:
     void saveFavorites() const;
 
     juce::File root;
+    Kind kind;
     std::vector<juce::String> factoryXml;
     std::vector<Entry> entries;
     juce::StringArray favoriteKeys;

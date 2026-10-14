@@ -589,6 +589,8 @@ juce::ValueTree RoomAnalysis::toValueTree() const
     juce::ValueTree t ("ROOM_ANALYSIS");
     t.setProperty ("valid", valid, nullptr);
     t.setProperty ("sourceName", sourceName, nullptr);
+    if (origin.isNotEmpty())
+        t.setProperty ("origin", origin, nullptr);
     t.setProperty ("durationS", durationS, nullptr);
     t.setProperty ("bandEdgesHz", join (bandEdgesHz), nullptr);
     t.setProperty ("bandCentersHz", join (bandCentersHz), nullptr);
@@ -619,6 +621,7 @@ RoomAnalysis RoomAnalysis::fromValueTree (const juce::ValueTree& t)
         return a;
 
     a.sourceName = t["sourceName"].toString();
+    a.origin = t["origin"].toString();
     a.durationS = t["durationS"];
     a.bandEdgesHz = split<float> (t["bandEdgesHz"]);
     a.bandCentersHz = split<float> (t["bandCentersHz"]);

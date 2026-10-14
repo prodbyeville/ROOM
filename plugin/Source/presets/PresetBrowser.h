@@ -2,10 +2,13 @@
 
 #include "../PluginProcessor.h"
 
-// ROOMS preset UI:
-//   PresetBar     - in the header: < [ROOMS | name*] >  heart  Save
+// Library UI, used for both ROOMS (rooms only) and STUDIOS (full presets):
+//   PresetBar     - in the header: < [STUDIOS | name*] >  heart  Save
 //   PresetBrowser - full-window overlay: packs, filters, sortable list, details
-//   SaveDialog    - name, type, styles, pack, notes (also used to edit tags)
+//   SaveDialog    - name, tags, pack, notes (also used to edit tags)
+//
+// Tags: ROOMS have Type + Character, plus Decay / Tone / Source that ROOM works
+// out itself. STUDIOS have Made for + Style.
 
 namespace room::presets
 {
@@ -44,10 +47,12 @@ class SaveDialog : public juce::Component
 public:
     enum class Mode { save, edit };
 
-    SaveDialog();
+    explicit SaveDialog (Kind);
 
-    /** Fill and show. For edit mode, pass the preset's current meta and pack. */
-    void open (Mode, const PresetMeta&, const juce::StringArray& packs, const juce::String& pack);
+    /** Fill and show. For edit mode, pass the current meta and pack.
+        autoInfo: a read-only line (ROOMS: the auto tags). */
+    void open (Mode, const PresetMeta&, const juce::StringArray& packs, const juce::String& pack,
+               const juce::String& autoInfo = {});
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -61,14 +66,15 @@ private:
     void submit();
     juce::Rectangle<int> card() const;
 
+    const Kind kind;
     Mode mode = Mode::save;
     PresetMeta original;
     bool overwriteArmed = false;
 
-    juce::Label title, nameLabel, typeLabel, styleTagLabel, packLabel, notesLabel, error;
+    juce::Label title, nameLabel, typeLabel, styleTagLabel, packLabel, notesLabel, error, autoLabel;
     juce::TextEditor name, notes, newPackName;
-    ChipGroup types { allTypes(), true };
-    ChipGroup styles { allStyles(), false };
+    ChipGroup types;    // ROOMS: Type (pick one)   STUDIOS: Made for (pick any)
+    ChipGroup styles;   // ROOMS: Character         STUDIOS: Style
     juce::ComboBox pack;
     juce::TextButton saveButton { "Save" }, cancelButton { "Cancel" };
 };
@@ -78,7 +84,8 @@ class PresetBrowser : public juce::Component,
                       private juce::TableListBoxModel
 {
 public:
-    explicit PresetBrowser (RoomAudioProcessor&);
+    PresetBrowser (RoomAudioProcessor&, Kind);
+    Kind getKind() const { return kind; }
 
     /** Re-read the library and refresh everything. */
     void refresh();
@@ -114,10 +121,13 @@ private:
     void importPresets();
     void exportPack();
     void deleteSelected();
+    PresetLibrary& lib() const;
+    juce::String currentKey() const;
 
     struct PackRow { juce::String label, pack; bool favorites = false; int count = 0; };
 
     RoomAudioProcessor& proc;
+    const Kind kind;
     PresetLibrary::Query query;
 
     juce::TextEditor search;
@@ -129,14 +139,15 @@ private:
     std::vector<PackRow> packRows;
     int selectedPackRow = 0;
     juce::TextButton newPackButton { "+ New pack" }, importButton { "Import..." }, exportButton { "Export..." };
-    juce::Label typesLabel, stylesLabel, packsLabel;
-    ChipGroup typeChips { allTypes(), false };
-    ChipGroup styleChips { allStyles(), false };
+    juce::Label typesLabel, stylesLabel, autoTagsLabel, packsLabel;
+    ChipGroup typeChips;    // ROOMS: Type     STUDIOS: Made for
+    ChipGroup styleChips;   // ROOMS: Character  STUDIOS: Style
+    ChipGroup autoChips;    // ROOMS: Decay / Tone / Source
     juce::TextButton clearFilters { "Clear filters" };
     juce::Rectangle<int> sidebarArea, detailArea;
 
     // List
-    juce::TableListBox table { "ROOMS", this };
+    juce::TableListBox table { "LIBRARY", this };
     std::vector<int> rows;
 
     // Details
@@ -152,7 +163,7 @@ private:
 class PresetBar : public juce::Component
 {
 public:
-    PresetBar();
+    explicit PresetBar (const juce::String& label);
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
     void resized() override;
@@ -165,7 +176,7 @@ public:
 private:
     juce::Rectangle<int> nameArea() const;
 
-    juce::String name;
+    juce::String label, name;
     bool modified = false, favorite = false, canFavorite = false;
     juce::TextButton prev { "<" }, next { ">" }, heart, save { "Save" };
 };

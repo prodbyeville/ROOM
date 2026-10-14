@@ -18,11 +18,13 @@ USE
 3. ROOM listens to that sound and builds a room from it.
 
 LAYOUT (top to bottom)
-  Top bar    ROOMS preset bar, heart, Save | Advanced, Randomize,
+  Top bar    STUDIOS bar, heart, Save | Advanced, Randomize,
              Dry/Wet, Out, Bypass
   1 LOAD     drop a sound (or click to browse), or press the red record
              button and play / clap / sing into the track (press again to
-             stop, max 30 s): that becomes the room
+             stop, max 30 s): that becomes the room.
+             Folder icon = load a saved ROOM, arrow icon = save this room
+             as a ROOM
   2 ROOM     what ROOM measured (decay per band, tone), then
              Intensity  how strongly the room's character is applied
              Balance    tone (resonances + EQ) vs space (tail). "Auto" uses
@@ -36,7 +38,9 @@ LAYOUT (top to bottom)
 TOP BAR
   Advanced   swaps the bottom section for the ADVANCED screen (below)
   Randomize  new random knob settings in musical ranges. Keeps your room,
-             Dry/Wet, Out, Bypass and Freeze
+             Dry/Wet, Out, Bypass and Freeze. Right-click it to choose what
+             gets randomized: room knobs, Advanced, EQ bands, Tape + Auto EQ,
+             LFO settings (off by default)
   Dry/Wet    blend of your original sound and the room
   Out        output volume
   Bypass     turns ROOM off (no timing shift)
@@ -49,33 +53,56 @@ ADVANCED SCREEN
   Release    how fast the room comes back after ducking
   Freeze     holds the current tail forever (pads, transitions)
   Below the Advanced knobs are two tabs:
-  ROOM INFO  everything ROOM measured: balance, decay per band (measured
-             and as your knobs set it now), resonances, length
-  MODULATION two LFOs. Drag an LFO's handle onto any knob to make it
-             move that knob. A coloured ring shows how far it swings it.
-             Right-click any knob to add an LFO, change the depth (10-100%),
+  MODULATION two LFOs (this tab opens first). Drag an LFO's handle onto any
+             knob to make it move that knob. A coloured ring shows how far
+             it swings it, and a small dot appears next to the knob: drag
+             the dot up/down to set the amount (Shift = fine), double-click
+             it to remove. Each LFO also lists the knobs it moves as chips
+             you can drag the same way.
+             Right-click any knob to add an LFO, pick a depth (10-100%),
              invert it or remove it.
+             Clear LFOs removes every assignment and resets both LFOs (your
+             knobs stay where they are).
              Shape: sine, triangle, saw up/down, square, S&H, smooth random
              Rate in Hz, or Sync to the song tempo (1/32 note .. 8 bars)
              Retrig restarts the LFO when you press play
              The knob itself never moves, so automation still works.
-             LFO assignments are saved in your project and in ROOMS presets.
+             LFO assignments are saved in your project and in STUDIOS.
+  ROOM INFO  everything ROOM measured: balance, decay per band (measured
+             and as your knobs set it now), resonances, length
 
 The window can be resized from the bottom-right corner.
 
-ROOMS (presets)
-  The bar at the top shows the current ROOM. Click it to open the browser.
-  < >        step through ROOMS (in the browser's current list and order)
-  Heart      favorite the current ROOM
-  Save       save the current sound as a ROOM: name, type, styles, pack, notes
-  Browser    search, filter by pack / type / style, click a column to sort,
-             heart to favorite, double-click to load. Your own ROOMS can be
-             edited (rename, retag, move pack) or deleted.
-  A ROOM stores the analyzed room and every knob except Output.
+SAVING: ROOMS and STUDIOS
+  There are two things you can save:
 
-  Your ROOMS live in:  Documents\Eville\ROOMS
-  Each folder in there is a pack. Copy .room files in or out to share them,
-  or use Import... / Export... in the browser.
+  ROOM     just the room: its decay per band, tone, resonances and balance
+           (what makes that space unique). No knobs. Loading a ROOM swaps the
+           room and keeps all your knobs and LFOs.
+           Save / load with the two icons in tier 1, next to Record.
+           Tags: Type and Character (you pick), plus Decay (Short / Medium /
+           Long), Tone (Dark / Neutral / Bright) and Source (Factory / File /
+           Recorded), which ROOM works out by itself.
+
+  STUDIO   the whole sound: the room plus every knob and the LFOs.
+           The bar at the top: click it to open the browser.
+           < >    step through STUDIOS (in the browser's current list/order)
+           Heart  favorite the current STUDIO
+           Save   save the current sound as a STUDIO
+           Tags: Made for (Vocals, Drums, Keys, Guitar, Bass, Synth,
+           Bus/Master, FX) and Style. A STUDIO also remembers its room's name.
+           Output, Bypass and Freeze are never saved in a STUDIO.
+
+  Both browsers: search, filter by pack and tags, click a column to sort,
+  heart to favorite, double-click to load. Your own can be edited (rename,
+  retag, move pack) or deleted.
+
+  Where they live:  Documents\Eville\ROOMS    (.room files)
+                    Documents\Eville\STUDIOS  (.studio files)
+  Each folder in there is a pack. Copy files in or out to share them, or use
+  Import... / Export... in the browser.
+  Presets you saved with an earlier build are moved over automatically: each
+  one becomes a STUDIO, and its room becomes a ROOM with the same name.
 
 Note: Auto EQ adds about 43 ms of latency, which your DAW compensates for
 automatically (plugin delay compensation).

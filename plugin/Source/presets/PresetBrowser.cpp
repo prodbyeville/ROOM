@@ -6,7 +6,16 @@ namespace room::presets
 
 namespace
 {
-    enum Column { colName = 1, colType, colStyle, colPack, colFav };
+    enum Column { colName = 1, colType, colStyle, colPack, colFav, colDecay, colTone, colSource, colMadeFor, colRoom };
+
+    juce::StringArray allAutoTags()
+    {
+        juce::StringArray a;
+        a.addArray (allDecayTags());
+        a.addArray (allToneTags());
+        a.addArray (allSources());
+        return a;
+    }
 
     const juce::Colour rowAlt { 0xff19191d };
     const juce::Colour selectedRow { 0xff2a2a33 };
@@ -139,20 +148,24 @@ void ChipGroup::resized()
 //==============================================================================
 // Save dialog
 
-SaveDialog::SaveDialog()
+SaveDialog::SaveDialog (Kind k)
+    : kind (k),
+      types (k == Kind::room ? allTypes() : allMadeFor(), k == Kind::room),
+      styles (allStyles(), false)
 {
     setWantsKeyboardFocus (true);
-    styleLabel (title, "Save ROOM", 16.0f);
+    styleLabel (title, "Save", 16.0f);
     title.setColour (juce::Label::textColourId, Colours::text);
     styleLabel (nameLabel, "NAME");
-    styleLabel (typeLabel, "TYPE");
-    styleLabel (styleTagLabel, "STYLE  (pick any)");
+    styleLabel (typeLabel, kind == Kind::room ? "TYPE" : "MADE FOR  (pick any)");
+    styleLabel (styleTagLabel, kind == Kind::room ? "CHARACTER  (pick any)" : "STYLE  (pick any)");
+    styleLabel (autoLabel, {}, 12.0f, false);
     styleLabel (packLabel, "PACK");
     styleLabel (notesLabel, "NOTES");
     styleLabel (error, {}, 12.0f, false);
     error.setColour (juce::Label::textColourId, Colours::reduction);
 
-    styleTextEditor (name, "Name this room");
+    styleTextEditor (name, kind == Kind::room ? "Name this room" : "Name this studio");
     styleTextEditor (notes, "Optional");
     styleTextEditor (newPackName, "New pack name");
     name.onReturnKey = [this] { submit(); };
@@ -174,22 +187,28 @@ SaveDialog::SaveDialog()
 
     for (juce::Component* c : { (juce::Component*) &title, (juce::Component*) &nameLabel, (juce::Component*) &typeLabel,
                                 (juce::Component*) &styleTagLabel, (juce::Component*) &packLabel, (juce::Component*) &notesLabel,
-                                (juce::Component*) &error, (juce::Component*) &name, (juce::Component*) &notes,
+                                (juce::Component*) &error, (juce::Component*) &autoLabel, (juce::Component*) &name, (juce::Component*) &notes,
                                 (juce::Component*) &types, (juce::Component*) &styles, (juce::Component*) &pack,
                                 (juce::Component*) &newPackName, (juce::Component*) &saveButton, (juce::Component*) &cancelButton })
         addAndMakeVisible (c);
 }
 
-void SaveDialog::open (Mode m, const PresetMeta& meta, const juce::StringArray& packs, const juce::String& currentPack)
+void SaveDialog::open (Mode m, const PresetMeta& meta, const juce::StringArray& packs, const juce::String& currentPack,
+                       const juce::String& autoInfo)
 {
     mode = m;
     original = meta;
     overwriteArmed = false;
-    title.setText (m == Mode::save ? "Save ROOM" : "Edit ROOM", juce::dontSendNotification);
+    const juce::String noun = kind == Kind::room ? "ROOM" : "STUDIO";
+    title.setText ((m == Mode::save ? "Save " : "Edit ") + noun
+                       + (kind == Kind::room ? "   (the room only: decay, tone, resonances)" : "   (room + every knob + LFOs)"),
+                   juce::dontSendNotification);
+    autoLabel.setText (autoInfo, juce::dontSendNotification);
+    autoLabel.setVisible (autoInfo.isNotEmpty());
     saveButton.setButtonText (m == Mode::save ? "Save" : "Apply");
     name.setText (meta.name, juce::dontSendNotification);
     notes.setText (meta.notes, juce::dontSendNotification);
-    types.setSelected (juce::StringArray (meta.type));
+    types.setSelected (kind == Kind::room ? juce::StringArray (meta.type) : meta.madeFor);
     styles.setSelected (meta.styles);
     error.setText ({}, juce::dontSendNotification);
 
@@ -222,7 +241,10 @@ void SaveDialog::submit()
     m.name = name.getText().trim();
     m.notes = notes.getText().trim();
     const auto t = types.getSelected();
-    m.type = t.isEmpty() ? juce::String() : t[0];
+    if (kind == Kind::room)
+        m.type = t.isEmpty() ? juce::String() : t[0];
+    else
+        m.madeFor = t;
     m.styles = styles.getSelected();
 
     const auto targetPack = pack.getSelectedId() == 1 ? newPackName.getText().trim() : pack.getText();
@@ -247,7 +269,7 @@ void SaveDialog::submit()
 
 juce::Rectangle<int> SaveDialog::card() const
 {
-    return getLocalBounds().withSizeKeepingCentre (std::min (480, getWidth() - 40), std::min (450, getHeight() - 40));
+    return getLocalBounds().withSizeKeepingCentre (std::min (520, getWidth() - 40), std::min (480, getHeight() - 40));
 }
 
 void SaveDialog::paint (juce::Graphics& g)
@@ -268,6 +290,11 @@ void SaveDialog::resized()
     nameLabel.setBounds (r.removeFromTop (16));
     name.setBounds (r.removeFromTop (32));
     r.removeFromTop (10);
+    if (autoLabel.isVisible())
+    {
+        autoLabel.setBounds (r.removeFromTop (18));
+        r.removeFromTop (6);
+    }
     typeLabel.setBounds (r.removeFromTop (16));
     types.setBounds (r.removeFromTop (types.heightForWidth (r.getWidth())));
     r.removeFromTop (10);
@@ -310,11 +337,16 @@ bool SaveDialog::keyPressed (const juce::KeyPress& k)
 //==============================================================================
 // Browser
 
-PresetBrowser::PresetBrowser (RoomAudioProcessor& p) : proc (p)
+PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
+    : proc (p), kind (k),
+      typeChips (k == Kind::room ? allTypes() : allMadeFor(), false),
+      styleChips (allStyles(), false),
+      autoChips (allAutoTags(), false)
 {
     setWantsKeyboardFocus (true);
 
-    styleTextEditor (search, "Search names, types, styles, notes...");
+    styleTextEditor (search, kind == Kind::room ? "Search names, types, character, decay, tone..."
+                                                 : "Search names, made for, styles, rooms...");
     search.onTextChange = [this] { query.search = search.getText(); updateRows(); };
     search.onEscapeKey = [this] { if (onClose) onClose(); };
     addAndMakeVisible (search);
@@ -329,8 +361,9 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p) : proc (p)
 
     // Sidebar
     styleLabel (packsLabel, "PACKS");
-    styleLabel (typesLabel, "TYPE");
-    styleLabel (stylesLabel, "STYLE");
+    styleLabel (typesLabel, kind == Kind::room ? "TYPE" : "MADE FOR");
+    styleLabel (stylesLabel, kind == Kind::room ? "CHARACTER" : "STYLE");
+    styleLabel (autoTagsLabel, juce::String::fromUTF8 ("DECAY  \xc2\xb7  TONE  \xc2\xb7  SOURCE"));
     for (auto* b : { &newPackButton, &importButton, &exportButton, &clearFilters })
     {
         styleButton (*b);
@@ -345,25 +378,52 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p) : proc (p)
     {
         typeChips.setSelected ({});
         styleChips.setSelected ({});
+        autoChips.setSelected ({});
         query.types.clear();
+        query.madeFor.clear();
         query.styles.clear();
+        query.autoTags.clear();
         updateRows();
     };
-    typeChips.onChange = [this] { query.types = typeChips.getSelected(); updateRows(); };
+    typeChips.onChange = [this]
+    {
+        if (kind == Kind::room) query.types = typeChips.getSelected();
+        else                    query.madeFor = typeChips.getSelected();
+        updateRows();
+    };
     styleChips.onChange = [this] { query.styles = styleChips.getSelected(); updateRows(); };
+    autoChips.onChange = [this] { query.autoTags = autoChips.getSelected(); updateRows(); };
     for (auto* c : { (juce::Component*) &packsLabel, (juce::Component*) &typesLabel, (juce::Component*) &stylesLabel,
                      (juce::Component*) &typeChips, (juce::Component*) &styleChips })
         addAndMakeVisible (c);
+    if (kind == Kind::room)
+    {
+        addAndMakeVisible (autoTagsLabel);
+        addAndMakeVisible (autoChips);
+    }
 
     // Table
     table.setColour (juce::ListBox::backgroundColourId, Colours::background);
     table.setColour (juce::ListBox::outlineColourId, juce::Colours::transparentBlack);
     table.setRowHeight (30);
     auto& h = table.getHeader();
-    h.addColumn ("Name", colName, 170, 80, 400, juce::TableHeaderComponent::defaultFlags);
-    h.addColumn ("Type", colType, 90, 60, 160, juce::TableHeaderComponent::defaultFlags);
-    h.addColumn ("Style", colStyle, 140, 60, 260, juce::TableHeaderComponent::defaultFlags);
-    h.addColumn ("Pack", colPack, 70, 50, 160, juce::TableHeaderComponent::defaultFlags);
+    const auto colFlags = juce::TableHeaderComponent::defaultFlags;
+    if (kind == Kind::room)
+    {
+        h.addColumn ("Name", colName, 120, 80, 400, colFlags);
+        h.addColumn ("Type", colType, 92, 50, 160, colFlags);
+        h.addColumn ("Character", colStyle, 120, 60, 260, colFlags);
+        h.addColumn ("Decay", colDecay, 58, 44, 100, colFlags);
+        h.addColumn ("Tone", colTone, 62, 44, 100, colFlags);
+    }
+    else
+    {
+        h.addColumn ("Name", colName, 140, 80, 400, colFlags);
+        h.addColumn ("Made for", colMadeFor, 90, 60, 200, colFlags);
+        h.addColumn ("Style", colStyle, 100, 60, 260, colFlags);
+        h.addColumn ("Room", colRoom, 90, 60, 200, colFlags);
+        h.addColumn ("Pack", colPack, 60, 44, 160, colFlags);
+    }
     h.addColumn ({}, colFav, 30, 30, 30, juce::TableHeaderComponent::notResizableOrSortable | juce::TableHeaderComponent::sortable);
     h.setStretchToFitActive (true);
     h.setSortColumnId (colName, true);
@@ -384,7 +444,7 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p) : proc (p)
     {
         if (auto* e = selectedEntry())
         {
-            proc.getLibrary().setFavorite (e->key, ! e->favorite);
+            lib().setFavorite (e->key, ! e->favorite);
             updateRows();
         }
     };
@@ -394,6 +454,16 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p) : proc (p)
         addAndMakeVisible (b);
 
     refresh();
+}
+
+PresetLibrary& PresetBrowser::lib() const
+{
+    return kind == Kind::room ? proc.getRoomLibrary() : proc.getLibrary();
+}
+
+juce::String PresetBrowser::currentKey() const
+{
+    return kind == Kind::room ? proc.getCurrentRoomKey() : proc.getCurrentPresetKey();
 }
 
 void PresetBrowser::visibilityChanged()
@@ -407,7 +477,7 @@ void PresetBrowser::visibilityChanged()
 
 void PresetBrowser::refresh()
 {
-    auto& lib = proc.getLibrary();
+    auto& lib = this->lib();
     lib.rescan();
 
     const auto previousPack = selectedPackRow < (int) packRows.size() ? packRows[(size_t) selectedPackRow] : PackRow {};
@@ -450,7 +520,7 @@ void PresetBrowser::refresh()
 
 void PresetBrowser::updateRows()
 {
-    auto& lib = proc.getLibrary();
+    auto& lib = this->lib();
     const auto& pr = packRows[(size_t) juce::jlimit (0, (int) packRows.size() - 1, selectedPackRow)];
     query.pack = pr.pack;
     query.favoritesOnly = pr.favorites;
@@ -460,7 +530,7 @@ void PresetBrowser::updateRows()
     if (packRows.size() > 1)
         packRows[1].count = lib.countFavorites();
 
-    countLabel.setText (juce::String ((int) rows.size()) + " of " + juce::String ((int) lib.getEntries().size()) + " ROOMS"
+    countLabel.setText (juce::String ((int) rows.size()) + " of " + juce::String ((int) lib.getEntries().size()) + (kind == Kind::room ? " ROOMS" : " STUDIOS")
                             + (lib.getUnreadableCount() > 0 ? "  (" + juce::String (lib.getUnreadableCount()) + " unreadable)" : juce::String()),
                         juce::dontSendNotification);
     table.updateContent();
@@ -472,7 +542,7 @@ void PresetBrowser::updateRows()
             sel = i;
     if (sel < 0 && selectedKey.isEmpty())
         for (int i = 0; i < (int) rows.size(); ++i)
-            if (lib.getEntries()[(size_t) rows[(size_t) i]].key == proc.getCurrentPresetKey())
+            if (lib.getEntries()[(size_t) rows[(size_t) i]].key == currentKey())
                 sel = i;
     if (sel >= 0)
         table.selectRow (sel, false, true);
@@ -484,12 +554,12 @@ void PresetBrowser::updateRows()
 
 std::vector<int> PresetBrowser::currentList() const
 {
-    return proc.getLibrary().query (query);
+    return lib().query (query);
 }
 
 const PresetLibrary::Entry* PresetBrowser::selectedEntry() const
 {
-    return selectedKey.isEmpty() ? nullptr : proc.getLibrary().find (selectedKey);
+    return selectedKey.isEmpty() ? nullptr : lib().find (selectedKey);
 }
 
 void PresetBrowser::showDetailsFor (const PresetLibrary::Entry* e)
@@ -510,7 +580,7 @@ void PresetBrowser::paintRowBackground (juce::Graphics& g, int row, int w, int h
 {
     g.fillAll (selected ? selectedRow : (row % 2 ? rowAlt : Colours::background));
     if (row >= 0 && row < (int) rows.size()
-        && proc.getLibrary().getEntries()[(size_t) rows[(size_t) row]].key == proc.getCurrentPresetKey())
+        && lib().getEntries()[(size_t) rows[(size_t) row]].key == currentKey())
     {
         g.setColour (Colours::accent);
         g.fillRect (0, 0, 3, h);
@@ -522,8 +592,8 @@ void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h
 {
     if (row < 0 || row >= (int) rows.size())
         return;
-    const auto& e = proc.getLibrary().getEntries()[(size_t) rows[(size_t) row]];
-    const auto current = e.key == proc.getCurrentPresetKey();
+    const auto& e = lib().getEntries()[(size_t) rows[(size_t) row]];
+    const auto current = e.key == currentKey();
     juce::String text;
     auto colour = Colours::dim.brighter (0.25f);
     switch (col)
@@ -531,6 +601,11 @@ void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h
         case colName:  text = e.meta.name; colour = current ? Colours::accent : Colours::text; break;
         case colType:  text = e.meta.type; colour = Colours::accent2; break;
         case colStyle: text = e.meta.styles.joinIntoString (" \xc2\xb7 "); break;
+        case colDecay: text = e.tags.decay.isEmpty() ? juce::String() : e.tags.medianT60 <= 0.0f ? juce::String ("steady") : juce::String (e.tags.medianT60, 1) + " s"; break;
+        case colTone:  text = e.tags.tone; break;
+        case colSource: text = e.tags.source; break;
+        case colMadeFor: text = e.meta.madeFor.joinIntoString (" \xc2\xb7 "); colour = Colours::accent2; break;
+        case colRoom:  text = e.meta.roomName; break;
         case colPack:  text = e.pack; break;
         case colFav:
             drawHeart (g, juce::Rectangle<float> ((float) w, (float) h).reduced (8.0f, 9.0f), e.favorite,
@@ -547,8 +622,8 @@ void PresetBrowser::cellClicked (int row, int col, const juce::MouseEvent&)
 {
     if (col == colFav && row >= 0 && row < (int) rows.size())
     {
-        const auto& e = proc.getLibrary().getEntries()[(size_t) rows[(size_t) row]];
-        proc.getLibrary().setFavorite (e.key, ! e.favorite);
+        const auto& e = lib().getEntries()[(size_t) rows[(size_t) row]];
+        lib().setFavorite (e.key, ! e.favorite);
         updateRows();
     }
 }
@@ -561,13 +636,13 @@ void PresetBrowser::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 void PresetBrowser::returnKeyPressed (int row)
 {
     if (row >= 0 && row < (int) rows.size() && onLoad)
-        onLoad (proc.getLibrary().getEntries()[(size_t) rows[(size_t) row]].key);
+        onLoad (lib().getEntries()[(size_t) rows[(size_t) row]].key);
 }
 
 void PresetBrowser::selectedRowsChanged (int row)
 {
     selectedKey = row >= 0 && row < (int) rows.size()
-                      ? proc.getLibrary().getEntries()[(size_t) rows[(size_t) row]].key
+                      ? lib().getEntries()[(size_t) rows[(size_t) row]].key
                       : juce::String();
     showDetailsFor (selectedEntry());
 }
@@ -580,6 +655,11 @@ void PresetBrowser::sortOrderChanged (int columnId, bool forwards)
         case colType:  query.sortBy = S::type; break;
         case colStyle: query.sortBy = S::style; break;
         case colPack:  query.sortBy = S::pack; break;
+        case colDecay: query.sortBy = S::decay; break;
+        case colTone:  query.sortBy = S::tone; break;
+        case colSource: query.sortBy = S::source; break;
+        case colMadeFor: query.sortBy = S::madeFor; break;
+        case colRoom:  query.sortBy = S::room; break;
         case colFav:   query.sortBy = S::favorite; break;
         default:       query.sortBy = S::name; break;
     }
@@ -592,7 +672,7 @@ void PresetBrowser::sortOrderChanged (int columnId, bool forwards)
 
 void PresetBrowser::newPack()
 {
-    auto* w = new juce::AlertWindow ("New pack", "Name the new pack (a folder in ROOMS).", juce::MessageBoxIconType::NoIcon, this);
+    auto* w = new juce::AlertWindow ("New pack", juce::String ("Name the new pack (a folder in ") + (kind == Kind::room ? "ROOMS" : "STUDIOS") + ").", juce::MessageBoxIconType::NoIcon, this);
     w->addTextEditor ("name", {}, "Pack name");
     w->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -601,7 +681,7 @@ void PresetBrowser::newPack()
         if (result == 1)
         {
             juce::String err;
-            if (proc.getLibrary().createPack (w->getTextEditorContents ("name"), err))
+            if (lib().createPack (w->getTextEditorContents ("name"), err))
                 refresh();
             else
                 juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("New pack").withMessage (err).withButton ("OK"), nullptr);
@@ -613,7 +693,8 @@ void PresetBrowser::importPresets()
 {
     const auto& pr = packRows[(size_t) selectedPackRow];
     const auto target = PresetLibrary::isValidPackName (pr.pack) ? pr.pack : juce::String (PresetLibrary::userPack);
-    chooser = std::make_unique<juce::FileChooser> ("Import ROOMS into \"" + target + "\"", juce::File(), "*.room");
+    chooser = std::make_unique<juce::FileChooser> (juce::String ("Import ") + (kind == Kind::room ? "ROOMS" : "STUDIOS") + " into \"" + target + "\"",
+                                                   juce::File(), kind == Kind::room ? "*.room" : "*.studio;*.room");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                               | juce::FileBrowserComponent::canSelectMultipleItems,
                           [this, target] (const juce::FileChooser& fc)
@@ -621,7 +702,7 @@ void PresetBrowser::importPresets()
                               const auto files = fc.getResults();
                               if (files.isEmpty())
                                   return;
-                              const auto n = proc.getLibrary().importFiles (files, target);
+                              const auto n = lib().importFiles (files, target);
                               refresh();
                               juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("Import")
                                                                 .withMessage ("Imported " + juce::String (n) + " of "
@@ -640,7 +721,7 @@ void PresetBrowser::exportPack()
                               const auto dir = fc.getResult();
                               if (dir == juce::File())
                                   return;
-                              const auto ok = proc.getLibrary().exportPack (pack, dir);
+                              const auto ok = lib().exportPack (pack, dir);
                               juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("Export")
                                                                 .withMessage (ok ? "Exported to " + dir.getFullPathName()
                                                                                  : "Some presets couldn't be exported.")
@@ -654,7 +735,7 @@ void PresetBrowser::deleteSelected()
     if (e == nullptr || e->factory)
         return;
     const auto key = e->key;
-    juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("Delete ROOM")
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle (juce::String ("Delete ") + lib().noun())
                                       .withMessage ("Delete \"" + e->meta.name + "\"? This can't be undone.")
                                       .withButton ("Delete").withButton ("Cancel")
                                       .withAssociatedComponent (this),
@@ -662,7 +743,7 @@ void PresetBrowser::deleteSelected()
                                   {
                                       if (result != 1)
                                           return;
-                                      proc.getLibrary().remove (key);
+                                      lib().remove (key);
                                       selectedKey.clear();
                                       refresh();
                                   });
@@ -687,7 +768,7 @@ void PresetBrowser::paint (juce::Graphics& g)
     // Title
     g.setColour (Colours::text);
     g.setFont (uiFont (20.0f, true));
-    g.drawText ("ROOMS", 20, 0, 120, 56, juce::Justification::centredLeft);
+    g.drawText (kind == Kind::room ? "ROOMS" : "STUDIOS", 20, 0, 120, 56, juce::Justification::centredLeft);
 
     // Panels
     g.setColour (Colours::panel);
@@ -728,7 +809,9 @@ void PresetBrowser::paint (juce::Graphics& g)
     {
         g.setColour (Colours::dim);
         g.setFont (uiFont (13.0f));
-        g.drawFittedText ("Select a ROOM to see its details.\nDouble-click to load it.", d.withHeight (60),
+        g.drawFittedText (juce::String ("Select a ") + lib().noun() + " to see its details.\nDouble-click to load it."
+                              + (kind == Kind::room ? "\n\nLoading a ROOM only swaps the room. Your knobs and LFOs stay." : ""),
+                          d.withHeight (110),
                           juce::Justification::topLeft, 3);
         return;
     }
@@ -746,18 +829,30 @@ void PresetBrowser::paint (juce::Graphics& g)
         auto row = d.removeFromTop (20);
         g.setColour (Colours::dim);
         g.setFont (uiFont (12.0f));
-        g.drawText (k, row.removeFromLeft (64), juce::Justification::centredLeft);
+        g.drawText (k, row.removeFromLeft (76), juce::Justification::centredLeft);
         g.setColour (Colours::text);
         g.drawText (v.isNotEmpty() ? v : juce::String ("-"), row, juce::Justification::centredLeft, true);
     };
-    line ("Type", e->meta.type);
-    line ("Style", e->meta.styles.joinIntoString (", "));
+    if (kind == Kind::room)
+    {
+        line ("Type", e->meta.type);
+        line ("Character", e->meta.styles.joinIntoString (", "));
+        line ("Decay", e->tags.decay);
+        line ("Tone", e->tags.tone);
+        line ("Source", e->tags.source);
+    }
+    else
+    {
+        line ("Made for", e->meta.madeFor.joinIntoString (", "));
+        line ("Style", e->meta.styles.joinIntoString (", "));
+        line ("Room", e->meta.roomName);
+    }
     line ("Pack", e->pack + (e->factory ? "  (built in)" : ""));
     if (e->meta.created.toMilliseconds() > 0)
         line ("Saved", e->meta.created.formatted ("%d %b %Y"));
 
     // Room summary, read from the preset itself
-    const auto tree = proc.getLibrary().loadPreset (*e);
+    const auto tree = lib().loadPreset (*e);
     const auto a = RoomAnalysis::fromValueTree (tree.getChildWithName ("ROOM_ANALYSIS"));
     d.removeFromTop (8);
     g.setColour (Colours::outline);
@@ -766,7 +861,7 @@ void PresetBrowser::paint (juce::Graphics& g)
     if (a.valid)
     {
         line ("Balance", juce::String (a.balance, 2) + (a.balance > 0.6f ? "  spatial" : a.balance < 0.4f ? "  tonal" : "  in between"));
-        line ("Decay", a.steady ? juce::String ("steady sound") : juce::String (a.medianT60, 2) + " s");
+        line ("Decay time", a.steady ? juce::String ("steady sound") : juce::String (a.medianT60, 2) + " s");
         line ("Rings", juce::String ((int) a.peaks.size()) + " resonance" + (a.peaks.size() == 1 ? "" : "s"));
     }
     else
@@ -795,7 +890,7 @@ void PresetBrowser::resized()
     r = r.reduced (16, 0).withTrimmedBottom (16);
     sidebarArea = r.removeFromLeft (200);
     r.removeFromLeft (12);
-    detailArea = r.removeFromRight (230);
+    detailArea = r.removeFromRight (kind == Kind::room ? 200 : 230);
     r.removeFromRight (12);
     table.setBounds (r);
 
@@ -830,6 +925,12 @@ void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
     s.removeFromTop (10);
     stylesLabel.setBounds (s.removeFromTop (18));
     styleChips.setBounds (s.removeFromTop (styleChips.heightForWidth (s.getWidth())));
+    if (kind == Kind::room)
+    {
+        s.removeFromTop (10);
+        autoTagsLabel.setBounds (s.removeFromTop (18));
+        autoChips.setBounds (s.removeFromTop (autoChips.heightForWidth (s.getWidth())));
+    }
     s.removeFromTop (6);
     clearFilters.setBounds (s.removeFromTop (24).removeFromLeft (100));
 }
@@ -837,7 +938,7 @@ void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
 //==============================================================================
 // Header bar
 
-PresetBar::PresetBar()
+PresetBar::PresetBar (const juce::String& l) : label (l)
 {
     for (auto* b : { &prev, &next, &save })
     {
@@ -884,13 +985,14 @@ void PresetBar::paint (juce::Graphics& g)
     auto tr = nameArea().reduced (10, 0);
     g.setColour (Colours::accent);
     g.setFont (uiFont (11.0f, true));
-    g.drawText ("ROOMS", tr.removeFromLeft (46), juce::Justification::centredLeft);
+    const auto lw = juce::GlyphArrangement::getStringWidthInt (uiFont (11.0f, true), label) + 8;
+    g.drawText (label, tr.removeFromLeft (lw), juce::Justification::centredLeft);
     g.setColour (Colours::outline);
     g.drawVerticalLine (tr.getX(), r.getY() + 7.0f, r.getBottom() - 7.0f);
     tr.removeFromLeft (10);
     g.setColour (name.isEmpty() ? Colours::dim : Colours::text);
     g.setFont (uiFont (14.0f, name.isNotEmpty()));
-    g.drawText ((name.isEmpty() ? juce::String ("No preset") : name) + (modified ? " *" : ""), tr.withTrimmedRight (16),
+    g.drawText ((name.isEmpty() ? juce::String ("Init") : name) + (modified && name.isNotEmpty() ? " *" : ""), tr.withTrimmedRight (16),
                 juce::Justification::centredLeft, true);
     // little "open" chevron
     juce::Path chev;

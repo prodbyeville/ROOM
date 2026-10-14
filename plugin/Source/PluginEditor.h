@@ -7,8 +7,8 @@
 
 // Working UI (layout settled, visual design still to come):
 //
-//   [ROOM] [< ROOMS | preset * >] [heart] [save]    [adv] [rand] (mix) (out) [bypass]
-//   1  LOAD    [ drop zone ...................................................... ]
+//   [ROOM] [< STUDIOS | name * >] [heart] [save]    [adv] [rand] (mix) (out) [bypass]
+//   1  LOAD    [rec] [ROOMS load] [ROOM save] [ drop zone ......................... ]
 //   2  ROOM    [ decay per band          ] [ tone (EQ + resonances)          ]
 //              INTENSITY      BALANCE      TAIL      SPACE
 //   3  FINISH  [ EQ display ..................................... ]  TAPE / AUTO EQ
@@ -58,13 +58,17 @@ private:
     float intensity = 1.0f, size = 1.0f, damping = 0.0f;
 };
 
-/** Small icon button for the top bar (randomize, bypass, advanced). */
+/** Small icon button (randomize, bypass, advanced, record, load, save). */
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { randomize, power, advanced, record };
+    enum class Icon { randomize, power, advanced, record, load, save };
     IconButton (Icon i, const juce::String& tooltip);
     void paintButton (juce::Graphics&, bool over, bool down) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+    /** Called on right-click (instead of a click). */
+    std::function<void()> onRightClick;
 
 private:
     Icon icon;
@@ -115,7 +119,8 @@ private:
 
     // Top bar
     IconButton advancedButton { IconButton::Icon::advanced, "Advanced: pre-delay, size, damping, ducking, freeze, room info" };
-    IconButton randomButton { IconButton::Icon::randomize, "Randomize the knobs (keeps the room, Dry/Wet and Output)" };
+    IconButton randomButton { IconButton::Icon::randomize, "Randomize the knobs (keeps the room, Dry/Wet and Output). Right-click to choose what gets randomized." };
+    void showRandomizeMenu();
     IconButton bypassButton { IconButton::Icon::power, "Bypass" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     Knob mix, output;   // small knobs in the top bar
@@ -125,6 +130,8 @@ private:
     DropZone dropZone;
     juce::TextButton clearButton { "Clear" };
     IconButton recordButton { IconButton::Icon::record, "Record a room: play, clap or sing into this track, then press again to stop (max 30 s)" };
+    IconButton roomLoadButton { IconButton::Icon::load, "ROOMS: load a saved room (only the room changes, your knobs stay)" };
+    IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
 
     // Tier 2
     RoomDisplay decayDisplay { RoomDisplay::Mode::decay };
@@ -140,17 +147,23 @@ private:
     AdvancedPanel advancedPanel { proc };
     juce::Rectangle<int> tierLabels[3];
 
-    // ROOMS presets
+    // STUDIOS (top bar) and ROOMS (tier 1)
     void loadPreset (const juce::String& key);
+    void loadRoom (const juce::String& key);
     void stepPreset (int delta);
     void openSaveDialog();
+    void openRoomSaveDialog();
     juce::String submitSaveDialog (room::presets::SaveDialog::Mode, const room::presets::PresetMeta&,
                                    const juce::String& pack, bool overwrite);
+    juce::String submitRoomSaveDialog (room::presets::SaveDialog::Mode, const room::presets::PresetMeta&,
+                                       const juce::String& pack, bool overwrite);
 
-    room::presets::PresetBar presetBar;
-    room::presets::PresetBrowser browser { proc };
-    room::presets::SaveDialog saveDialog;
-    juce::String editingKey;
+    room::presets::PresetBar presetBar { "STUDIOS" };
+    room::presets::PresetBrowser browser { proc, room::presets::Kind::studio };
+    room::presets::PresetBrowser roomBrowser { proc, room::presets::Kind::room };
+    room::presets::SaveDialog saveDialog { room::presets::Kind::studio };
+    room::presets::SaveDialog roomSaveDialog { room::presets::Kind::room };
+    juce::String editingKey, editingRoomKey;
 
     int shownVersion = -1;
     float shownIntensity = -1.0f, shownSize = -1.0f, shownDamping = -9.0f;

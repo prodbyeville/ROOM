@@ -1,33 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<ROOM_PRESET version="1" name="Metal Pipe" author="Eville" type="Object" styles="Metallic,Experimental"
-             notes="Inharmonic, long ringing." created="2026-10-11T02:40:47.865Z">
-  <PARAMS>
-    <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
-    <PARAM id="eq1Freq" value="100.0"/>
-    <PARAM id="eq1Gain" value="0.0"/>
-    <PARAM id="eq1Q" value="0.7099999785423279"/>
-    <PARAM id="eq2Freq" value="300.0"/>
-    <PARAM id="eq2Gain" value="0.0"/>
-    <PARAM id="eq2Q" value="1.0"/>
-    <PARAM id="eq3Freq" value="1000.0"/>
-    <PARAM id="eq3Gain" value="0.0"/>
-    <PARAM id="eq3Q" value="1.0"/>
-    <PARAM id="eq4Freq" value="3500.0"/>
-    <PARAM id="eq4Gain" value="0.0"/>
-    <PARAM id="eq4Q" value="1.0"/>
-    <PARAM id="eq5Freq" value="8000.0"/>
-    <PARAM id="eq5Gain" value="0.0"/>
-    <PARAM id="eq5Q" value="0.7099999785423279"/>
-    <PARAM id="intensity" value="1.0"/>
-    <PARAM id="mix" value="0.4000000059604645"/>
-    <PARAM id="space" value="1.0"/>
-    <PARAM id="tail" value="2.5"/>
-    <PARAM id="tape" value="0.0"/>
-  </PARAMS>
-  <ROOM_ANALYSIS valid="1" sourceName="Metal Pipe" durationS="3.0" bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
+<ROOM version="2" name="Metal Pipe" author="Eville" type="Object" styles="Metallic,Experimental"
+      notes="A struck pipe: inharmonic, long ringing." created="2026-10-14T11:32:41.064Z">
+  <ROOM_ANALYSIS valid="1" sourceName="Metal Pipe" origin="Factory" durationS="3.0"
+                 bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
                  bandCentersHz="71.4435,101.2945,143.6180,203.6254,288.7054,409.3342,580.3648,822.8565,1166.6676,1654.1321,2345.2720,3325.1885,4714.5400,6684.3989,9477.3174,13437.1904"
                  bandT60s="0.0500,0.0500,2.2165,2.2036,2.1993,2.1993,2.1993,2.1820,1.7998,1.7988,1.4438,1.3919,1.0165,0.8206,0.7040,0.6667"
                  bandConfident="1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000"
@@ -37,4 +13,4 @@
                  peakGains="46.3260,7.1663,64.4096,51.8566,27.0166,9.7082" peakQs="10.3950,2.2918,19.5716,25.1804,28.6842,28.7936"
                  lateEnergyFraction="0.6971676349639893" steady="0" balance="0.2814197838306427"
                  spatialEvidence="0.5874496102333069" tonalEvidence="1.5" medianT60="1.621282696723938"/>
-</ROOM_PRESET>
+</ROOM>
