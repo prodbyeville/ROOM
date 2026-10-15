@@ -566,8 +566,18 @@ void IconButton::mouseDown (const juce::MouseEvent& e)
 void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     auto r = getLocalBounds().toFloat();
+    const auto latched = icon == Icon::advanced && getToggleState();   // open: the key stays down, its legend lit
+    down = down || latched;
     Hw::drawKey (g, r, true, over, down);
     r = Hw::keyCap (r).translated (0.0f, down ? 0.6f : 0.0f);
+    if (badge)
+    {
+        const auto d = juce::Point<float> (r.getRight() - 7.0f, r.getY() + 7.0f);
+        g.setColour (Colours::crimson.withAlpha (0.3f));
+        g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (d));
+        g.setColour (Colours::crimson);
+        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (d));
+    }
     const auto c = r.getCentre().translated (0.0f, -0.5f);
     const auto s = std::min (r.getWidth(), r.getHeight()) * 0.5f;
     g.setColour (Colours::ink.withAlpha (0.88f));
@@ -600,13 +610,26 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
         }
         case Icon::advanced:
         {
-            // the unit with its side section: a frame with the right part filled
+            // the unit with its side section: a frame with the right part filled.
+            // Open: the legend is backlit crimson, like the bypass key.
             const auto box = juce::Rectangle<float> (s * 1.3f, s * 0.95f).withCentre (c);
+            const auto side = box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f);
+            if (latched)
+            {
+                g.setColour (Colours::crimson.withAlpha (0.25f));
+                g.drawRoundedRectangle (box, 2.0f, 4.0f);
+                g.fillRoundedRectangle (side.expanded (2.0f), 2.0f);
+                g.setColour (Colours::crimson.brighter (0.25f));
+            }
             g.drawRoundedRectangle (box, 2.0f, 1.5f);
-            g.fillRoundedRectangle (box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f), 1.0f);
-            if (getToggleState())
-                Hw::drawLed (g, { r.getRight() - 8.5f, r.getY() + 8.5f }, true, 2.2f);
+            g.fillRoundedRectangle (side, 1.0f);
             return;
+        }
+        case Icon::menu:
+        {
+            for (int i = -1; i <= 1; ++i)
+                p.addLineSegment ({ c.x - s * 0.6f, c.y + (float) i * s * 0.38f, c.x + s * 0.6f, c.y + (float) i * s * 0.38f }, 0.0f);
+            break;
         }
         case Icon::randomize:
         {
@@ -652,12 +675,18 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addAndMakeVisible (randomButton);
     randomButton.onClick = [this] { proc.randomizeKnobs (random); };
     randomButton.onRightClick = [this] { showRandomizeMenu(); };
+    content.addAndMakeVisible (menuButton);
+    menuButton.onClick = [this] { showMainMenu(); };
+    updates.onResult = [this] { menuButton.setBadge (updates.isUpdateAvailable()); };
+    menuButton.setBadge (updates.isUpdateAvailable());
     content.addAndMakeVisible (advancedButton);
     advancedButton.onClick = [this] { setAdvancedOpen (! proc.advancedOpen); };
     content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::bypass, bypassButton);
-    setupKnob (mix, ParamIDs::mix, "wet", 15.0f, "", "", "", false);
-    setupKnob (output, ParamIDs::output, "out", 15.0f, "", "", "", false);
+    setupKnob (mix, ParamIDs::mix, "wet", 15.0f, "", "", "", false,
+              "how much of the room you hear against your dry sound.");
+    setupKnob (output, ParamIDs::output, "out", 15.0f, "", "", "", false,
+              "the final level, after everything.");
 
     // --- Load / room / tone ---
     content.addAndMakeVisible (loadScreen);
@@ -675,10 +704,14 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addAndMakeVisible (toneScreen);
 
     // --- Shape the room ---
-    setupKnob (intensity, ParamIDs::intensity, "intensity", 37.0f, "0", "100", "200", false);
-    setupKnob (balance, ParamIDs::balance, "balance", 37.0f, "tone", "", "space", false);
-    setupKnob (tail, ParamIDs::tail, "tail", 37.0f, "0.3", "", "6 s", false);
-    setupKnob (space, ParamIDs::space, "space", 37.0f, "mono", "", "wide", false);
+    setupKnob (intensity, ParamIDs::intensity, "intensity", 37.0f, "0", "100", "200", false,
+              "how much of the room you hear: its decay, tone and resonances. 100 is the room as measured.");
+    setupKnob (balance, ParamIDs::balance, "balance", 37.0f, "tone", "", "space", false,
+              "tone vs space. left keeps the room's colour (its eq and rings), right keeps its sense of space (decay and width). auto uses what room detected.");
+    setupKnob (tail, ParamIDs::tail, "tail", 37.0f, "0.3", "", "6 s", false,
+              "how long the room rings out.");
+    setupKnob (space, ParamIDs::space, "space", 37.0f, "mono", "", "wide", false,
+              "how wide the room sounds, from mono to wide.");
     autoBalance.getProperties().set ("style", "led");
     autoBalance.setTooltip ("auto: use the balance ROOM detected in the sound");
     content.addAndMakeVisible (autoBalance);
@@ -696,8 +729,10 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     // --- Finish (separate module) ---
     content.addAndMakeVisible (eqPanel);
-    setupKnob (tape, ParamIDs::tape, "tape", 28.0f, "0", "", "100", true);
-    setupKnob (autoEq, ParamIDs::autoEq, "auto eq", 28.0f, "0", "", "100", true);
+    setupKnob (tape, ParamIDs::tape, "tape", 28.0f, "0", "", "100", true,
+              "warm tape saturation on the way out.");
+    setupKnob (autoEq, ParamIDs::autoEq, "auto eq", 28.0f, "0", "", "100", true,
+              "gently evens out the tone so the room sits in the mix.");
 
     // --- STUDIOS ---
     presetBar.onOpen = [this] { browser.setVisible (true); browser.toFront (true); };
@@ -744,6 +779,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         return submitRoomSaveDialog (mode, meta, pack, overwrite);
     };
 
+    setTipsEnabled (proc.tipsEnabled);
+
     // Resizable, keeping the shape: everything scales together.
     setResizable (true, true);
     setAdvancedOpen (proc.advancedOpen);
@@ -757,8 +794,10 @@ RoomAudioProcessorEditor::~RoomAudioProcessorEditor()
 }
 
 void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const juce::String& name, float radius,
-                                          const juce::String& lo, const juce::String& mid, const juce::String& hi, bool onBlack)
+                                          const juce::String& lo, const juce::String& mid, const juce::String& hi, bool onBlack,
+                                          const juce::String& tip)
 {
+    k.slider.setTooltip (tip);
     k.slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     k.slider.setPopupDisplayEnabled (true, true, &content);
     auto& props = k.slider.getProperties();
@@ -777,6 +816,68 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
     content.addAndMakeVisible (k.label);
     k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, k.slider);
     k.slider.setModTarget (&proc.modulation, room::Modulation::targetIndex (id));   // -1 = not an LFO target
+}
+
+void RoomAudioProcessorEditor::setTipsEnabled (bool on)
+{
+    proc.tipsEnabled = on;
+    if (on && tooltips == nullptr)
+        tooltips = std::make_unique<juce::TooltipWindow> (this, 700);
+    else if (! on)
+        tooltips.reset();
+}
+
+void RoomAudioProcessorEditor::newPreset()
+{
+    proc.resetToInit();
+    for (auto* k : { &intensity, &balance, &tail, &space, &mix, &output, &tape, &autoEq })
+        k->slider.refreshModulation();
+    advancedPanel.refreshModulation();
+    content.repaint();
+}
+
+void RoomAudioProcessorEditor::showMainMenu()
+{
+    const auto version = UpdateChecker::currentVersion();
+    juce::PopupMenu m;
+    m.addItem ("new preset", [this] { newPreset(); });
+    m.addSeparator();
+    m.addItem ("tips", true, areTipsEnabled(), [this] { setTipsEnabled (! areTipsEnabled()); });
+    m.addSeparator();
+    if (updates.isUpdateAvailable())
+    {
+        juce::PopupMenu::Item item (juce::String (juce::CharPointer_UTF8 ("update available \xc2\xb7 v")) + updates.getLatestVersion());
+        item.colour = Colours::crimson.brighter (0.3f);
+        item.action = [this] { juce::URL (updates.getDownloadUrl()).launchInDefaultBrowser(); };
+        m.addItem (std::move (item));
+    }
+    else
+        m.addItem ("check for updates", [this] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
+    m.addItem ("visit website", [] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
+    m.addItem ("get support", [version]
+    {
+        juce::URL ("mailto:" + juce::String (UpdateChecker::supportEmail) + "?subject=room%20v" + version).launchInDefaultBrowser();
+    });
+    m.addItem (juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), [this] { showAbout(); });
+    m.addSeparator();
+    m.addItem ("room v" + version, false, false, nullptr);
+    EvilleLookAndFeel::showMenu (m, menuButton);
+}
+
+void RoomAudioProcessorEditor::showAbout()
+{
+    const auto message = juce::String (juce::CharPointer_UTF8 (
+        "by eville \xc2\xb7 v")) + UpdateChecker::currentVersion() + "\n\n"
+        "build a reverb from any sound: drop it in, shape the room, finish it.\n\n"
+        + juce::String (juce::CharPointer_UTF8 ("\xc2\xa9 ")) + juce::String (juce::Time::getCurrentTime().getYear()) + " eville\n"
+        "fonts: satoshi (indian type foundry), cormorant garamond (sil open font license)\n\n"
+        "prodbyeville.com\n" + UpdateChecker::supportEmail;
+    EvilleLookAndFeel::showDialog (content, "room", message, { "close", "visit website" }, {},
+                                   [] (int result, const juce::String&)
+                                   {
+                                       if (result == 2)
+                                           juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser();
+                                   });
 }
 
 void RoomAudioProcessorEditor::setAdvanced (bool showLfos)
@@ -807,6 +908,9 @@ void RoomAudioProcessorEditor::setAdvancedOpen (bool open)
 
 void RoomAudioProcessorEditor::timerCallback()
 {
+    if (ticksUntilUpdateCheck > 0 && --ticksUntilUpdateCheck == 0)
+        updates.checkIfDue();
+
     {
         auto& lib = proc.getLibrary();
         const auto* e = lib.find (proc.getCurrentPresetKey());
@@ -974,12 +1078,9 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     g.setColour (Colours::ink);
     const auto wordFont = Fonts::sans (54.0f, Fonts::black);
     g.setFont (wordFont);
-    const auto wordX = c.getX() + 38.0f;
+    const auto wordX = c.getX() + 88.0f;
     const auto wordW = (float) juce::GlyphArrangement::getStringWidthInt (wordFont, "room");
     g.drawText ("room", juce::Rectangle<float> (wordX, c.getY() + 22.0f, wordW + 10.0f, 60.0f), juce::Justification::centredLeft);
-    g.setFont (Fonts::serif (21.0f));
-    g.setColour (Colours::ink.withAlpha (0.85f));
-    g.drawText ("by eville", juce::Rectangle<float> (wordX + wordW + 12.0f, c.getY() + 42.0f, 100.0f, 30.0f), juce::Justification::centredLeft);
 
     // Top bar print and the crease under it
     g.setFont (Fonts::sans (13.0f));
@@ -1057,9 +1158,10 @@ void RoomAudioProcessorEditor::layoutContent()
     // --- Top bar ---
     // Every key up here is the same size; labels sit under them on one line.
     const int key = 44, keyY = c.getY() + 30;
-    presetBar.setBounds (c.getX() + 258, keyY, 336, key);
-    randomButton.setBounds (c.getX() + 604, keyY, key, key);
-    advancedButton.setBounds (c.getX() + 656, keyY, key, key);
+    menuButton.setBounds (c.getX() + 30, keyY, key, key);
+    presetBar.setBounds (c.getX() + 226, keyY, 372, key);
+    randomButton.setBounds (c.getX() + 606, keyY, key, key);
+    advancedButton.setBounds (c.getX() + 658, keyY, key, key);
     for (auto [k, x] : { std::pair { &mix, 744 }, { &output, 796 } })
     {
         k->slider.setBounds (juce::Rectangle<int> (54, 50).withCentre ({ c.getX() + x, keyY + key / 2 }));
@@ -1157,8 +1259,7 @@ void RoomAudioProcessorEditor::loadRoom (const juce::String& key)
     const auto tree = lib.loadPreset (*e);
     if (! tree.isValid())
     {
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("ROOMS")
-                                          .withMessage ("\"" + e->meta.name + "\" couldn't be read.").withButton ("OK"), nullptr);
+        EvilleLookAndFeel::showDialog (content, "rooms", "\"" + e->meta.name + "\" couldn't be read.", { "ok" });
         return;
     }
     proc.applyRoom (tree, key);
@@ -1250,8 +1351,7 @@ void RoomAudioProcessorEditor::loadPreset (const juce::String& key)
     const auto tree = lib.loadPreset (*e);
     if (! tree.isValid())
     {
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("STUDIOS")
-                                          .withMessage ("\"" + e->meta.name + "\" couldn't be read.").withButton ("OK"), nullptr);
+        EvilleLookAndFeel::showDialog (content, "studios", "\"" + e->meta.name + "\" couldn't be read.", { "ok" });
         return;
     }
     proc.applyPreset (tree, key);

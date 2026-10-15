@@ -10,6 +10,11 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     setupKnob (damping, ParamIDs::damping, "damping", "-", "0", "+");
     setupKnob (duck, ParamIDs::duck, "ducking", "0", "", "100");
     setupKnob (duckRelease, ParamIDs::duckRelease, "release", "50", "", "1k");
+    preDelay.slider.setTooltip ("a gap before the room starts, so your dry sound stays clear.");
+    size.slider.setTooltip ("makes the room bigger or smaller.");
+    damping.slider.setTooltip ("darker or brighter: how fast the highs die away in the room.");
+    duck.slider.setTooltip ("turns the room down while you play and lets it bloom in the gaps.");
+    duckRelease.slider.setTooltip ("how fast the room comes back after ducking.");
 
     freeze.setClickingTogglesState (true);
     freeze.getProperties().set ("key", "dark");
@@ -83,7 +88,8 @@ void AdvancedPanel::paint (juce::Graphics& g)
         Hw::drawLed (g, { (float) freeze.getBounds().getCentreX(), (float) freeze.getY() - 12.0f }, freeze.getToggleState(), 4.0f);
         g.setFont (Fonts::sans (14.0f));
         g.setColour (Colours::dustWhite);
-        g.drawText ("freeze", freeze.getBounds().withY (freeze.getBottom() + 1).withHeight (18).withSizeKeepingCentre (80, 18),
+        // on the same line as "release"
+        g.drawText ("freeze", juce::Rectangle<int> (80, 18).withCentre ({ freeze.getBounds().getCentreX(), duckRelease.label.getBounds().getCentreY() }),
                     juce::Justification::centred);
     }
 }

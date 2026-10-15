@@ -21,7 +21,10 @@ LAYOUT
 ROOM is one unit with three panels:
 
   the console (dust white, top left)
-    top        room by eville, the studios window (< name >), heart, save,
+    top        the menu (three lines): new preset (back to init, the room
+               stays), tips on / off, check for updates, visit website,
+               get support, about, the version.
+               the studios window ([heart] name < >), save,
                shuffle (right-click to choose what moves), advanced (opens
                the advanced section on the right; the window grows to fit),
                wet, out, and bypass (the key glows red while ROOM is on)
@@ -92,3 +95,17 @@ original sound file around.
 If the plugin doesn't show up after a rescan, Windows may have blocked the
 downloaded zip: right-click the zip > Properties > tick "Unblock" > OK, then
 extract and copy again.
+
+UPDATES
+  ROOM checks once a day (quietly, in the background) for
+  https://prodbyeville.com/room/latest.json, a tiny file like:
+
+      { "version": "0.2.0", "url": "https://prodbyeville.com/room" }
+
+  If "version" is newer than the installed ROOM, a red dot appears on the
+  menu key and the menu shows "update available" (it opens "url").
+  No file, no internet: nothing happens.
+
+TIPS
+  Rest the mouse on any knob or key for a moment to see what it does.
+  Turn tips off (or back on) in the menu.

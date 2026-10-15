@@ -679,21 +679,19 @@ void PresetBrowser::sortOrderChanged (int columnId, bool forwards)
 
 void PresetBrowser::newPack()
 {
-    auto* w = new juce::AlertWindow ("New pack", juce::String ("Name the new pack (a folder in ") + (kind == Kind::room ? "ROOMS" : "STUDIOS") + ").", juce::MessageBoxIconType::NoIcon, this);
-    w->addTextEditor ("name", {}, "Pack name");
-    w->addButton ("Create", 1, juce::KeyPress (juce::KeyPress::returnKey));
-    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int result)
-    {
-        if (result == 1)
-        {
-            juce::String err;
-            if (lib().createPack (w->getTextEditorContents ("name"), err))
-                refresh();
-            else
-                juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("New pack").withMessage (err).withButton ("OK"), nullptr);
-        }
-    }), true);
+    EvilleLookAndFeel::showDialog (*this, "new pack",
+                                   juce::String ("name the new pack (a folder in ") + (kind == Kind::room ? "ROOMS" : "STUDIOS") + ").",
+                                   { "create", "cancel" }, "pack name",
+                                   [this] (int result, const juce::String& name)
+                                   {
+                                       if (result != 1)
+                                           return;
+                                       juce::String err;
+                                       if (lib().createPack (name, err))
+                                           refresh();
+                                       else
+                                           EvilleLookAndFeel::showDialog (*this, "new pack", err.toLowerCase(), { "ok" });
+                                   });
 }
 
 void PresetBrowser::importPresets()
@@ -711,10 +709,8 @@ void PresetBrowser::importPresets()
                                   return;
                               const auto n = lib().importFiles (files, target);
                               refresh();
-                              juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("Import")
-                                                                .withMessage ("Imported " + juce::String (n) + " of "
-                                                                              + juce::String (files.size()) + " into " + target + ".")
-                                                                .withButton ("OK"), nullptr);
+                              EvilleLookAndFeel::showDialog (*this, "import", "imported " + juce::String (n) + " of "
+                                                                 + juce::String (files.size()) + " into " + target + ".", { "ok" });
                           });
 }
 
@@ -729,10 +725,8 @@ void PresetBrowser::exportPack()
                               if (dir == juce::File())
                                   return;
                               const auto ok = lib().exportPack (pack, dir);
-                              juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle ("Export")
-                                                                .withMessage (ok ? "Exported to " + dir.getFullPathName()
-                                                                                 : "Some presets couldn't be exported.")
-                                                                .withButton ("OK"), nullptr);
+                              EvilleLookAndFeel::showDialog (*this, "export", ok ? "exported to " + dir.getFullPathName()
+                                                                                 : juce::String ("some presets couldn't be exported."), { "ok" });
                           });
 }
 
@@ -742,11 +736,9 @@ void PresetBrowser::deleteSelected()
     if (e == nullptr || e->factory)
         return;
     const auto key = e->key;
-    juce::AlertWindow::showAsync (juce::MessageBoxOptions().withTitle (juce::String ("Delete ") + lib().noun())
-                                      .withMessage ("Delete \"" + e->meta.name + "\"? This can't be undone.")
-                                      .withButton ("Delete").withButton ("Cancel")
-                                      .withAssociatedComponent (this),
-                                  [this, key] (int result)
+    EvilleLookAndFeel::showDialog (*this, "delete " + juce::String (lib().noun()).toLowerCase(),
+                                   "delete \"" + e->meta.name + "\"? this can't be undone.", { "delete", "cancel" }, {},
+                                   [this, key] (int result, const juce::String&)
                                   {
                                       if (result != 1)
                                           return;
@@ -953,21 +945,22 @@ void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
 
 PresetBar::PresetBar (const juce::String& l) : label (l)
 {
-    for (auto* b : { &prev, &next })
+    for (auto* b : { &prev, &next, &heart })
     {
         b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
         b->setColour (juce::TextButton::textColourOffId, Colours::screenText);
         b->setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
         b->setButtonText ({});
+        b->onStateChange = [this] { repaint(); };   // their glyphs are drawn on the glass
         addAndMakeVisible (b);
     }
     save.getProperties().set ("key", "light");
-    heart.getProperties().set ("key", "light");
     save.setButtonText ({});
-    for (auto* b : { &save, &heart })
-        addAndMakeVisible (b);
+    addAndMakeVisible (save);
     save.setTooltip ("save this sound as a STUDIO (room + every knob + lfos)");
     heart.setTooltip ("favorite");
+    prev.setTooltip ("previous studio");
+    next.setTooltip ("next studio");
     prev.onClick = [this] { if (onPrev) onPrev(); };
     next.onClick = [this] { if (onNext) onNext(); };
     save.onClick = [this] { if (onSave) onSave(); };
@@ -990,31 +983,59 @@ void PresetBar::setPreset (const juce::String& n, bool mod, bool fav, bool canFa
 juce::Rectangle<int> PresetBar::nameArea() const
 {
     auto r = getLocalBounds();
-    r.removeFromRight (2 * (getHeight() + 8));
+    r.removeFromRight (getHeight() + 8);
     return r;
 }
 
 void PresetBar::paint (juce::Graphics& g)
 {
+    // One glass window: [heart]  studios / name  [<] [>]
     const auto win = nameArea().toFloat();
     const auto glass = Hw::drawScreen (g, win);
+    auto text = glass.withLeft ((float) heart.getRight() + 4.0f).withRight ((float) prev.getX() - 4.0f);
     g.setFont (Fonts::mono (14.0f));
     g.setColour (Colours::screenText);
-    const auto shown = label + " / " + (name.isEmpty() ? juce::String ("init") : name) + (modified && name.isNotEmpty() ? " *" : "");
-    g.drawText (shown, glass.reduced (34.0f, 0.0f), juce::Justification::centred, true);
+    const auto title = (name.isEmpty() ? juce::String ("init") : name) + (modified && name.isNotEmpty() ? " *" : "");
+    auto shown = label + " / " + title;
+    if (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), shown) > text.getWidth() / 0.78f)
+        shown = title;   // long names: the name matters more than the "studios /" label
+    g.drawFittedText (shown, text.toNearestInt(), juce::Justification::centred, 1, 0.78f);
+
+    // heart: lit crimson when this studio is a favourite
+    const auto hb = heart.getBounds().toFloat().withSizeKeepingCentre (15.0f, 13.0f);
+    const auto hc = ! canFavorite ? Colours::screenDim.withAlpha (0.35f)
+                  : favorite      ? Colours::crimson.brighter (0.15f)
+                  : heart.isMouseOver() ? Colours::screenText : Colours::screenDim;
+    if (favorite && canFavorite)
+    {
+        g.setColour (Colours::crimson.withAlpha (0.25f));
+        g.fillEllipse (hb.expanded (5.0f));
+    }
+    drawHeart (g, hb, favorite, hc);
+
     g.setColour (Colours::screenText.withAlpha (0.8f));
-    g.drawText ("<", prev.getBounds().toFloat(), juce::Justification::centred);
-    g.drawText (">", next.getBounds().toFloat(), juce::Justification::centred);
+    for (auto* b : { &prev, &next })
+    {
+        const auto c = b->getBounds().toFloat().getCentre();
+        const auto d = b == &prev ? -1.0f : 1.0f;
+        juce::Path chevron;
+        chevron.startNewSubPath (c.x - d * 2.5f, c.y - 5.0f);
+        chevron.lineTo (c.x + d * 2.5f, c.y);
+        chevron.lineTo (c.x - d * 2.5f, c.y + 5.0f);
+        g.setColour (Colours::screenText.withAlpha (b->isMouseOver() ? 1.0f : 0.7f));
+        g.strokePath (chevron, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+    // a hairline between the name and the arrows, like a segmented display
+    g.setColour (Colours::screenDim.withAlpha (0.25f));
+    g.drawVerticalLine (prev.getX() - 2, glass.getY() + 9.0f, glass.getBottom() - 9.0f);
     Hw::drawScreenOverlay (g, glass);
 }
 
 void PresetBar::paintOverChildren (juce::Graphics& g)
 {
-    // Heart and disk glyphs on their keys
-    const auto down = [] (juce::Button& b) { return b.isDown() ? 0.6f : 0.0f; };
-    const auto hb = Hw::keyCap (heart.getBounds().toFloat()).reduced (8.0f, 7.5f).translated (0.0f, down (heart) - 0.5f);
-    drawHeart (g, hb, favorite, ! canFavorite ? Colours::inkDim.withAlpha (0.5f) : favorite ? Colours::crimson : Colours::ink);
-    const auto sb = Hw::keyCap (save.getBounds().toFloat()).reduced (9.5f).translated (0.0f, down (save) - 0.5f);
+    // The disk glyph on the save key
+    const auto down = save.isDown() ? 0.6f : 0.0f;
+    const auto sb = Hw::keyCap (save.getBounds().toFloat()).reduced (9.5f).translated (0.0f, down - 0.5f);
     g.setColour (Colours::ink.withAlpha (0.88f));
     g.drawRoundedRectangle (sb, 2.0f, 1.6f);
     g.fillRect (sb.getX() + sb.getWidth() * 0.25f, sb.getY(), sb.getWidth() * 0.5f, sb.getHeight() * 0.35f);
@@ -1026,10 +1047,10 @@ void PresetBar::resized()
     auto r = getLocalBounds();
     save.setBounds (r.removeFromRight (getHeight()));
     r.removeFromRight (8);
-    heart.setBounds (r.removeFromRight (getHeight()));
-    r.removeFromRight (8);
-    prev.setBounds (r.removeFromLeft (34).reduced (0, 4));
-    next.setBounds (r.removeFromRight (34).reduced (0, 4));
+    auto glass = r.reduced (6, 6);
+    heart.setBounds (glass.removeFromLeft (28));
+    next.setBounds (glass.removeFromRight (24));
+    prev.setBounds (glass.removeFromRight (24));
 }
 
 void PresetBar::mouseUp (const juce::MouseEvent& e)

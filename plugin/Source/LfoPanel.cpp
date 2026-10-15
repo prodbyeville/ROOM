@@ -22,6 +22,8 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     }
     rate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 66, 26);
     rate.getProperties().set ("bigReadout", true);
+    rate.setTooltip ("how fast the lfo moves");
+    shape.setTooltip ("the lfo's shape");
     rate.setColour (juce::Slider::textBoxTextColourId, Colours::screenText);
     rate.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (rate);
@@ -297,6 +299,8 @@ LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     }
     syncAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoSync (lfo), sync);
     retrigAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoRetrig (lfo), retrig);
+    sync.setTooltip ("lock the rate to the song tempo");
+    retrig.setTooltip ("restart the lfo when you press play");
     setTooltip ("lfo " + juce::String (lfo + 1) + ": click to open, drag onto a knob to assign");
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     trail.assign (90, 0.0f);

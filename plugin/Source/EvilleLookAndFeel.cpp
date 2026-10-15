@@ -289,6 +289,135 @@ namespace
     }
 }
 
+void EvilleLookAndFeel::drawAlertBox (juce::Graphics& g, juce::AlertWindow& w, const juce::Rectangle<int>& textArea,
+                                      juce::TextLayout& layout)
+{
+    g.fillAll (juce::Colours::transparentBlack);
+    glassPanel (g, w.getLocalBounds().toFloat().reduced (6.0f), 10.0f, true);
+    layout.draw (g, textArea.toFloat());
+}
+
+juce::Array<int> EvilleLookAndFeel::getWidthsForTextButtons (juce::AlertWindow&, const juce::Array<juce::TextButton*>& buttons)
+{
+    juce::Array<int> widths;
+    for (auto* b : buttons)
+        widths.add (std::max (96, juce::GlyphArrangement::getStringWidthInt (Fonts::sans (13.0f), b->getButtonText()) + 40));
+    return widths;
+}
+
+namespace
+{
+    // A dialog drawn inside the plugin: dims the window, black glass panel in the middle.
+    class RoomDialog : public juce::Component
+    {
+    public:
+        RoomDialog (const juce::String& t, const juce::String& m, const juce::StringArray& buttonNames, const juce::String& hint)
+            : title (t), message (m)
+        {
+            setWantsKeyboardFocus (true);
+            if (hint.isNotEmpty())
+            {
+                field = std::make_unique<juce::TextEditor>();
+                field->setTextToShowWhenEmpty (hint, Colours::screenDim);
+                field->setFont (Fonts::sans (14.0f));
+                field->setColour (juce::TextEditor::backgroundColourId, Colours::glass);
+                field->setColour (juce::TextEditor::textColourId, Colours::screenText);
+                field->setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff050505));
+                field->setColour (juce::TextEditor::focusedOutlineColourId, Colours::crimson);
+                field->setColour (juce::CaretComponent::caretColourId, Colours::crimson);
+                field->setIndents (10, 8);
+                field->onReturnKey = [this] { exitModalState (1); };
+                field->onEscapeKey = [this] { exitModalState (0); };
+                addAndMakeVisible (*field);
+            }
+            for (int i = 0; i < buttonNames.size(); ++i)
+            {
+                auto* b = buttons.add (new juce::TextButton (buttonNames[i]));
+                b->getProperties().set ("key", "dark");
+                b->onClick = [this, i] { exitModalState (i + 1); };
+                addAndMakeVisible (b);
+            }
+        }
+
+        juce::String getText() const { return field != nullptr ? field->getText() : juce::String(); }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colours::black.withAlpha (0.45f));
+            glassPanel (g, panel.toFloat(), 10.0f, true);
+            auto r = panel.reduced (28, 24);
+            g.setColour (Colours::dustWhite);
+            g.setFont (Fonts::sans (19.0f, Fonts::bold));
+            g.drawText (title, r.removeFromTop (26), juce::Justification::centredLeft);
+            r.removeFromTop (10);
+            layout.draw (g, r.removeFromTop ((int) std::ceil (layout.getHeight())).toFloat());
+        }
+
+        void resized() override
+        {
+            const int w = std::min (440, getWidth() - 40);
+            juce::AttributedString text;
+            text.append (message, Fonts::sans (14.5f), Colours::dustWhite.withAlpha (0.86f));
+            text.setLineSpacing (3.0f);
+            layout.createLayout (text, (float) (w - 56));
+            const int h = 24 + 26 + 10 + (int) std::ceil (layout.getHeight()) + (field != nullptr ? 14 + 38 : 0) + 24 + 38 + 24;
+            panel = juce::Rectangle<int> (w, h).withCentre (getLocalBounds().getCentre());
+            auto r = panel.reduced (28, 24);
+            r.removeFromTop (26 + 10 + (int) std::ceil (layout.getHeight()));
+            if (field != nullptr)
+            {
+                r.removeFromTop (14);
+                field->setBounds (r.removeFromTop (38));
+            }
+            auto row = r.removeFromBottom (38);
+            for (int i = buttons.size(); --i >= 0;)   // right aligned, first (default) button on the right
+            {
+                const auto bw = std::max (96, juce::GlyphArrangement::getStringWidthInt (Fonts::sans (13.0f), buttons[i]->getButtonText()) + 40);
+                buttons[buttons.size() - 1 - i]->setBounds (row.removeFromRight (bw));
+                row.removeFromRight (10);
+            }
+        }
+
+        bool keyPressed (const juce::KeyPress& k) override
+        {
+            if (k == juce::KeyPress::escapeKey) { exitModalState (0); return true; }
+            if (k == juce::KeyPress::returnKey) { exitModalState (1); return true; }
+            return true;   // modal: nothing leaks through
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (! panel.contains (e.getPosition()))   // click outside: cancel
+                exitModalState (0);
+        }
+
+    private:
+        juce::String title, message;
+        std::unique_ptr<juce::TextEditor> field;
+        juce::OwnedArray<juce::TextButton> buttons;
+        juce::TextLayout layout;
+        juce::Rectangle<int> panel;
+    };
+}
+
+void EvilleLookAndFeel::showDialog (juce::Component& parent, const juce::String& title, const juce::String& message,
+                                    const juce::StringArray& buttons, const juce::String& textHint,
+                                    std::function<void (int, const juce::String&)> callback)
+{
+    auto* d = new RoomDialog (title, message, buttons, textHint);
+    d->setBounds (parent.getLocalBounds());
+    parent.addAndMakeVisible (d);
+    d->toFront (true);
+    d->enterModalState (true, juce::ModalCallbackFunction::create ([d, callback] (int result)
+    {
+        if (callback)
+            callback (result, d->getText());
+    }), true);
+    for (auto* c : d->getChildren())
+        if (auto* ed = dynamic_cast<juce::TextEditor*> (c))
+            ed->grabKeyboardFocus();
+}
+
 void EvilleLookAndFeel::showMenu (juce::PopupMenu& m, juce::Component& target)
 {
     m.setLookAndFeel (&target.getLookAndFeel());

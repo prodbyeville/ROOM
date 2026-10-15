@@ -1129,6 +1129,28 @@ namespace
                 advKey->onClick();
             check (! ed.isAdvancedOpen() && ed.getWidth() == closedWidth, "and closes it again");
             p.advancedOpen = false;
+
+            // Main menu: tips on / off, new preset (init keeps the room)
+            check (ed.areTipsEnabled(), "tips are on by default");
+            p.tipsEnabled = false;
+        }
+        {
+            RoomAudioProcessorEditor ed (p);
+            check (! ed.areTipsEnabled(), "tips stay off once switched off");
+            p.tipsEnabled = true;
+            auto* intensityParam = p.apvts.getParameter (ParamIDs::intensity);
+            intensityParam->setValueNotifyingHost (0.9f);
+            p.modulation.assign (0, room::Modulation::targetIndex (ParamIDs::tail), 0.3f);
+            const auto roomBefore = p.getAnalysis().toValueTree().toXmlString();
+            ed.newPreset();
+            check (std::abs (intensityParam->getValue() - intensityParam->getDefaultValue()) < 1e-6f
+                       && ! p.modulation.isAssigned (0, room::Modulation::targetIndex (ParamIDs::tail))
+                       && p.getCurrentPresetName().isEmpty() && ! p.isPresetModified()
+                       && p.getAnalysis().toValueTree().toXmlString() == roomBefore,
+                   "new preset: knobs and lfos back to init, the room stays");
+            check (UpdateChecker::isNewer ("0.2.0", "0.1.0") && ! UpdateChecker::isNewer ("0.1.0", "0.1.0")
+                       && UpdateChecker::isNewer ("0.10.0", "0.9.1") && ! UpdateChecker::isNewer ("", "0.1.0"),
+                   "update versions compare");
         }
 
         // A knob's depth dot: drag up for more, down for less, double-click removes.
@@ -1302,6 +1324,13 @@ namespace
                         if ((b->getKind() == Kind::room) == (mode == "rooms")) { b->setVisible (true); b->toFront (false); }
                 if (mode == "save")
                     if (auto* bar = dynamic_cast<PresetBar*> (child)) if (bar->onSave) bar->onSave();
+                if (mode == "newpack")
+                {
+                    if (auto* b = dynamic_cast<PresetBrowser*> (child))
+                        if (b->getKind() == Kind::studio) { b->setVisible (true); b->toFront (false); }
+                    if (auto* tb = dynamic_cast<juce::TextButton*> (child))
+                        if (tb->getButtonText().containsIgnoreCase ("new pack") && tb->onClick) tb->onClick();
+                }
                 if (mode == "roomsave")
                     if (auto* ib = dynamic_cast<IconButton*> (child))
                         if (ib->getTooltip().startsWith ("Save this room") && ib->onClick) ib->onClick();
@@ -1315,13 +1344,19 @@ namespace
             ed.setAdvancedOpen (true);
         if (mode == "info")
             ed.showRoomInfo (true);
+        if (mode == "longname")
+            p.setCurrentPreset ("Factory/x", "small room with a very long name");
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
             ed.setSize (juce::roundToInt ((float) ed.contentWidth() * args[5].getFloatValue()),
                         juce::roundToInt (RoomAudioProcessorEditor::baseHeight * args[5].getFloatValue()));
-        juce::Timer::callPendingTimersSynchronously();
+        for (int i = 0; i < 4; ++i)   // let the 15 Hz editor timer come due
+        {
+            juce::Thread::sleep (70);
+            juce::Timer::callPendingTimersSynchronously();
+        }
 
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
-        if (mode == "menu")
+        if (mode == "menu" || mode == "mainmenu")
         {
             // Draw the shuffle menu and a knob's modulation menu with the editor's
             // look and feel, laid over the snapshot where they would open.
@@ -1368,6 +1403,16 @@ namespace
                 g.addTransform (juce::AffineTransform::scale (scale));
                 g.drawImageAt (menu, at.x, at.y);
             };
+            if (args[2] == "mainmenu")
+            {
+                drawMenu ({ 74, 80 }, { { "new preset", 0, false, false }, { "", 2, false, false }, { "tips", 0, true, true },
+                                        { "", 2, false, false }, { "check for updates", 0, false, false },
+                                        { "visit website", 0, false, false }, { "get support", 0, false, false },
+                                        { juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), 0, false, false },
+                                        { "", 2, false, false }, { "room v0.1.0", 0, false, false } });
+            }
+            else
+            {
             drawMenu ({ 600, 100 }, { { "shuffle", 1, false, false }, { "shuffle now", 0, false, false }, { "", 2, false, false },
                                       { "what moves", 1, false, false },
                                       { "room knobs  (intensity, balance, tail, space)", 0, true, true },
@@ -1380,6 +1425,7 @@ namespace
             drawMenu ({ 790, 500 }, { { "10%", 0, false, false }, { "25%", 0, true, true }, { "50%", 0, false, false },
                                       { "100%", 0, false, false }, { "", 2, false, false }, { "invert", 0, false, false },
                                       { "remove from lfo 1", 0, false, false } });
+            }
         }
         juce::File out (args[1]);
         out.deleteFile();

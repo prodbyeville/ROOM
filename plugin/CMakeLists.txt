@@ -68,6 +68,7 @@ target_sources(ROOM PRIVATE
     Source/LfoPanel.cpp
     Source/EvilleLookAndFeel.cpp
     Source/Screens.cpp
+    Source/UpdateChecker.cpp
     Source/presets/PresetBrowser.cpp)
 target_include_directories(ROOM PRIVATE Source)
 target_compile_definitions(ROOM PUBLIC ${ROOM_DEFINITIONS})

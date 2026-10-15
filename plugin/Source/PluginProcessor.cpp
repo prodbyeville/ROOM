@@ -629,6 +629,16 @@ void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
     }
 }
 
+void RoomAudioProcessor::resetToInit()
+{
+    for (auto* p : getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (p))
+            if (withId->paramID != ParamIDs::bypass && withId->paramID != ParamIDs::output)
+                p->setValueNotifyingHost (p->getDefaultValue());
+    clearModulation();
+    setCurrentPreset ({}, {});
+}
+
 void RoomAudioProcessor::clearModulation()
 {
     modulation.clear();
@@ -847,6 +857,7 @@ void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("presetModified", isPresetModified(), nullptr);
     state.setProperty ("editorScale", editorScale, nullptr);
     state.setProperty ("advancedOpen", advancedOpen, nullptr);
+    state.setProperty ("tipsEnabled", tipsEnabled, nullptr);
     state.setProperty ("randomizeMask", randomizeMask, nullptr);
     state.setProperty ("roomKey", currentRoomKey, nullptr);
     state.appendChild (apvts.copyState(), nullptr);
@@ -885,6 +896,7 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
     editorScale = juce::jlimit (0.75f, 1.75f, (float) state.getProperty ("editorScale", 1.0f));
     advancedOpen = (bool) state.getProperty ("advancedOpen", false);
     randomizeMask = (int) state.getProperty ("randomizeMask", (int) randomDefault) & randomAll;
+    tipsEnabled = (bool) state.getProperty ("tipsEnabled", true);
     currentRoomKey = state["roomKey"].toString();
     currentPresetKey = state["presetKey"].toString();
     currentPresetName = state["presetName"].toString();

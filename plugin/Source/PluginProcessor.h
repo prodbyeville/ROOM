@@ -176,12 +176,17 @@ public:
     /** Remove every LFO assignment and put both LFOs back to their defaults. */
     void clearModulation();
 
+    /** "new preset": every knob, the eq and the lfos back to their defaults
+        (Output and Bypass untouched). The loaded room stays. */
+    void resetToInit();
+
     /** LFO -> knob assignments (edited by the UI, read by the audio thread). */
     room::Modulation modulation;
 
     /** UI state saved with the project. */
     float editorScale = 1.0f;
     bool advancedOpen = false;
+    bool tipsEnabled = true;   // hover tips on knobs and keys
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

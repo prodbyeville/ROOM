@@ -15,6 +15,7 @@ EqPanel::EqPanel (RoomAudioProcessor& p) : proc (p)
 {
     spectrumDb.fill (kSpecBottomDb);
     setRepaintsOnMouseActivity (false);
+    setTooltip ("the final eq. drag a band to boost or cut, scroll to make it wider or narrower, double-click to reset it.");
     startTimerHz (30);
 }
 

@@ -61,6 +61,21 @@ public:
     juce::Rectangle<int> getTooltipBounds (const juce::String& text, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override;
     void drawBubble (juce::Graphics&, juce::BubbleComponent&, const juce::Point<float>& tip, const juce::Rectangle<float>& body) override;
 
+    // Dialogs (new pack, delete, messages, about): the same black glass, shown
+    // inside the plugin window.
+    void drawAlertBox (juce::Graphics&, juce::AlertWindow&, const juce::Rectangle<int>& textArea, juce::TextLayout&) override;
+    int getAlertWindowButtonHeight() override { return 36; }
+    juce::Font getAlertWindowTitleFont() override { return Fonts::sans (19.0f, Fonts::bold); }
+    juce::Font getAlertWindowMessageFont() override { return Fonts::sans (14.5f); }
+    juce::Font getAlertWindowFont() override { return Fonts::sans (13.5f); }
+    juce::Array<int> getWidthsForTextButtons (juce::AlertWindow&, const juce::Array<juce::TextButton*>&) override;
+
+    /** Show a dialog inside `parent` (centred). Buttons return 1, 2, ... in order; escape
+        returns 0. With a non-empty textHint there is a text field; its text is passed back. */
+    static void showDialog (juce::Component& parent, const juce::String& title, const juce::String& message,
+                            const juce::StringArray& buttons, const juce::String& textHint = {},
+                            std::function<void (int result, const juce::String& text)> callback = nullptr);
+
     /** Show a menu in the room style, wherever the host puts it. */
     static void showMenu (juce::PopupMenu&, juce::Component& target);
     static constexpr int menuMargin = 10;   // room for the menu's shadow

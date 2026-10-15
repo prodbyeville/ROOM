@@ -5,12 +5,13 @@
 #include "AdvancedPanel.h"
 #include "EvilleLookAndFeel.h"
 #include "presets/PresetBrowser.h"
+#include "UpdateChecker.h"
 
 // The ROOM unit (eville): one piece of hardware sitting on a desk. The
 // advanced section (right) opens from its key; the window grows to fit it.
 //
 //   +-------------------------------------------------+-------------+
-//   | room by eville [< studios >][♥][save] [shuffle] | advanced    |
+//   | [≡] room  [♥ studios / name < >][save] [shuffle] | advanced    |
 //   |                  [advanced] (wet) (out) [bypass]|  knobs      |
 //   | ( load )        ( room )        ( tone )        |  freeze     |
 //   |  (intensity)  (balance)  (tail)  (space)        |             |
@@ -104,7 +105,7 @@ private:
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { randomize, record, save, advanced };
+    enum class Icon { randomize, record, save, advanced, menu };
     IconButton (Icon i, const juce::String& tooltip);
     void paintButton (juce::Graphics&, bool over, bool down) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -112,8 +113,12 @@ public:
     /** Called on right-click (instead of a click). */
     std::function<void()> onRightClick;
 
+    /** A small crimson dot inside the key (the menu key: an update is waiting). */
+    void setBadge (bool b) { if (badge != b) { badge = b; repaint(); } }
+
 private:
     Icon icon;
+    bool badge = false;
 };
 
 /** Bypass: a translucent crimson key, lit while ROOM is on. */
@@ -144,6 +149,11 @@ public:
 
     /** Open (or close) the LFO controls in the advanced section (opens advanced first). */
     void setAdvanced (bool showLfos);
+    /** Tips on / off (the main menu's "tips"). */
+    bool areTipsEnabled() const { return tooltips != nullptr; }
+    /** Menu actions (public for tests). */
+    void newPreset();
+
     /** Show the full room info on the room screen. */
     void showRoomInfo (bool show) { roomScreen.setShowInfo (show); }
 
@@ -162,7 +172,7 @@ private:
     };
     void setupKnob (Knob&, const juce::String& paramId, const juce::String& name, float radius,
                     const juce::String& scaleMin, const juce::String& scaleMid, const juce::String& scaleMax,
-                    bool onBlack);
+                    bool onBlack, const juce::String& tip = {});
 
     /** Everything lives in here, laid out at base size and scaled as a whole. */
     struct Content : public juce::Component
@@ -176,7 +186,15 @@ private:
     RoomAudioProcessor& proc;
     EvilleLookAndFeel lnf;
     Content content;
-    juce::TooltipWindow tooltips { this, 600 };
+    std::unique_ptr<juce::TooltipWindow> tooltips;   // only while tips are on
+    void setTipsEnabled (bool);
+
+    // Main menu (top left)
+    IconButton menuButton { IconButton::Icon::menu, "menu" };
+    void showMainMenu();
+    void showAbout();
+    UpdateChecker updates;
+    int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
 
     // Fixed geometry of the unit's three panels (base coordinates)
     const juce::Rectangle<float> consoleArea { 44.0f, 34.0f, 892.0f, 588.0f };

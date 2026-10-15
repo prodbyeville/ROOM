@@ -10,6 +10,7 @@
 //     double-click to reset the band
 
 class EqPanel : public juce::Component,
+                public juce::SettableTooltipClient,
                 private juce::Timer
 {
 public:
