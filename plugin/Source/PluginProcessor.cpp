@@ -18,7 +18,8 @@ public:
     {
         signalThreadShouldExit();
         notify();
-        stopThread (5000);
+        // Let a build in progress finish: a killed thread can take the host down with it.
+        stopThread (20000);
     }
 
     void requestFile (const juce::File& f)

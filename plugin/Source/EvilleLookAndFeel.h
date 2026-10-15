@@ -29,6 +29,19 @@ namespace UiAssetFiles
     const char* get (const char* fileName, int& sizeOut);
 }
 
+/** Decoded UI images and typefaces, shared by every open editor
+    (juce::SharedResourcePointer<UiResources>). */
+struct UiResources
+{
+    juce::Image image (const char* fileName);
+    juce::Typeface::Ptr typeface (const char* fileName);
+
+private:
+    juce::CriticalSection lock;
+    std::map<juce::String, juce::Image> images;
+    std::map<juce::String, juce::Typeface::Ptr> faces;
+};
+
 class EvilleLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -79,6 +92,7 @@ public:
     /** Show a menu in the room style, wherever the host puts it. */
     static void showMenu (juce::PopupMenu&, juce::Component& target);
     static constexpr int menuMargin = 10;   // room for the menu's shadow
+
     juce::Font getComboBoxFont (juce::ComboBox&) override { return Fonts::sans (13.0f); }
     juce::Font getTextButtonFont (juce::TextButton&, int height) override;
     juce::Font getSliderPopupFont (juce::Slider&) override { return Fonts::mono (12.0f); }
@@ -87,4 +101,7 @@ public:
     /** Knob centre and radius inside a slider (shared with ModSlider's rings). */
     static juce::Rectangle<float> knobBounds (const juce::Slider&);
     static bool onBlack (const juce::Component&);
+
+private:
+    juce::SharedResourcePointer<UiResources> resources;   // keeps the cache alive while an editor is open
 };

@@ -7,11 +7,11 @@
 #include "presets/PresetBrowser.h"
 #include "UpdateChecker.h"
 
-// The ROOM unit (eville): one piece of hardware sitting on a desk. The
+// The ROOM unit (eville): one piece of hardware filling the window. The
 // advanced section (right) opens from its key; the window grows to fit it.
 //
 //   +-------------------------------------------------+-------------+
-//   | [≡] room  [♥ studios / name < >][save] [shuffle] | advanced    |
+//   | [≡] room  [♥ studios / name < >][save] [randomize] | advanced    |
 //   |                  [advanced] (wet) (out) [bypass]|  knobs      |
 //   | ( load )        ( room )        ( tone )        |  freeze     |
 //   |  (intensity)  (balance)  (tail)  (space)        |             |
@@ -20,7 +20,7 @@
 //   +-------------------------------------------------+-------------+
 //
 // Dust-white console, black finish and advanced. Everything is laid out at
-// 1240 x 936 and drawn through a scale transform, so the window resizes
+// 1152 x 772 (892 wide with advanced closed) and drawn through a scale transform, so the window resizes
 // freely (fixed aspect).
 
 class RoomAudioProcessorEditor;
@@ -100,7 +100,7 @@ private:
     float lastIntensity = -1.0f, lastBalance = -1.0f;
 };
 
-/** Square hardware key with an icon (record, save, shuffle). */
+/** Square hardware key with an icon (record, save, randomize). */
 class IconButton : public juce::Button
 {
 public:
@@ -138,7 +138,7 @@ public:
 
     void resized() override;
 
-    static constexpr int baseWidth = 1240, closedWidth = 980, baseHeight = 936;
+    static constexpr int baseWidth = 1152, closedWidth = 892, baseHeight = 772;
 
     /** Open or close the advanced section; the window grows / shrinks to fit. */
     void setAdvancedOpen (bool);
@@ -197,9 +197,9 @@ private:
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
 
     // Fixed geometry of the unit's three panels (base coordinates)
-    const juce::Rectangle<float> consoleArea { 44.0f, 34.0f, 892.0f, 588.0f };
-    const juce::Rectangle<float> finishArea { 44.0f, 622.0f, 892.0f, 264.0f };
-    const juce::Rectangle<float> advancedArea { 936.0f, 34.0f, 260.0f, 852.0f };
+    const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 588.0f };
+    const juce::Rectangle<float> finishArea { 0.0f, 588.0f, 892.0f, 184.0f };
+    const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
     juce::Rectangle<int> bays[3];
     juce::Point<float> finishLed, finishJack;
     juce::Image paperTexture, blackTexture;   // painted steel and powder coat, made in Higgsfield
@@ -208,7 +208,7 @@ private:
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
-    IconButton randomButton { IconButton::Icon::randomize, "shuffle the knobs (right-click to choose what moves)" };
+    IconButton randomButton { IconButton::Icon::randomize, "randomize the knobs (right-click to choose what moves)" };
     IconButton advancedButton { IconButton::Icon::advanced, "advanced: pre-delay, size, damping, ducking, freeze and the lfos" };
     void showRandomizeMenu();
     BypassSwitch bypassButton;

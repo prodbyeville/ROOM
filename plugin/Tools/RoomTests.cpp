@@ -1360,7 +1360,7 @@ namespace
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
         if (mode == "menu" || mode == "mainmenu")
         {
-            // Draw the shuffle menu and a knob's modulation menu with the editor's
+            // Draw the randomize menu and a knob's modulation menu with the editor's
             // look and feel, laid over the snapshot where they would open.
             auto& lf = ed.getLookAndFeel();
             const juce::PopupMenu::Options opts;
@@ -1415,7 +1415,7 @@ namespace
             }
             else
             {
-            drawMenu ({ 600, 100 }, { { "shuffle", 1, false, false }, { "shuffle now", 0, false, false }, { "", 2, false, false },
+            drawMenu ({ 600, 100 }, { { "randomize", 1, false, false }, { "randomize now", 0, false, false }, { "", 2, false, false },
                                       { "what moves", 1, false, false },
                                       { "room knobs  (intensity, balance, tail, space)", 0, true, true },
                                       { "advanced  (pre-delay, size, damping, ducking)", 0, true, false },

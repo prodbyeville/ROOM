@@ -167,7 +167,9 @@ void EqPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelD
         return;
     auto* p = param (ParamIDs::eqQ (b));
     const auto q = p->convertFrom0to1 (p->getValue());
-    const auto newQ = juce::jlimit (0.3f, 8.0f, q * std::pow (1.15f, w.deltaY * 4.0f));
+    // Scroll up: narrower (higher Q). Respect the system's "natural" scrolling setting.
+    const auto up = w.isReversed ? -w.deltaY : w.deltaY;
+    const auto newQ = juce::jlimit (0.3f, 8.0f, q * std::pow (1.15f, up * 4.0f));
     p->beginChangeGesture();
     p->setValueNotifyingHost (p->convertTo0to1 (newQ));
     p->endChangeGesture();

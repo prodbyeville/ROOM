@@ -15,22 +15,41 @@ const char* UiAssetFiles::get (const char* fileName, int& sizeOut)
     return nullptr;
 }
 
-namespace
+juce::Image UiResources::image (const char* fileName)
 {
-    juce::Typeface::Ptr loadTypeface (const char* file)
+    const juce::ScopedLock sl (lock);
+    auto& img = images[fileName];
+    if (! img.isValid())
     {
         int size = 0;
-        if (auto* data = UiAssetFiles::get (file, size))
-            return juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
-        return nullptr;
+        if (auto* data = UiAssetFiles::get (fileName, size))
+            img = juce::ImageFileFormat::loadFrom (data, (size_t) size);
     }
+    return img;
 }
 
+juce::Typeface::Ptr UiResources::typeface (const char* fileName)
+{
+    const juce::ScopedLock sl (lock);
+    auto& face = faces[fileName];
+    if (face == nullptr)
+    {
+        int size = 0;
+        if (auto* data = UiAssetFiles::get (fileName, size))
+            face = juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
+    }
+    return face;
+}
+
+// Images and typefaces live in one shared cache, owned by every open editor's
+// look and feel. It goes away with the last editor, while JUCE is still up:
+// statics would only be freed when the host unloads the plugin's DLL, after
+// JUCE has shut down, which crashes some hosts (FL Studio on delete).
 juce::Typeface::Ptr Fonts::satoshi (Weight w)
 {
-    static juce::Typeface::Ptr faces[4] = { loadTypeface ("Satoshi-Regular.otf"), loadTypeface ("Satoshi-Medium.otf"),
-                                            loadTypeface ("Satoshi-Bold.otf"), loadTypeface ("Satoshi-Black.otf") };
-    return faces[(int) w];
+    static const char* files[4] = { "Satoshi-Regular.otf", "Satoshi-Medium.otf", "Satoshi-Bold.otf", "Satoshi-Black.otf" };
+    juce::SharedResourcePointer<UiResources> res;
+    return res->typeface (files[(int) w]);
 }
 
 juce::Font Fonts::sans (float height, Weight w)
@@ -42,8 +61,8 @@ juce::Font Fonts::sans (float height, Weight w)
 
 juce::Font Fonts::serif (float height)
 {
-    static juce::Typeface::Ptr face = loadTypeface ("CormorantGaramond-MediumItalic.ttf");
-    if (face != nullptr)
+    juce::SharedResourcePointer<UiResources> res;
+    if (auto face = res->typeface ("CormorantGaramond-MediumItalic.ttf"))
         return juce::Font (juce::FontOptions (face).withHeight (height));
     return juce::Font (juce::FontOptions (height, juce::Font::italic));
 }
@@ -170,8 +189,8 @@ void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int,
     // The knob itself: a photographed knurled cap (made in Higgsfield), one for
     // the white console and one for the black modules. The photo carries its own
     // contact shadow. It doesn't rotate (its light stays top-left); the pointer does.
-    static const auto paperKnob = Hw::asset ("knob_paper.png");
-    static const auto blackKnob = Hw::asset ("knob_black.png");
+    const auto paperKnob = Hw::asset ("knob_paper.png");
+    const auto blackKnob = Hw::asset ("knob_black.png");
     if (const auto& knobImg = dark ? blackKnob : paperKnob; knobImg.isValid())
     {
         const auto half = r / (dark ? 0.92f : 0.875f);
@@ -251,7 +270,7 @@ void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
     g.fillRoundedRectangle (juce::Rectangle<float> (slot.getX() + 2.0f, cy - 1.5f, px - slot.getX() - 2.0f, 3.0f), 1.5f);
 
     const auto tb = juce::Rectangle<float> (thumb, thumb).withCentre ({ px, cy });
-    static const auto knobImg = Hw::asset ("knob_black.png");
+    const auto knobImg = Hw::asset ("knob_black.png");
     if (knobImg.isValid())
     {
         g.setOpacity (1.0f);
@@ -592,6 +611,19 @@ void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, 
 
 void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool down)
 {
+    if (b.getProperties()["style"].toString() == "lightkey")
+    {
+        // A small off-white key with an LED in its cap, the label underneath.
+        auto r = b.getLocalBounds().toFloat();
+        const auto label = r.removeFromBottom (14.0f);
+        const auto key = juce::Rectangle<float> (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight())).withCentre (r.getCentre());
+        Hw::drawKey (g, key, true, over, down);
+        Hw::drawLed (g, Hw::keyCap (key).getCentre().translated (0.0f, down ? 0.6f : 0.0f), b.getToggleState(), 3.4f);
+        g.setFont (Fonts::sans (12.5f));
+        g.setColour (Colours::ink.withAlpha (over ? 1.0f : 0.85f));
+        g.drawText (b.getButtonText(), label, juce::Justification::centred);
+        return;
+    }
     if (b.getProperties()["style"].toString() == "minikey")
     {
         auto r = b.getLocalBounds().toFloat();

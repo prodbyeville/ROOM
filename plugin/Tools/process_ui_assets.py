@@ -36,7 +36,6 @@ PARTS = [
     ("minikey_off.png",  "minikey_off.png",  "black", 120, (0.50, 0.50), 0.22, "round"),
 ]
 TEXTURES = [
-    ("desk.png", "tex_desk.jpg", 1024),
     ("paper.png", "tex_paper.jpg", 1024),
     ("black.png", "tex_black.jpg", 1024),
 ]

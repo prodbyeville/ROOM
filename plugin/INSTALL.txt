@@ -25,7 +25,7 @@ ROOM is one unit with three panels:
                stays), tips on / off, check for updates, visit website,
                get support, about, the version.
                the studios window ([heart] name < >), save,
-               shuffle (right-click to choose what moves), advanced (opens
+               randomize (right-click to choose what moves), advanced (opens
                the advanced section on the right; the window grows to fit),
                wet, out, and bypass (the key glows red while ROOM is on)
     load       the loaded room and its fingerprint (lows at the bottom,

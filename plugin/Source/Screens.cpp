@@ -73,10 +73,8 @@ void Hw::strokeGlow (juce::Graphics& g, const juce::Path& p, juce::Colour c, flo
 
 juce::Image Hw::asset (const char* fileName)
 {
-    int size = 0;
-    if (auto* data = UiAssetFiles::get (fileName, size))
-        return juce::ImageCache::getFromMemory (data, size);
-    return {};
+    juce::SharedResourcePointer<UiResources> res;   // see UiResources: no statics
+    return res->image (fileName);
 }
 
 namespace
@@ -100,8 +98,8 @@ void Hw::drawKey (juce::Graphics& g, juce::Rectangle<float> r, bool light, bool 
 {
     // Photographed key caps set into the panel (made in Higgsfield). The photo
     // carries the key well and the cap's own contact shadow.
-    static const auto paperKey = asset ("key_paper.png");
-    static const auto blackKey = asset ("key_black.png");
+    const auto paperKey = asset ("key_paper.png");
+    const auto blackKey = asset ("key_black.png");
     const auto& img = light ? paperKey : blackKey;
     if (img.isValid())
     {
@@ -151,8 +149,8 @@ void Hw::drawKey (juce::Graphics& g, juce::Rectangle<float> r, bool light, bool 
 void Hw::drawGlowKey (juce::Graphics& g, juce::Rectangle<float> r, bool lit, bool over, bool down)
 {
     // A translucent crimson key that lights from inside (made in Higgsfield).
-    static const auto onImg = asset ("key_glow_on.png");
-    static const auto offImg = asset ("key_glow_off.png");
+    const auto onImg = asset ("key_glow_on.png");
+    const auto offImg = asset ("key_glow_off.png");
     const auto s = std::min (r.getWidth(), r.getHeight());
     const auto cap = juce::Rectangle<float> (s * 0.78f, s * 0.78f).withCentre (r.getCentre());
     if (const auto& img = lit ? onImg : offImg; img.isValid())
@@ -173,7 +171,7 @@ void Hw::drawMiniKey (juce::Graphics& g, juce::Rectangle<float> r, bool lit, boo
 {
     // A small black key with an LED in the middle of its cap; lit in code so
     // on and off are exactly the same key.
-    static const auto img = asset ("minikey_off.png");
+    const auto img = asset ("minikey_off.png");
     const auto s = std::min (r.getWidth(), r.getHeight());
     const auto c = r.getCentre();
     if (img.isValid())
@@ -210,8 +208,8 @@ juce::Rectangle<float> Hw::keyCap (juce::Rectangle<float> r)
 
 void Hw::drawLed (juce::Graphics& g, juce::Point<float> c, bool on, float radius)
 {
-    static const auto ledOn = asset ("led_on.png");
-    static const auto ledOff = asset ("led_off.png");
+    const auto ledOn = asset ("led_on.png");
+    const auto ledOff = asset ("led_off.png");
     if (const auto& img = on ? ledOn : ledOff; img.isValid())
     {
         if (on)
@@ -232,8 +230,8 @@ void Hw::drawLed (juce::Graphics& g, juce::Point<float> c, bool on, float radius
 
 void Hw::drawScrew (juce::Graphics& g, juce::Point<float> c, bool onBlack, float size)
 {
-    static const auto paperScrew = asset ("screw_paper.png");
-    static const auto blackScrew = asset ("screw_black.png");
+    const auto paperScrew = asset ("screw_paper.png");
+    const auto blackScrew = asset ("screw_black.png");
     if (const auto& img = onBlack ? blackScrew : paperScrew; img.isValid())
     {
         // Not rotated: the photo's light has to agree with the rest of the unit.
@@ -247,7 +245,7 @@ void Hw::drawScrew (juce::Graphics& g, juce::Point<float> c, bool onBlack, float
 
 void Hw::drawToggle (juce::Graphics& g, juce::Point<float> c, bool up, float size)
 {
-    static const auto img = asset ("toggle.png");
+    const auto img = asset ("toggle.png");
     if (img.isValid())
     {
         // The photo is lit from above; flipped, the lever points down (bypassed).
@@ -261,7 +259,7 @@ void Hw::drawToggle (juce::Graphics& g, juce::Point<float> c, bool up, float siz
 
 void Hw::drawJack (juce::Graphics& g, juce::Point<float> c, float size)
 {
-    static const auto img = asset ("jack.png");
+    const auto img = asset ("jack.png");
     if (img.isValid())
     {
         drawPart (g, img, c, size, 0.77f);
