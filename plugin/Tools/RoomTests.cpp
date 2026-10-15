@@ -12,6 +12,7 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <iostream>
+#include <thread>
 
 using namespace room::presets;
 
@@ -1523,10 +1524,17 @@ namespace
         if (keys.isEmpty())
             keys = { "Factory/Small Room", "Factory/Big Hall", "Factory/Pipe Space", "Factory/Dark Hall" };
 
+        // --bench-rt: feed blocks at real-time pace, like a host does. The
+        // background stages then have the time they would have in a DAW.
+        const bool realtime = args[0] == "--bench-rt";
+        const double seconds = realtime ? 10.0 : 30.0;
+        std::cout << (realtime ? "(real-time paced)\n" : "(as fast as possible)\n");
         std::cout << "preset                     rate    block   % of one core   worst block (% of its time)\n";
+        const std::vector<double> rates = realtime ? std::vector<double> { 48000.0, 96000.0 } : std::vector<double> { 44100.0, 48000.0, 96000.0 };
+        const std::vector<int> blocks = realtime ? std::vector<int> { 64, 256 } : std::vector<int> { 64, 256, 512 };
         for (auto& key : keys)
-            for (double sr : { 44100.0, 48000.0, 96000.0 })
-                for (int block : { 64, 256, 512 })
+            for (double sr : rates)
+                for (int block : blocks)
                 {
                     RoomAudioProcessor p;
                     p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_bench_presets"));
@@ -1542,8 +1550,8 @@ namespace
                     juce::AudioBuffer<float> io (2, block);
                     juce::MidiBuffer midi;
                     juce::Random rng (7);
-                    const int total = (int) (sr * 30.0);
-                    double worst = 0.0;
+                    const int total = (int) (sr * seconds);
+                    double worst = 0.0, busy = 0.0;
                     const auto t0 = juce::Time::getHighResolutionTicks();
                     for (int pos = 0; pos < total; pos += block)
                     {
@@ -1552,10 +1560,17 @@ namespace
                                 io.setSample (c, i, (rng.nextFloat() * 2.0f - 1.0f) * 0.2f);
                         const auto b0 = juce::Time::getHighResolutionTicks();
                         p.processBlock (io, midi);
-                        worst = std::max (worst, juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - b0));
+                        const auto took = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - b0);
+                        worst = std::max (worst, took);
+                        busy += took;
+                        if (realtime)   // wait for this block's moment, like an audio callback
+                        {
+                            const auto due = (pos + block) / sr;
+                            while (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) < due)
+                                std::this_thread::yield();
+                        }
                     }
-                    const auto secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
-                    const auto load = 100.0 * secs / 30.0;
+                    const auto load = 100.0 * busy / seconds;
                     const auto worstPct = 100.0 * worst / (block / sr);
                     std::printf ("%-26s %6.0f  %5d   %10.2f %%     %10.1f %%\n", key.fromFirstOccurrenceOf ("/", false, false).toRawUTF8(),
                                  sr, block, load, worstPct);
@@ -1572,7 +1587,7 @@ int main (int argc, char* argv[])
 
     if (args[0] == "--screenshot" && args.size() >= 5)
         return screenshot (args);
-    if (args[0] == "--bench")
+    if (args[0] == "--bench" || args[0] == "--bench-rt")
         return bench (args);
 
     const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
