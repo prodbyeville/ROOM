@@ -3,10 +3,12 @@
 #include "PluginProcessor.h"
 #include "ModSlider.h"
 
-// The two LFOs (advanced section). Each module, top to bottom:
-//   [:: lfo 1  drag to a knob]  shape
+// The two LFOs (advanced section), stacked. Each module, top to bottom:
+//   [:: lfo 1]  shape
+//   "drag the handle onto a knob"
 //   live waveform with a moving dot
-//   [sync] rate-or-division  [retrig]
+//   rate (a big slider) or the tempo division when synced
+//   [sync]  [retrig]
 //   a chip for every knob it moves
 // Drag the handle onto any knob to assign the LFO to it. Drag a chip up/down
 // to change that amount (Shift = fine), double-click it to remove, right-click
@@ -25,6 +27,10 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
+    void paintOverChildren (juce::Graphics&) override;
+    /** Light the module up briefly (you just opened it). */
+    void flash();
+
     struct TargetChip { int target; juce::Rectangle<int> bounds; };
     /** One chip per knob this LFO moves (public for tests). */
     std::vector<TargetChip> targetChips() const;
@@ -42,8 +48,9 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> shapeAtt, divAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAtt, retrigAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rateAtt;
-    juce::Rectangle<int> waveArea, targetsArea;
+    juce::Rectangle<int> waveArea, targetsArea, captionArea;
     std::vector<float> trail;   // recent LFO values for the scope
+    float flashAlpha = 0.0f;
     int dragTarget = -1;
     float dragStartDepth = 0.0f;
 };
@@ -77,8 +84,8 @@ private:
     bool dragged = false;
 };
 
-/** The full LFO controls, shown in place of the advanced knobs: tabs for
-    LFO 1 / 2, the module, and "done" to go back. */
+/** The full LFO controls, shown in place of the advanced knobs: lfo 1 and
+    lfo 2 stacked, and "done" to go back. */
 class LfoPanel : public juce::Component
 {
 public:
@@ -93,6 +100,6 @@ public:
 
 private:
     LfoModule lfo1, lfo2;
-    juce::TextButton tab1 { "lfo 1" }, tab2 { "lfo 2" }, done { "done" };
+    juce::TextButton done { "done" };
     int shown = 0;
 };

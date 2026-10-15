@@ -22,8 +22,9 @@ ROOM is one unit with three panels:
 
   the console (dust white, top left)
     top        room by eville, the studios window (< name >), heart, save,
-               shuffle (randomize; right-click to choose what moves),
-               wet, out, and the bypass switch (the red light = ROOM is on)
+               shuffle (right-click to choose what moves), advanced (opens
+               the advanced section on the right; the window grows to fit),
+               wet, out, and bypass (the key glows red while ROOM is on)
     load       the loaded room. click it for the ROOMS library, drop a sound
                on it to build a room, right-click for more (sound file,
                clear). record: play / clap / sing into the track, press
@@ -38,10 +39,10 @@ ROOM is one unit with three panels:
                strongest resonance)
     knobs      intensity, balance (+ auto), tail, space
 
-  advanced (black, the whole right side)
+  advanced (black, the right side; open it with the advanced key)
     pre-delay, size, damping, ducking, release, freeze
-    lfo 1 / lfo 2: click a card to open its controls right there (shape,
-    rate or sync, retrig, what it moves). drag a card or the lfo handle
+    lfo 1 / lfo 2: click a card to open both lfos, stacked (shape, rate or
+    sync, retrig, what it moves). right-click a knob for its modulation. drag a card or the lfo handle
     onto any knob to assign it. a dot appears next to the knob: drag it
     up / down for the amount, double-click to remove. "done" goes back.
 

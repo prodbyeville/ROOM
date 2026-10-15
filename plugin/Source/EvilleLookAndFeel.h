@@ -12,6 +12,7 @@
 //   "scaleMin" / "scaleMid" / "scaleMax"  printed numbers around a knob
 //   "key"       "light" or "dark": draw a TextButton as a hardware key
 //   "style"     "led": draw a ToggleButton as an LED with a label
+//               "minikey": a small black key with an LED in it, label beside
 
 namespace Fonts
 {
@@ -46,7 +47,23 @@ public:
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool over, bool down) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool over, bool down) override;
 
+    // Menus, tooltips and value bubbles: black glass, lowercase Satoshi, a crimson accent.
     juce::Font getPopupMenuFont() override { return Fonts::sans (14.0f); }
+    int getPopupMenuBorderSizeWithOptions (const juce::PopupMenu::Options&) override { return menuMargin + 6; }
+    void drawPopupMenuBackgroundWithOptions (juce::Graphics&, int width, int height, const juce::PopupMenu::Options&) override;
+    void drawPopupMenuItemWithOptions (juce::Graphics&, const juce::Rectangle<int>& area, bool highlighted,
+                                       const juce::PopupMenu::Item&, const juce::PopupMenu::Options&) override;
+    void drawPopupMenuSectionHeaderWithOptions (juce::Graphics&, const juce::Rectangle<int>& area,
+                                                const juce::String& name, const juce::PopupMenu::Options&) override;
+    void getIdealPopupMenuItemSizeWithOptions (const juce::String& text, bool isSeparator, int standardHeight,
+                                               int& idealWidth, int& idealHeight, const juce::PopupMenu::Options&) override;
+    void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
+    juce::Rectangle<int> getTooltipBounds (const juce::String& text, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override;
+    void drawBubble (juce::Graphics&, juce::BubbleComponent&, const juce::Point<float>& tip, const juce::Rectangle<float>& body) override;
+
+    /** Show a menu in the room style, wherever the host puts it. */
+    static void showMenu (juce::PopupMenu&, juce::Component& target);
+    static constexpr int menuMargin = 10;   // room for the menu's shadow
     juce::Font getComboBoxFont (juce::ComboBox&) override { return Fonts::sans (13.0f); }
     juce::Font getTextButtonFont (juce::TextButton&, int height) override;
     juce::Font getSliderPopupFont (juce::Slider&) override { return Fonts::mono (12.0f); }

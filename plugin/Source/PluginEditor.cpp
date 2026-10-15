@@ -86,7 +86,7 @@ void LoadScreen::mouseUp (const juce::MouseEvent& e)
         m.addItem ("build a room from a sound file...", [this] { chooseSoundFile(); });
         m.addSeparator();
         m.addItem ("clear the room", proc.getAnalysis().valid, false, [this] { proc.clearRoom(); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        EvilleLookAndFeel::showMenu (m, *this);
         return;
     }
     if (onOpenLibrary)
@@ -598,6 +598,16 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
             p.closeSubPath();
             break;
         }
+        case Icon::advanced:
+        {
+            // the unit with its side section: a frame with the right part filled
+            const auto box = juce::Rectangle<float> (s * 1.3f, s * 0.95f).withCentre (c);
+            g.drawRoundedRectangle (box, 2.0f, 1.5f);
+            g.fillRoundedRectangle (box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f), 1.0f);
+            if (getToggleState())
+                Hw::drawLed (g, { r.getRight() - 8.5f, r.getY() + 8.5f }, true, 2.2f);
+            return;
+        }
         case Icon::randomize:
         {
             const auto x0 = c.x - s * 0.62f, x1 = c.x + s * 0.62f, y0 = c.y - s * 0.38f, y1 = c.y + s * 0.38f;
@@ -617,19 +627,10 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
     g.strokePath (p, stroke);
 }
 
-void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool)
+void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool down)
 {
-    // A chrome bat toggle (up = on) and the power LED: lit while ROOM is running.
-    const auto bypassed = getToggleState();
-    auto r = getLocalBounds().toFloat();
-    const auto toggleArea = r.removeFromLeft (r.getHeight());
-    Hw::drawToggle (g, toggleArea.getCentre(), ! bypassed, toggleArea.getHeight());
-    if (over)
-    {
-        g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.fillEllipse (toggleArea.reduced (toggleArea.getWidth() * 0.3f));
-    }
-    Hw::drawLed (g, r.getCentre(), ! bypassed, 4.5f);
+    // Lit crimson while ROOM is running, dark when bypassed.
+    Hw::drawGlowKey (g, getLocalBounds().toFloat(), ! getToggleState(), over, down);
 }
 
 //==============================================================================
@@ -651,6 +652,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addAndMakeVisible (randomButton);
     randomButton.onClick = [this] { proc.randomizeKnobs (random); };
     randomButton.onRightClick = [this] { showRandomizeMenu(); };
+    content.addAndMakeVisible (advancedButton);
+    advancedButton.onClick = [this] { setAdvancedOpen (! proc.advancedOpen); };
     content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::bypass, bypassButton);
     setupKnob (mix, ParamIDs::mix, "wet", 15.0f, "", "", "", false);
@@ -741,17 +744,9 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
         return submitRoomSaveDialog (mode, meta, pack, overwrite);
     };
 
-    content.setBounds (0, 0, baseWidth, baseHeight);
-
     // Resizable, keeping the shape: everything scales together.
-    // (Size first: the limits/aspect constrainer would otherwise start from 0 x 0.)
-    const auto startScale = juce::jlimit (0.6f, 1.4f, proc.editorScale);
-    setSize (juce::roundToInt (baseWidth * startScale), juce::roundToInt (baseHeight * startScale));
     setResizable (true, true);
-    setResizeLimits (baseWidth * 3 / 5, baseHeight * 3 / 5, baseWidth * 7 / 5, baseHeight * 7 / 5);
-    if (auto* c = getConstrainer())
-        c->setFixedAspectRatio ((double) baseWidth / baseHeight);
-    setSize (juce::roundToInt (baseWidth * startScale), juce::roundToInt (baseHeight * startScale));
+    setAdvancedOpen (proc.advancedOpen);
 
     startTimerHz (15);
 }
@@ -786,7 +781,28 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
 
 void RoomAudioProcessorEditor::setAdvanced (bool showLfos)
 {
+    if (showLfos && ! proc.advancedOpen)
+        setAdvancedOpen (true);
     advancedPanel.showModulationTab (showLfos);
+}
+
+void RoomAudioProcessorEditor::setAdvancedOpen (bool open)
+{
+    // Keep the current scale; the window gets wider or narrower around the unit.
+    const auto scale = juce::jlimit (0.6f, 1.4f, getHeight() > 0 ? (float) getHeight() / (float) baseHeight : proc.editorScale);
+    proc.advancedOpen = open;
+    advancedButton.setToggleState (open, juce::dontSendNotification);
+    advancedPanel.setVisible (open);
+    if (! open)
+        advancedPanel.showModulationTab (false);
+    const auto w = contentWidth();
+    content.setBounds (0, 0, w, baseHeight);
+    staticLayer = {};
+    if (auto* c = getConstrainer())
+        c->setFixedAspectRatio ((double) w / baseHeight);
+    setResizeLimits (w * 3 / 5, baseHeight * 3 / 5, w * 7 / 5, baseHeight * 7 / 5);
+    setSize (juce::roundToInt ((float) w * scale), juce::roundToInt ((float) baseHeight * scale));
+    content.repaint();
 }
 
 void RoomAudioProcessorEditor::timerCallback()
@@ -827,13 +843,13 @@ void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
     if (! staticLayer.isValid() || std::abs (scale - staticScale) > 0.001f)
     {
         staticScale = scale;
-        staticLayer = juce::Image (juce::Image::RGB, std::max (1, juce::roundToInt (baseWidth * scale)),
+        staticLayer = juce::Image (juce::Image::RGB, std::max (1, juce::roundToInt ((float) contentWidth() * scale)),
                                    std::max (1, juce::roundToInt (baseHeight * scale)), true);
         juce::Graphics sg (staticLayer);
         sg.addTransform (juce::AffineTransform::scale (scale));
         paintUnit (sg);
     }
-    g.drawImage (staticLayer, juce::Rectangle<float> (0.0f, 0.0f, (float) baseWidth, (float) baseHeight));
+    g.drawImage (staticLayer, juce::Rectangle<float> (0.0f, 0.0f, (float) contentWidth(), (float) baseHeight));
 
     // The power LED on finish follows bypass.
     Hw::drawLed (g, finishLed, ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f), 4.5f);
@@ -841,7 +857,8 @@ void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
 
 void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
 {
-    const auto unit = consoleArea.getUnion (advancedArea).getUnion (finishArea);
+    const auto open = proc.advancedOpen;
+    const auto unit = open ? consoleArea.getUnion (advancedArea).getUnion (finishArea) : consoleArea.getUnion (finishArea);
     const auto corner = 10.0f;
 
     // --- the desk: light grey, lit from the top left ---
@@ -849,12 +866,12 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
     if (auto desk = Hw::asset ("tex_desk.jpg"); desk.isValid())
     {
         g.setOpacity (1.0f);
-        g.drawImage (desk, juce::Rectangle<float> (0.0f, 0.0f, (float) baseWidth, (float) baseHeight),
+        g.drawImage (desk, juce::Rectangle<float> (0.0f, 0.0f, (float) contentWidth(), (float) baseHeight),
                      juce::RectanglePlacement::fillDestination);
     }
     {
         juce::ColourGradient light (juce::Colours::white.withAlpha (0.18f), 0.0f, 0.0f,
-                                    juce::Colours::black.withAlpha (0.10f), (float) baseWidth, (float) baseHeight, true);
+                                    juce::Colours::black.withAlpha (0.10f), (float) contentWidth(), (float) baseHeight, true);
         g.setGradientFill (light);
         g.fillAll();
     }
@@ -907,12 +924,14 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
     };
     panel (consoleArea, false);
     panel (finishArea, true);
-    panel (advancedArea, true);
+    if (open)
+        panel (advancedArea, true);
 
     // The joints between the panels: a dark hairline gap.
     g.setColour (juce::Colour (0xff050505));
     g.fillRect (juce::Rectangle<float> (consoleArea.getX(), consoleArea.getBottom() - 0.5f, consoleArea.getWidth(), 1.5f));
-    g.fillRect (juce::Rectangle<float> (advancedArea.getX() - 0.5f, unit.getY(), 1.5f, unit.getHeight()));
+    if (open)
+        g.fillRect (juce::Rectangle<float> (advancedArea.getX() - 0.5f, unit.getY(), 1.5f, unit.getHeight()));
     g.restoreState();
 
     // The unit's outer edge: a bright lip along the top, rolled corners.
@@ -926,6 +945,8 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
     // Screws: four on each panel, each at its own angle.
     for (auto r : { consoleArea, advancedArea, finishArea })
     {
+        if (r == advancedArea && ! open)
+            continue;
         const auto black = r != consoleArea;
         const auto in = r.reduced (15.0f);
         for (auto p : { in.getTopLeft(), in.getTopRight(), in.getBottomLeft(), in.getBottomRight() })
@@ -963,7 +984,10 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     // Top bar print and the crease under it
     g.setFont (Fonts::sans (13.0f));
     g.setColour (Colours::ink);
-    g.drawText ("bypass", bypassButton.getBounds().translated (0, -17).withHeight (16), juce::Justification::centred);
+    for (auto [b, name] : { std::pair<juce::Component*, const char*> { &randomButton, "shuffle" }, { &advancedButton, "advanced" },
+                            { &bypassButton, "bypass" } })
+        g.drawText (name, juce::Rectangle<int> (70, 16).withCentre ({ b->getBounds().getCentreX(), b->getBottom() + 10 }),
+                    juce::Justification::centred);
     Hw::drawGroove (g, { c.getX() + 26.0f, c.getY() + 104.0f }, { c.getRight() - 26.0f, c.getY() + 104.0f }, false);
 
     // Bay frames pressed into the panel, with their names on the frame line
@@ -1014,14 +1038,14 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
 
 void RoomAudioProcessorEditor::resized()
 {
-    const auto scale = (float) getWidth() / (float) baseWidth;
+    const auto scale = (float) getHeight() / (float) baseHeight;
     content.setTransform (juce::AffineTransform::scale (scale));
     proc.editorScale = scale;
 }
 
 void RoomAudioProcessorEditor::layoutContent()
 {
-    const auto full = juce::Rectangle<int> (0, 0, baseWidth, baseHeight);
+    const auto full = juce::Rectangle<int> (0, 0, contentWidth(), baseHeight);
     browser.setBounds (full);
     roomBrowser.setBounds (full);
     saveDialog.setBounds (full);
@@ -1031,14 +1055,17 @@ void RoomAudioProcessorEditor::layoutContent()
     staticLayer = {};   // the print follows the layout
 
     // --- Top bar ---
-    presetBar.setBounds (c.getX() + 278, c.getY() + 32, 360, 42);
-    randomButton.setBounds (c.getX() + 650, c.getY() + 31, 44, 44);
-    for (auto [k, x] : { std::pair { &mix, 732 }, { &output, 786 } })
+    // Every key up here is the same size; labels sit under them on one line.
+    const int key = 44, keyY = c.getY() + 30;
+    presetBar.setBounds (c.getX() + 258, keyY, 336, key);
+    randomButton.setBounds (c.getX() + 604, keyY, key, key);
+    advancedButton.setBounds (c.getX() + 656, keyY, key, key);
+    for (auto [k, x] : { std::pair { &mix, 744 }, { &output, 796 } })
     {
-        k->slider.setBounds (juce::Rectangle<int> (54, 50).withCentre ({ c.getX() + x, c.getY() + 47 }));
-        k->label.setBounds (juce::Rectangle<int> (54, 16).withCentre ({ c.getX() + x, c.getY() + 83 }));
+        k->slider.setBounds (juce::Rectangle<int> (54, 50).withCentre ({ c.getX() + x, keyY + key / 2 }));
+        k->label.setBounds (juce::Rectangle<int> (54, 16).withCentre ({ c.getX() + x, keyY + key + 10 }));
     }
-    bypassButton.setBounds (c.getX() + 810, c.getY() + 30, 66, 50);
+    bypassButton.setBounds (c.getX() + 832, keyY, key, key);
 
     // --- Row 1: three identical bays ---
     const int bayW = 264, bayH = 220, bayY = c.getY() + 128, gap = 20;
@@ -1051,14 +1078,17 @@ void RoomAudioProcessorEditor::layoutContent()
         auto keys = s.removeFromBottom (44);
         s.removeFromBottom (6);
         loadScreen.setBounds (s);
-        recordButton.setBounds (keys.getX() + 4, keys.getY() + 2, 42, 42);
-        roomSaveButton.setBounds (keys.getX() + 124, keys.getY() + 2, 42, 42);
+        recordButton.setBounds (keys.getX() + 4, keys.getY(), 44, 44);
+        roomSaveButton.setBounds (keys.getX() + 124, keys.getY(), 44, 44);
     }
     roomScreen.setBounds (screenOf (bays[1]));
     toneScreen.setBounds (screenOf (bays[2]));
 
     // --- Row 2: the four knobs ---
-    const int kx0 = c.getX() + 28, kw = (c.getWidth() - 56) / 4, ky = c.getY() + 458;
+    // Centred between the bays and the seam: the block runs from the top scale
+    // number (ky - 66) to the bottom of "auto" (ky + 104).
+    const int kx0 = c.getX() + 28, kw = (c.getWidth() - 56) / 4;
+    const int ky = (bays[0].getBottom() + c.getBottom() + 66 - 104) / 2;
     Knob* knobs[4] = { &intensity, &balance, &tail, &space };
     for (int i = 0; i < 4; ++i)
     {
@@ -1093,14 +1123,15 @@ void RoomAudioProcessorEditor::showRandomizeMenu()
         { P::randomRoom,     "room knobs  (intensity, balance, tail, space)" },
         { P::randomAdvanced, "advanced  (pre-delay, size, damping, ducking)" },
         { P::randomEq,       "eq bands" },
-        { P::randomFinish,   "tape + auto eq" },
+        { P::randomFinish,   "tape and auto eq" },
         { P::randomLfos,     "lfo settings  (shape, rate)" },
     };
 
     juce::PopupMenu menu;
-    menu.addSectionHeader ("randomize");
-    menu.addItem ("randomize now", proc.randomizeMask != 0, false, [this] { proc.randomizeKnobs (random); });
+    menu.addSectionHeader ("shuffle");
+    menu.addItem ("shuffle now", proc.randomizeMask != 0, false, [this] { proc.randomizeKnobs (random); });
     menu.addSeparator();
+    menu.addSectionHeader ("what moves");
     for (auto& [bit, name] : groups)
         menu.addItem (name, true, (proc.randomizeMask & bit) != 0, [this, bit = bit]
         {
@@ -1111,7 +1142,7 @@ void RoomAudioProcessorEditor::showRandomizeMenu()
     menu.addItem ("all", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomAll; showRandomizeMenu(); });
     menu.addItem ("none", true, false, [this] { proc.randomizeMask = 0; showRandomizeMenu(); });
     menu.addItem ("back to default", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomDefault; showRandomizeMenu(); });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&randomButton));
+    EvilleLookAndFeel::showMenu (menu, randomButton);
 }
 
 //==============================================================================

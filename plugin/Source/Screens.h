@@ -18,6 +18,11 @@ namespace Hw
     /** Tactile square key. light = dust-white plastic, otherwise black. */
     void drawKey (juce::Graphics&, juce::Rectangle<float>, bool light, bool over, bool down);
 
+    /** A translucent crimson key, lit from inside while `lit` (bypass / power). */
+    void drawGlowKey (juce::Graphics&, juce::Rectangle<float>, bool lit, bool over, bool down);
+    /** A small black key with an LED in its cap (sync, retrig). */
+    void drawMiniKey (juce::Graphics&, juce::Rectangle<float>, bool lit, bool over, bool down);
+
     /** The face of a key drawn by drawKey (inside its well), for icons and text. */
     juce::Rectangle<float> keyCap (juce::Rectangle<float> keyBounds);
 

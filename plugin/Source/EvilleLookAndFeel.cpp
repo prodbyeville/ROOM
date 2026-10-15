@@ -75,15 +75,15 @@ EvilleLookAndFeel::EvilleLookAndFeel()
     setColour (juce::ComboBox::outlineColourId, Colours::outline);
     setColour (juce::ComboBox::textColourId, Colours::screenText);
     setColour (juce::ComboBox::arrowColourId, Colours::screenDim);
-    setColour (juce::PopupMenu::backgroundColourId, Colours::panel);
-    setColour (juce::PopupMenu::textColourId, Colours::text);
-    setColour (juce::PopupMenu::headerTextColourId, Colours::dim);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, Colours::crimson.withAlpha (0.6f));
+    setColour (juce::PopupMenu::backgroundColourId, C::transparentBlack);   // see-through: the menu draws its own rounded glass
+    setColour (juce::PopupMenu::textColourId, Colours::dustWhite);
+    setColour (juce::PopupMenu::headerTextColourId, Colours::screenDim);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, juce::Colour (0xff262626));
     setColour (juce::PopupMenu::highlightedTextColourId, Colours::dustWhite);
     setColour (juce::BubbleComponent::backgroundColourId, Colours::evilleBlack);
     setColour (juce::BubbleComponent::outlineColourId, Colours::graphite);
     setColour (juce::TooltipWindow::backgroundColourId, Colours::evilleBlack);
-    setColour (juce::TooltipWindow::textColourId, Colours::dustWhite);
+    setColour (juce::TooltipWindow::textColourId, Colours::screenText);
     setColour (juce::TooltipWindow::outlineColourId, Colours::graphite);
     setColour (juce::ScrollBar::thumbColourId, Colours::outline);
     setColour (juce::AlertWindow::backgroundColourId, Colours::panel);
@@ -122,7 +122,7 @@ juce::Rectangle<float> EvilleLookAndFeel::knobBounds (const juce::Slider& s)
 juce::Label* EvilleLookAndFeel::createSliderTextBox (juce::Slider& s)
 {
     auto* l = LookAndFeel_V4::createSliderTextBox (s);
-    l->setFont (Fonts::mono (12.0f));
+    l->setFont (Fonts::mono (s.getProperties()["bigReadout"] ? 14.0f : 12.0f));
     return l;
 }
 
@@ -235,13 +235,191 @@ void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
         LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);
         return;
     }
+    // A slot cut into the panel, crimson up to the thumb, and a small black knob as the thumb.
+    const auto thumb = std::min (22.0f, (float) h - 4.0f);
     const auto cy = (float) y + (float) h * 0.5f;
-    g.setColour (juce::Colour (0xff3c3c3c));
-    g.fillRoundedRectangle ((float) x, cy - 1.5f, (float) w, 3.0f, 1.5f);
+    const auto left = (float) x + thumb * 0.5f, right = (float) (x + w) - thumb * 0.5f;
+    const auto slot = juce::Rectangle<float> (left - 3.0f, cy - 3.5f, right - left + 6.0f, 7.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.07f));
+    g.fillRoundedRectangle (slot.translated (0.0f, 1.0f), 3.5f);
+    g.setColour (juce::Colour (0xff050505));
+    g.fillRoundedRectangle (slot, 3.5f);
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.drawRoundedRectangle (slot.reduced (0.5f).translated (0.0f, 0.5f), 3.0f, 1.0f);
+    const auto px = juce::jlimit (left, right, pos);
     g.setColour (Colours::crimson);
-    g.fillRoundedRectangle ((float) x, cy - 1.5f, pos - (float) x, 3.0f, 1.5f);
-    g.setColour (Colours::dustWhite);
-    g.fillEllipse (juce::Rectangle<float> (11.0f, 11.0f).withCentre ({ pos, cy }));
+    g.fillRoundedRectangle (juce::Rectangle<float> (slot.getX() + 2.0f, cy - 1.5f, px - slot.getX() - 2.0f, 3.0f), 1.5f);
+
+    const auto tb = juce::Rectangle<float> (thumb, thumb).withCentre ({ px, cy });
+    static const auto knobImg = Hw::asset ("knob_black.png");
+    if (knobImg.isValid())
+    {
+        g.setOpacity (1.0f);
+        g.drawImage (knobImg, tb.expanded (thumb * 0.06f), juce::RectanglePlacement::stretchToFit);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xff1a1a1a));
+        g.fillEllipse (tb);
+    }
+    g.setColour (juce::Colour (0xfff2efe8).withAlpha (s.isMouseOverOrDragging() ? 1.0f : 0.9f));
+    g.drawLine (px, tb.getY() + thumb * 0.16f, px, tb.getY() + thumb * 0.46f, 1.8f);
+}
+
+//==============================================================================
+// Menus, tooltips, value bubbles
+
+namespace
+{
+    void glassPanel (juce::Graphics& g, juce::Rectangle<float> r, float corner, bool withShadow)
+    {
+        if (withShadow)   // soft shadow, falling down like every other shadow on the unit
+            for (int i = 0; i < 6; ++i)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.055f));
+                g.fillRoundedRectangle (r.translated (0.0f, 3.0f).expanded ((float) i * 1.4f), corner + (float) i * 1.4f);
+            }
+        juce::ColourGradient body (juce::Colour (0xff1d1d1d), 0.0f, r.getY(), juce::Colour (0xff0e0e0e), 0.0f, r.getBottom(), false);
+        g.setGradientFill (body);
+        g.fillRoundedRectangle (r, corner);
+        g.setColour (juce::Colours::black);
+        g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));   // lit top lip
+        g.drawLine (r.getX() + corner, r.getY() + 1.5f, r.getRight() - corner, r.getY() + 1.5f, 1.0f);
+    }
+}
+
+void EvilleLookAndFeel::showMenu (juce::PopupMenu& m, juce::Component& target)
+{
+    m.setLookAndFeel (&target.getLookAndFeel());
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target).withStandardItemHeight (30));
+}
+
+void EvilleLookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int w, int h, const juce::PopupMenu::Options&)
+{
+    g.fillAll (juce::Colours::transparentBlack);
+    glassPanel (g, juce::Rectangle<float> ((float) w, (float) h).reduced ((float) menuMargin), 9.0f, true);
+}
+
+void EvilleLookAndFeel::getIdealPopupMenuItemSizeWithOptions (const juce::String& text, bool isSeparator, int,
+                                                              int& idealWidth, int& idealHeight, const juce::PopupMenu::Options&)
+{
+    if (isSeparator)
+    {
+        idealWidth = 60;
+        idealHeight = 11;
+        return;
+    }
+    idealHeight = 30;
+    idealWidth = juce::GlyphArrangement::getStringWidthInt (getPopupMenuFont(), text) + 64;
+}
+
+void EvilleLookAndFeel::drawPopupMenuSectionHeaderWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area,
+                                                               const juce::String& name, const juce::PopupMenu::Options&)
+{
+    g.setFont (Fonts::sans (11.0f, Fonts::bold).withExtraKerningFactor (0.12f));
+    g.setColour (Colours::screenDim);
+    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (20.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);
+}
+
+void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area, bool highlighted,
+                                                      const juce::PopupMenu::Item& item, const juce::PopupMenu::Options&)
+{
+    auto r = area.toFloat();
+    if (item.isSeparator)
+    {
+        Hw::drawGroove (g, { r.getX() + 14.0f, r.getCentreY() }, { r.getRight() - 14.0f, r.getCentreY() }, true);
+        return;
+    }
+    if (item.customComponent != nullptr)
+        return;
+
+    const auto enabled = item.isEnabled;
+    if (highlighted && enabled)
+    {
+        const auto pill = r.reduced (5.0f, 2.0f);
+        g.setColour (juce::Colour (0xff2a2a2a));
+        g.fillRoundedRectangle (pill, 6.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.05f));
+        g.drawLine (pill.getX() + 6.0f, pill.getY() + 0.8f, pill.getRight() - 6.0f, pill.getY() + 0.8f, 1.0f);
+        g.setColour (Colours::crimson);
+        g.fillRoundedRectangle (pill.getX() + 1.0f, pill.getY() + 6.0f, 2.5f, pill.getHeight() - 12.0f, 1.25f);
+    }
+
+    // Ticked: a lit crimson dot where a check would be
+    const auto dot = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 19.0f, r.getCentreY() });
+    if (item.isTicked)
+    {
+        g.setColour (Colours::crimson.withAlpha (0.3f));
+        g.fillEllipse (dot.expanded (3.5f));
+        g.setColour (Colours::crimson.brighter (0.2f));
+        g.fillEllipse (dot);
+    }
+    else if (highlighted && enabled)
+    {
+        g.setColour (Colours::screenDim.withAlpha (0.5f));
+        g.drawEllipse (dot.reduced (0.5f), 1.0f);
+    }
+
+    auto text = r.withTrimmedLeft (32.0f).withTrimmedRight (14.0f);
+    if (item.subMenu != nullptr)
+    {
+        const auto c = juce::Point<float> (text.getRight() - 4.0f, r.getCentreY());
+        juce::Path chevron;
+        chevron.startNewSubPath (c.x - 3.0f, c.y - 4.5f);
+        chevron.lineTo (c.x + 1.5f, c.y);
+        chevron.lineTo (c.x - 3.0f, c.y + 4.5f);
+        g.setColour (Colours::screenDim.withAlpha (enabled ? 1.0f : 0.4f));
+        g.strokePath (chevron, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        text.removeFromRight (14.0f);
+    }
+    if (item.shortcutKeyDescription.isNotEmpty())
+    {
+        g.setFont (Fonts::mono (11.5f));
+        g.setColour (Colours::screenDim);
+        g.drawText (item.shortcutKeyDescription, text, juce::Justification::centredRight);
+    }
+    g.setFont (getPopupMenuFont());
+    g.setColour ((item.colour.isTransparent() ? Colours::dustWhite : item.colour)
+                     .withAlpha (! enabled ? 0.35f : highlighted ? 1.0f : 0.86f));
+    g.drawFittedText (item.text, text.toNearestInt(), juce::Justification::centredLeft, 1);
+}
+
+juce::Rectangle<int> EvilleLookAndFeel::getTooltipBounds (const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent)
+{
+    const auto font = Fonts::sans (13.0f);
+    const auto w = std::min (320, juce::GlyphArrangement::getStringWidthInt (font, text) + 26);
+    const auto lines = juce::GlyphArrangement::getStringWidthInt (font, text) + 26 > 320 ? 2 : 1;
+    const auto h = 14 + lines * 17;
+    auto r = juce::Rectangle<int> (pos.x > parent.getCentreX() ? pos.x - (w + 12) : pos.x + 12,
+                                   pos.y > parent.getCentreY() ? pos.y - (h + 8) : pos.y + 14, w, h);
+    return r.constrainedWithin (parent);
+}
+
+void EvilleLookAndFeel::drawTooltip (juce::Graphics& g, const juce::String& text, int w, int h)
+{
+    g.fillAll (juce::Colour (0xff121212));
+    glassPanel (g, juce::Rectangle<float> ((float) w, (float) h), 4.0f, false);
+    g.setFont (Fonts::sans (13.0f));
+    g.setColour (Colours::screenText);
+    g.drawFittedText (text, juce::Rectangle<int> (w, h).reduced (12, 5), juce::Justification::centredLeft, 2);
+}
+
+void EvilleLookAndFeel::drawBubble (juce::Graphics& g, juce::BubbleComponent&, const juce::Point<float>& tip,
+                                    const juce::Rectangle<float>& body)
+{
+    // The value readout above a knob: a small black glass tag with a pointer.
+    juce::Path p;
+    p.addBubble (body.reduced (0.5f), body.getUnion (juce::Rectangle<float> (tip.x, tip.y, 1.0f, 1.0f)), tip, 5.0f,
+                 std::min (12.0f, body.getWidth() * 0.4f));
+    g.setColour (juce::Colours::black.withAlpha (0.3f));
+    g.fillPath (p, juce::AffineTransform::translation (0.0f, 2.0f));
+    g.setColour (juce::Colour (0xff121212));
+    g.fillPath (p);
+    g.setColour (juce::Colours::black);
+    g.strokePath (p, juce::PathStrokeType (1.0f));
+    g.setColour (juce::Colours::white.withAlpha (0.09f));
+    g.drawLine (body.getX() + 5.0f, body.getY() + 1.5f, body.getRight() - 5.0f, body.getY() + 1.5f, 1.0f);
 }
 
 //==============================================================================
@@ -285,6 +463,16 @@ void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, 
 
 void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool down)
 {
+    if (b.getProperties()["style"].toString() == "minikey")
+    {
+        auto r = b.getLocalBounds().toFloat();
+        const auto key = r.removeFromLeft (std::min (r.getHeight(), 30.0f)).withSizeKeepingCentre (r.getHeight(), r.getHeight());
+        Hw::drawMiniKey (g, key, b.getToggleState(), over, down);
+        g.setFont (Fonts::sans (13.5f));
+        g.setColour (Colours::dustWhite.withAlpha (over || b.getToggleState() ? 1.0f : 0.82f));
+        g.drawText (b.getButtonText(), r.withTrimmedLeft (7.0f), juce::Justification::centredLeft);
+        return;
+    }
     if (b.getProperties()["style"].toString() != "led")
     {
         LookAndFeel_V4::drawToggleButton (g, b, over, down);

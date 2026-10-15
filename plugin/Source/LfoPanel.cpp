@@ -20,13 +20,14 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
         c->setColour (juce::ComboBox::arrowColourId, Colours::screenDim);
         addAndMakeVisible (c);
     }
-    rate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 62, 18);
+    rate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 66, 26);
+    rate.getProperties().set ("bigReadout", true);
     rate.setColour (juce::Slider::textBoxTextColourId, Colours::screenText);
     rate.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (rate);
     for (auto* b : { &sync, &retrig })
     {
-        b->getProperties().set ("style", "led");
+        b->getProperties().set ("style", "minikey");
         b->getProperties().set ("surface", "black");
         addAndMakeVisible (b);
     }
@@ -45,7 +46,13 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
 
 juce::Rectangle<int> LfoModule::handleArea() const
 {
-    return getLocalBounds().removeFromTop (28).removeFromLeft (getWidth() / 2 + 6);
+    return getLocalBounds().removeFromTop (32).removeFromLeft (88);
+}
+
+void LfoModule::flash()
+{
+    flashAlpha = 1.0f;
+    repaint();
 }
 
 static juce::String targetName (int t)
@@ -68,7 +75,7 @@ static juce::String chipText (int target, float depth)
 std::vector<LfoModule::TargetChip> LfoModule::targetChips() const
 {
     std::vector<TargetChip> out;
-    const auto font = Fonts::sans (11.5f);
+    const auto font = Fonts::sans (12.5f);
     int x = targetsArea.getX(), y = targetsArea.getY();
     for (auto& slot : proc.modulation.slots[(size_t) lfo])
         if (const auto t = slot.target.load(); t >= 0)
@@ -77,9 +84,9 @@ std::vector<LfoModule::TargetChip> LfoModule::targetChips() const
             if (x > targetsArea.getX() && x + w > targetsArea.getRight())
             {
                 x = targetsArea.getX();
-                y += 24;
+                y += 27;
             }
-            out.push_back ({ t, { x, y, w, 20 } });
+            out.push_back ({ t, { x, y, w, 23 } });
             x += w + 6;
         }
     return out;
@@ -107,9 +114,9 @@ void LfoModule::mouseDown (const juce::MouseEvent& e)
             menu.addItem (juce::String (juce::roundToInt (d * 100.0f)) + "%", true, std::abs (std::abs (depth) - d) < 0.005f,
                           [this, t, d, depth] { proc.modulation.assign (lfo, t, depth < 0.0f ? -d : d); repaint(); });
         menu.addSeparator();
-        menu.addItem ("Invert", true, depth < 0.0f, [this, t, depth] { proc.modulation.assign (lfo, t, -depth); repaint(); });
-        menu.addItem ("Remove", [this, t] { proc.modulation.remove (lfo, t); repaint(); });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        menu.addItem ("invert", true, depth < 0.0f, [this, t, depth] { proc.modulation.assign (lfo, t, -depth); repaint(); });
+        menu.addItem ("remove", [this, t] { proc.modulation.remove (lfo, t); repaint(); });
+        EvilleLookAndFeel::showMenu (menu, *this);
         return;
     }
     dragTarget = t;
@@ -168,6 +175,7 @@ void LfoModule::timerCallback()
 
     std::rotate (trail.begin(), trail.begin() + 1, trail.end());
     trail.back() = proc.modulation.liveValue[(size_t) lfo].load();
+    flashAlpha = std::max (0.0f, flashAlpha - 0.025f);
     repaint();
 }
 
@@ -175,19 +183,20 @@ void LfoModule::paint (juce::Graphics& g)
 {
     const auto col = ModSlider::lfoColour (lfo);
 
-    // Drag handle: a small key with a grip
+    // Drag handle: a key with a grip and the lfo's name; a caption under it.
     const auto h = handleArea().toFloat();
-    Hw::drawKey (g, h.reduced (0.5f), false, false, false);
+    Hw::drawKey (g, h, false, false, false);
+    const auto cap = Hw::keyCap (h);
     g.setColour (col);
     for (int k = 0; k < 3; ++k)   // grip dots
         for (int j = 0; j < 2; ++j)
-            g.fillEllipse (h.getX() + 9.0f + j * 5.0f, h.getY() + 8.0f + k * 4.5f, 2.6f, 2.6f);
+            g.fillEllipse (cap.getX() + 7.0f + j * 5.0f, cap.getCentreY() - 6.5f + k * 4.5f, 2.6f, 2.6f);
     g.setColour (Colours::dustWhite);
-    g.setFont (Fonts::sans (13.0f, Fonts::bold));
-    g.drawText ("lfo " + juce::String (lfo + 1), h.withTrimmedLeft (24.0f), juce::Justification::centredLeft);
+    g.setFont (Fonts::sans (14.0f, Fonts::bold));
+    g.drawText ("lfo " + juce::String (lfo + 1), cap.withTrimmedLeft (21.0f), juce::Justification::centredLeft);
     g.setColour (Colours::screenDim);
-    g.setFont (Fonts::sans (10.0f));
-    g.drawText ("drag to a knob", h.withTrimmedRight (7.0f).withTrimmedBottom (2.0f), juce::Justification::centredRight);
+    g.setFont (Fonts::sans (12.0f));
+    g.drawText ("drag the handle onto a knob", captionArea.toFloat(), juce::Justification::centredLeft);
 
     // Scope: the last couple of seconds of this LFO, on glass
     const auto glass = Hw::drawScreen (g, waveArea.toFloat());
@@ -214,9 +223,9 @@ void LfoModule::paint (juce::Graphics& g)
     if (chips.empty())
     {
         g.setColour (Colours::screenDim);
-        g.setFont (Fonts::sans (11.5f));
-        g.drawFittedText ("drag the handle onto any knob (or right-click a knob)", targetsArea,
-                          juce::Justification::centredLeft, 2);
+        g.setFont (Fonts::sans (12.5f));
+        g.drawFittedText ("moves nothing yet. drag the handle onto a knob, or right-click a knob.", targetsArea.withHeight (36),
+                          juce::Justification::topLeft, 2);
     }
     for (auto& c : chips)
     {
@@ -234,28 +243,42 @@ void LfoModule::paint (juce::Graphics& g)
         g.setColour (col);
         g.fillPath (amt);
         g.setColour (Colours::dustWhite);
-        g.setFont (Fonts::sans (11.5f));
+        g.setFont (Fonts::sans (12.5f));
         g.drawText (chipText (c.target, depth), b.withTrimmedLeft (22.0f), juce::Justification::centredLeft);
+    }
+}
+
+void LfoModule::paintOverChildren (juce::Graphics& g)
+{
+    if (flashAlpha > 0.0f)
+    {
+        g.setColour (Colours::crimson.withAlpha (0.8f * flashAlpha));
+        g.drawRoundedRectangle (waveArea.toFloat().expanded (2.0f), 8.0f, 2.0f);
     }
 }
 
 void LfoModule::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (28);
+    auto top = r.removeFromTop (32);
     top.removeFromLeft (handleArea().getWidth() + 8);
-    shape.setBounds (top.reduced (0, 2));
-    r.removeFromTop (8);
+    shape.setBounds (top.reduced (0, 3));
+    captionArea = r.removeFromTop (20).withTrimmedLeft (2);
+    r.removeFromTop (4);
 
-    waveArea = r.removeFromTop (std::max (60, std::min (330, r.getHeight() - 220)));
+    const int fixedBelow = 10 + 34 + 8 + 30 + 10 + 48;
+    waveArea = r.removeFromTop (std::max (60, std::min (200, r.getHeight() - fixedBelow)));
     r.removeFromTop (10);
 
-    auto controls = r.removeFromTop (26);
-    sync.setBounds (controls.removeFromLeft (58));
-    retrig.setBounds (controls.removeFromRight (62));
-    controls.removeFromRight (6);
+    // Rate: a full-width slider (or the tempo division when synced)
+    const auto controls = r.removeFromTop (34);
     rate.setBounds (controls);
-    division.setBounds (controls.withSizeKeepingCentre (std::min (controls.getWidth(), 110), 24));
+    division.setBounds (controls.reduced (0, 3));
+    r.removeFromTop (8);
+
+    auto keys = r.removeFromTop (30);
+    sync.setBounds (keys.removeFromLeft (keys.getWidth() / 2).withWidth (96));
+    retrig.setBounds (keys.withWidth (100));
 
     r.removeFromTop (10);
     targetsArea = r;
@@ -268,7 +291,7 @@ LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
 {
     for (auto* b : { &sync, &retrig })
     {
-        b->getProperties().set ("style", "led");
+        b->getProperties().set ("style", "minikey");
         b->getProperties().set ("surface", "black");
         addAndMakeVisible (b);
     }
@@ -282,14 +305,14 @@ LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
 
 juce::Rectangle<int> LfoCard::screenArea() const
 {
-    return getLocalBounds().withTrimmedBottom (30);
+    return getLocalBounds().withTrimmedBottom (40);
 }
 
 void LfoCard::resized()
 {
-    auto r = getLocalBounds().removeFromBottom (24);
-    sync.setBounds (r.removeFromLeft (r.getWidth() / 2).withSizeKeepingCentre (58, 22));
-    retrig.setBounds (r.withSizeKeepingCentre (62, 22));
+    auto r = getLocalBounds().removeFromBottom (30);
+    sync.setBounds (r.removeFromLeft (r.getWidth() / 2).withWidth (96));
+    retrig.setBounds (r.withWidth (100));
 }
 
 void LfoCard::timerCallback()
@@ -369,45 +392,35 @@ void LfoCard::mouseUp (const juce::MouseEvent& e)
 LfoPanel::LfoPanel (RoomAudioProcessor& p) : lfo1 (p, 0), lfo2 (p, 1)
 {
     addAndMakeVisible (lfo1);
-    addChildComponent (lfo2);
-    for (auto* b : { &tab1, &tab2, &done })
-    {
-        b->getProperties().set ("key", "dark");
-        addAndMakeVisible (b);
-    }
-    tab1.onClick = [this] { showLfo (0); };
-    tab2.onClick = [this] { showLfo (1); };
+    addAndMakeVisible (lfo2);
+    done.getProperties().set ("key", "dark");
+    addAndMakeVisible (done);
     done.onClick = [this] { if (onDone) onDone(); };
     done.setTooltip ("back to the advanced knobs");
-    showLfo (0);
 }
 
 void LfoPanel::showLfo (int l)
 {
+    // Both lfos are on screen, stacked; the one you clicked lights up briefly.
     shown = l;
-    lfo1.setVisible (l == 0);
-    lfo2.setVisible (l == 1);
-    tab1.setToggleState (l == 0, juce::dontSendNotification);
-    tab2.setToggleState (l == 1, juce::dontSendNotification);
-    repaint();
+    (l == 0 ? lfo1 : lfo2).flash();
 }
 
 void LfoPanel::paint (juce::Graphics& g)
 {
-    // A small LED over the open tab
-    for (auto* b : { &tab1, &tab2 })
-        Hw::drawLed (g, { (float) b->getRight() - 9.0f, (float) b->getY() + 9.0f }, b->getToggleState(), 2.5f);
+    // A crease between the two lfos
+    const auto y = (float) (lfo1.getBottom() + lfo2.getY()) * 0.5f;
+    Hw::drawGroove (g, { 0.0f, y }, { (float) getWidth(), y }, true);
 }
 
 void LfoPanel::resized()
 {
     auto r = getLocalBounds();
-    auto tabs = r.removeFromTop (30);
-    tab1.setBounds (tabs.removeFromLeft (70));
-    tabs.removeFromLeft (6);
-    tab2.setBounds (tabs.removeFromLeft (70));
-    done.setBounds (tabs.removeFromRight (64));
-    r.removeFromTop (12);
-    lfo1.setBounds (r);
+    done.setBounds (r.removeFromTop (34).removeFromRight (78));
+    r.removeFromTop (8);
+    const auto gap = 22;
+    const auto h = (r.getHeight() - gap) / 2;
+    lfo1.setBounds (r.removeFromTop (h));
+    r.removeFromTop (gap);
     lfo2.setBounds (r);
 }

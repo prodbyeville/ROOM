@@ -148,6 +148,60 @@ void Hw::drawKey (juce::Graphics& g, juce::Rectangle<float> r, bool light, bool 
     g.fillRoundedRectangle (r.withTrimmedBottom (lift), 6.0f);
 }
 
+void Hw::drawGlowKey (juce::Graphics& g, juce::Rectangle<float> r, bool lit, bool over, bool down)
+{
+    // A translucent crimson key that lights from inside (made in Higgsfield).
+    static const auto onImg = asset ("key_glow_on.png");
+    static const auto offImg = asset ("key_glow_off.png");
+    const auto s = std::min (r.getWidth(), r.getHeight());
+    const auto cap = juce::Rectangle<float> (s * 0.78f, s * 0.78f).withCentre (r.getCentre());
+    if (const auto& img = lit ? onImg : offImg; img.isValid())
+        drawPart (g, img, r.getCentre(), s, 1.0f);
+    else
+    {
+        g.setColour (lit ? Colours::crimson : juce::Colour (0xff3a1414));
+        g.fillRoundedRectangle (cap, s * 0.1f);
+    }
+    if (over || down)
+    {
+        g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? 0.18f : 0.07f));
+        g.fillRoundedRectangle (cap.reduced (s * 0.03f), s * 0.08f);
+    }
+}
+
+void Hw::drawMiniKey (juce::Graphics& g, juce::Rectangle<float> r, bool lit, bool over, bool down)
+{
+    // A small black key with an LED in the middle of its cap; lit in code so
+    // on and off are exactly the same key.
+    static const auto img = asset ("minikey_off.png");
+    const auto s = std::min (r.getWidth(), r.getHeight());
+    const auto c = r.getCentre();
+    if (img.isValid())
+        drawPart (g, img, c, s, 1.0f);
+    else
+    {
+        g.setColour (juce::Colour (0xff1c1c1c));
+        g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.8f, s * 0.8f).withCentre (c), s * 0.12f);
+    }
+    const auto lens = juce::Rectangle<float> (s * 0.34f, s * 0.34f).withCentre (c);
+    if (lit)
+    {
+        juce::ColourGradient bloom (Colours::crimson.withAlpha (0.55f), c.x, c.y, Colours::crimson.withAlpha (0.0f), c.x + s * 0.42f, c.y, true);
+        g.setGradientFill (bloom);
+        g.fillEllipse (lens.expanded (s * 0.24f));
+        juce::ColourGradient led (juce::Colour (0xffffb0a4), c.x - s * 0.04f, c.y - s * 0.05f, Colours::crimson, c.x + s * 0.15f, c.y + s * 0.15f, true);
+        g.setGradientFill (led);
+        g.fillEllipse (lens.reduced (s * 0.02f));
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.fillEllipse (juce::Rectangle<float> (s * 0.08f, s * 0.06f).withCentre ({ c.x - s * 0.04f, c.y - s * 0.07f }));
+    }
+    if (over || down)
+    {
+        g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? 0.2f : 0.05f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.72f, s * 0.72f).withCentre (c), s * 0.12f);
+    }
+}
+
 juce::Rectangle<float> Hw::keyCap (juce::Rectangle<float> r)
 {
     const auto s = std::min (r.getWidth(), r.getHeight());
@@ -182,20 +236,8 @@ void Hw::drawScrew (juce::Graphics& g, juce::Point<float> c, bool onBlack, float
     static const auto blackScrew = asset ("screw_black.png");
     if (const auto& img = onBlack ? blackScrew : paperScrew; img.isValid())
     {
-        // Each screw sits at its own angle, like it was driven in by hand.
-        const auto angle = (float) ((int) (c.x * 7.0f + c.y * 13.0f) % 360) * juce::MathConstants<float>::pi / 180.0f;
-        const auto s = size / 0.8f;
-        const auto t = juce::AffineTransform::translation (-img.getWidth() * 0.5f, -img.getHeight() * 0.5f)
-                           .rotated (angle)
-                           .scaled (s / (float) img.getWidth())
-                           .translated (c.x, c.y);
-        g.setOpacity (1.0f);
-        g.saveState();
-        juce::Path round;
-        round.addEllipse (juce::Rectangle<float> (s, s).withCentre (c));
-        g.reduceClipRegion (round);
-        g.drawImageTransformed (img, t, false);
-        g.restoreState();
+        // Not rotated: the photo's light has to agree with the rest of the unit.
+        drawPart (g, img, c, size, 0.8f);
         return;
     }
     const auto r = juce::Rectangle<float> (size, size).withCentre (c);

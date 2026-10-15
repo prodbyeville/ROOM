@@ -78,12 +78,12 @@ void AdvancedPanel::paint (juce::Graphics& g)
     Hw::drawGroove (g, { 18.0f, 70.0f }, { (float) getWidth() - 18.0f, 70.0f }, true);
     if (! lfoPanel.isVisible())
     {
-        Hw::drawGroove (g, { 18.0f, 420.0f }, { (float) getWidth() - 18.0f, 420.0f }, true);
+        Hw::drawGroove (g, { 18.0f, 440.0f }, { (float) getWidth() - 18.0f, 440.0f }, true);
         // Freeze: LED above the key, label below
         Hw::drawLed (g, { (float) freeze.getBounds().getCentreX(), (float) freeze.getY() - 12.0f }, freeze.getToggleState(), 4.0f);
         g.setFont (Fonts::sans (14.0f));
         g.setColour (Colours::dustWhite);
-        g.drawText ("freeze", freeze.getBounds().translated (0, freeze.getHeight() + 1).withSizeKeepingCentre (80, 18),
+        g.drawText ("freeze", freeze.getBounds().withY (freeze.getBottom() + 1).withHeight (18).withSizeKeepingCentre (80, 18),
                     juce::Justification::centred);
     }
 }
@@ -106,7 +106,7 @@ void AdvancedPanel::resized()
     freeze.setBounds (juce::Rectangle<int> (50, 50).withCentre ({ cols[1], rows[2] + 4 }));
 
     // The two LFO cards fill the rest, down to the bottom of the unit.
-    const int top = 436, bottom = getHeight() - 34, gap = 14;
+    const int top = 456, bottom = getHeight() - 30, gap = 14;
     const int h = (bottom - top - gap) / 2;
     card1.setBounds (18, top, getWidth() - 36, h);
     card2.setBounds (18, top + h + gap, getWidth() - 36, h);

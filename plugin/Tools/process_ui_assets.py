@@ -29,6 +29,11 @@ PARTS = [
     ("key_black.png",   "key_black.png",   "black", 200, (0.50, 0.47), 0.29, "round"),
     ("screw_black.png", "screw_black.png", "black",  72, (0.50, 0.47), 0.22, "circle"),
     ("jack.png",        "jack.png",        "black", 160, (0.50, 0.50), 0.26, "circle"),
+    # keys with a light in them: the glow pair is cropped so on and off are the same size;
+    # the mini key (sync / retrig) is lit in code over the unlit photo
+    ("key_glow_on.png",  "key_glow_on.png",  "paper", 200, (0.497, 0.494), 0.255, "round"),
+    ("key_glow_off.png", "key_glow_off.png", "paper", 200, (0.499, 0.493), 0.222, "round"),
+    ("minikey_off.png",  "minikey_off.png",  "black", 120, (0.50, 0.50), 0.22, "round"),
 ]
 TEXTURES = [
     ("desk.png", "tex_desk.jpg", 1024),

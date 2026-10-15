@@ -230,12 +230,13 @@ void ModSlider::mouseDown (const juce::MouseEvent& e)
 void ModSlider::showModMenu()
 {
     juce::PopupMenu menu;
+    menu.addSectionHeader ("modulation");
     for (int l = 0; l < room::Modulation::numLfos; ++l)
     {
-        const auto name = "LFO " + juce::String (l + 1);
+        const auto name = "lfo " + juce::String (l + 1);
         if (! mod->isAssigned (l, target))
         {
-            menu.addItem ("Modulate with " + name, [this, l]
+            menu.addItem ("move with " + name, [this, l]
             {
                 mod->assign (l, target, 0.25f);
                 updateTimer();
@@ -250,11 +251,11 @@ void ModSlider::showModMenu()
                          std::abs (std::abs (depth) - d) < 0.005f,
                          [this, l, d, depth] { mod->assign (l, target, depth < 0.0f ? -d : d); repaint(); });
         sub.addSeparator();
-        sub.addItem ("Invert", true, depth < 0.0f, [this, l, depth] { mod->assign (l, target, -depth); repaint(); });
-        sub.addItem ("Remove", [this, l] { mod->remove (l, target); updateTimer(); repaint(); });
-        menu.addSubMenu (name + "  (" + juce::String (juce::roundToInt (depth * 100.0f)) + "%)", sub);
+        sub.addItem ("invert", true, depth < 0.0f, [this, l, depth] { mod->assign (l, target, -depth); repaint(); });
+        sub.addItem ("remove from " + name, [this, l] { mod->remove (l, target); updateTimer(); repaint(); });
+        menu.addSubMenu (name + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + juce::String (juce::roundToInt (depth * 100.0f)) + "%", sub);
     }
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+    EvilleLookAndFeel::showMenu (menu, *this);
 }
 
 bool ModSlider::isInterestedInDragSource (const SourceDetails& d)

@@ -6,11 +6,12 @@
 #include "EvilleLookAndFeel.h"
 #include "presets/PresetBrowser.h"
 
-// The ROOM unit (eville): one piece of hardware sitting on a desk.
+// The ROOM unit (eville): one piece of hardware sitting on a desk. The
+// advanced section (right) opens from its key; the window grows to fit it.
 //
 //   +-------------------------------------------------+-------------+
-//   | room by eville  [< studios / name >] [shuffle]  | advanced    |
-//   |                            (wet) (out)  bypass  |  knobs      |
+//   | room by eville [< studios >][♥][save] [shuffle] | advanced    |
+//   |                  [advanced] (wet) (out) [bypass]|  knobs      |
 //   | ( load )        ( room )        ( tone )        |  freeze     |
 //   |  (intensity)  (balance)  (tail)  (space)        |             |
 //   +-------------------------------------------------+  lfo 1      |
@@ -103,7 +104,7 @@ private:
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { randomize, record, save };
+    enum class Icon { randomize, record, save, advanced };
     IconButton (Icon i, const juce::String& tooltip);
     void paintButton (juce::Graphics&, bool over, bool down) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -115,7 +116,7 @@ private:
     Icon icon;
 };
 
-/** Bypass: a small metal toggle and the power LED (lit = ROOM is on). */
+/** Bypass: a translucent crimson key, lit while ROOM is on. */
 class BypassSwitch : public juce::Button
 {
 public:
@@ -133,9 +134,15 @@ public:
 
     void resized() override;
 
-    static constexpr int baseWidth = 1240, baseHeight = 936;
+    static constexpr int baseWidth = 1240, closedWidth = 980, baseHeight = 936;
 
-    /** Open (or close) the LFO controls in the advanced section. */
+    /** Open or close the advanced section; the window grows / shrinks to fit. */
+    void setAdvancedOpen (bool);
+    bool isAdvancedOpen() const { return proc.advancedOpen; }
+    /** Width of the layout right now (base coordinates). */
+    int contentWidth() const { return proc.advancedOpen ? baseWidth : closedWidth; }
+
+    /** Open (or close) the LFO controls in the advanced section (opens advanced first). */
     void setAdvanced (bool showLfos);
     /** Show the full room info on the room screen. */
     void showRoomInfo (bool show) { roomScreen.setShowInfo (show); }
@@ -183,7 +190,8 @@ private:
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
-    IconButton randomButton { IconButton::Icon::randomize, "randomize the knobs (right-click to choose what moves)" };
+    IconButton randomButton { IconButton::Icon::randomize, "shuffle the knobs (right-click to choose what moves)" };
+    IconButton advancedButton { IconButton::Icon::advanced, "advanced: pre-delay, size, damping, ducking, freeze and the lfos" };
     void showRandomizeMenu();
     BypassSwitch bypassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;

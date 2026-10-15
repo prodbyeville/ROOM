@@ -3,7 +3,7 @@
 //
 //   room_tests                                           run all tests
 //   room_tests --screenshot OUT.png MODE ROOM_SRC TARGET  save a UI snapshot
-//        MODE = main | browser | save | rooms | roomsave | advanced | record | lfo   [SCALE, e.g. 0.75]
+//        MODE = main | browser | save | rooms | roomsave | advanced | record | lfo | info | menu   [SCALE, e.g. 0.75]
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -1100,15 +1100,35 @@ namespace
         {
             RoomAudioProcessorEditor ed (p);
             auto* adv = findChild<AdvancedPanel> (ed);
+            check (adv != nullptr && ! adv->isVisible() && ! ed.isAdvancedOpen(), "advanced starts closed");
+            const auto closedWidth = ed.getWidth();
+            IconButton* advKey = nullptr;
+            std::function<void (juce::Component&)> findKey = [&] (juce::Component& c)
+            {
+                for (auto* child : c.getChildren())
+                {
+                    if (auto* ib = dynamic_cast<IconButton*> (child))
+                        if (ib->getTooltip().startsWith ("advanced")) advKey = ib;
+                    findKey (*child);
+                }
+            };
+            findKey (ed);
+            if (advKey != nullptr && advKey->onClick)
+                advKey->onClick();
             auto* card = findChild<LfoCard> (ed);
-            check (adv != nullptr && adv->isVisible() && card != nullptr && card->isVisible() && ! adv->isShowingLfos(),
-                   "advanced is always on screen, with the two lfo cards");
+            check (advKey != nullptr && adv != nullptr && adv->isVisible() && ed.getWidth() > closedWidth
+                       && card != nullptr && card->isVisible() && ! adv->isShowingLfos(),
+                   "the advanced key opens advanced, the window grows, the two lfo cards are there");
             if (card != nullptr && adv != nullptr)
             {
                 card->mouseUp (mouseAt (*card, { 20.0f, 20.0f }, { 20.0f, 20.0f }));
                 check (adv->isShowingLfos(), "clicking an lfo card opens its controls in place");
                 adv->showModulationTab (false);
             }
+            if (advKey != nullptr && advKey->onClick)
+                advKey->onClick();
+            check (! ed.isAdvancedOpen() && ed.getWidth() == closedWidth, "and closes it again");
+            p.advancedOpen = false;
         }
 
         // A knob's depth dot: drag up for more, down for less, double-click removes.
@@ -1285,22 +1305,82 @@ namespace
                 if (mode == "roomsave")
                     if (auto* ib = dynamic_cast<IconButton*> (child))
                         if (ib->getTooltip().startsWith ("Save this room") && ib->onClick) ib->onClick();
-                if (mode == "lfo")
-                    if (auto* adv = dynamic_cast<AdvancedPanel*> (child)) adv->showModulationTab (true);
                 findAndShow (*child);
             }
         };
         findAndShow (ed);
         if (mode == "lfo")
             ed.setAdvanced (true);
+        if (mode == "advanced")
+            ed.setAdvancedOpen (true);
         if (mode == "info")
             ed.showRoomInfo (true);
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
-            ed.setSize (juce::roundToInt (RoomAudioProcessorEditor::baseWidth * args[5].getFloatValue()),
+            ed.setSize (juce::roundToInt ((float) ed.contentWidth() * args[5].getFloatValue()),
                         juce::roundToInt (RoomAudioProcessorEditor::baseHeight * args[5].getFloatValue()));
         juce::Timer::callPendingTimersSynchronously();
 
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
+        if (mode == "menu")
+        {
+            // Draw the shuffle menu and a knob's modulation menu with the editor's
+            // look and feel, laid over the snapshot where they would open.
+            auto& lf = ed.getLookAndFeel();
+            const juce::PopupMenu::Options opts;
+            auto drawMenu = [&] (juce::Point<int> at, std::vector<std::tuple<juce::String, int, bool, bool>> rows)
+            {
+                // rows: text, kind (0 item, 1 header, 2 separator, 3 submenu), ticked, highlighted
+                const auto border = lf.getPopupMenuBorderSizeWithOptions (opts);
+                int w = 0, h = 0;
+                for (auto& [text, kind, ticked, hi] : rows)
+                {
+                    int iw = 0, ih = 0;
+                    lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
+                    w = std::max (w, iw);
+                    h += kind == 1 ? 26 : ih;
+                }
+                const auto scale = (float) img.getHeight() / (float) RoomAudioProcessorEditor::baseHeight;
+                juce::Image menu (juce::Image::ARGB, w + border * 2, h + border * 2, true);
+                {
+                    juce::Graphics g (menu);
+                    lf.drawPopupMenuBackgroundWithOptions (g, menu.getWidth(), menu.getHeight(), opts);
+                    int y = border;
+                    for (auto& [text, kind, ticked, hi] : rows)
+                    {
+                        int iw = 0, ih = 0;
+                        lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
+                        if (kind == 1)
+                        {
+                            lf.drawPopupMenuSectionHeaderWithOptions (g, { border, y, w, 26 }, text, opts);
+                            y += 26;
+                            continue;
+                        }
+                        juce::PopupMenu::Item item (text);
+                        item.isSeparator = kind == 2;
+                        item.isTicked = ticked;
+                        if (kind == 3)
+                            item.subMenu = std::make_unique<juce::PopupMenu>();
+                        lf.drawPopupMenuItemWithOptions (g, { border, y, w, ih }, hi, item, opts);
+                        y += ih;
+                    }
+                }
+                juce::Graphics g (img);
+                g.addTransform (juce::AffineTransform::scale (scale));
+                g.drawImageAt (menu, at.x, at.y);
+            };
+            drawMenu ({ 600, 100 }, { { "shuffle", 1, false, false }, { "shuffle now", 0, false, false }, { "", 2, false, false },
+                                      { "what moves", 1, false, false },
+                                      { "room knobs  (intensity, balance, tail, space)", 0, true, true },
+                                      { "advanced  (pre-delay, size, damping, ducking)", 0, true, false },
+                                      { "eq bands", 0, false, false }, { "tape and auto eq", 0, false, false },
+                                      { "lfo settings  (shape, rate)", 0, true, false }, { "", 2, false, false },
+                                      { "all", 0, false, false }, { "none", 0, false, false }, { "back to default", 0, false, false } });
+            drawMenu ({ 560, 470 }, { { "modulation", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), 3, false, true },
+                                      { "move with lfo 2", 0, false, false } });
+            drawMenu ({ 790, 500 }, { { "10%", 0, false, false }, { "25%", 0, true, true }, { "50%", 0, false, false },
+                                      { "100%", 0, false, false }, { "", 2, false, false }, { "invert", 0, false, false },
+                                      { "remove from lfo 1", 0, false, false } });
+        }
         juce::File out (args[1]);
         out.deleteFile();
         juce::FileOutputStream os (out);
