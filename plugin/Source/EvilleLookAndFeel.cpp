@@ -167,23 +167,32 @@ void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int,
             }
     }
 
-    // Shadow under the knob
-    g.setColour (juce::Colours::black.withAlpha ((dark ? 0.5f : 0.28f) * alpha));
-    g.fillEllipse (kb.translated (0.0f, r * 0.12f).expanded (1.5f));
-    g.setColour (juce::Colours::black.withAlpha (0.12f * alpha));
-    g.fillEllipse (kb.translated (0.0f, r * 0.22f).expanded (3.0f));
-
-    // The knob itself: a photographed knurled cap (made in Higgsfield). It doesn't
-    // rotate (its light comes from the top-left like the room's); the pointer does.
-    if (static auto knobImg = Hw::asset ("knob.png"); knobImg.isValid())
+    // The knob itself: a photographed knurled cap (made in Higgsfield), one for
+    // the white console and one for the black modules. The photo carries its own
+    // contact shadow. It doesn't rotate (its light stays top-left); the pointer does.
+    static const auto paperKnob = Hw::asset ("knob_paper.png");
+    static const auto blackKnob = Hw::asset ("knob_black.png");
+    if (const auto& knobImg = dark ? blackKnob : paperKnob; knobImg.isValid())
     {
-        const auto img = kb.expanded (r * 0.06f).translated (0.0f, r * 0.05f);
+        const auto half = r / (dark ? 0.92f : 0.875f);
         g.setOpacity (alpha);
-        g.drawImage (knobImg, img, juce::RectanglePlacement::stretchToFit);
-        g.setOpacity (1.0f);
+        g.drawImage (knobImg, juce::Rectangle<float> (half * 2.0f, half * 2.0f).withCentre (c),
+                     juce::RectanglePlacement::stretchToFit);
+        if (s.isMouseOverOrDragging() && s.isEnabled())
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.035f));
+            g.fillEllipse (kb.reduced (r * 0.1f));
+        }
+        // Pointer: a white line inlaid in the cap, with a hairline of shadow under it.
         const auto a = startAngle + pos * (endAngle - startAngle);
-        g.setColour (Colours::dustWhite.withAlpha (0.95f * alpha));
-        g.drawLine ({ pointAt (a, r * 0.18f), pointAt (a, r * 0.78f) }, std::max (2.0f, r * 0.07f));
+        const auto w = std::max (1.8f, r * 0.075f);
+        const juce::Line<float> line (pointAt (a, r * 0.30f), pointAt (a, r * 0.80f));
+        g.setColour (juce::Colours::black.withAlpha (0.6f * alpha));
+        g.drawLine (line.withShortenedStart (-0.5f).withShortenedEnd (-0.5f), w + 1.4f);
+        g.setColour (juce::Colour (0xfff2efe8).withAlpha (0.96f * alpha));
+        g.drawLine (line, w);
+        g.setColour (juce::Colours::white.withAlpha (0.5f * alpha));
+        g.drawLine ({ line.getStart().translated (-w * 0.2f, -w * 0.2f), line.getEnd().translated (-w * 0.2f, -w * 0.2f) }, w * 0.35f);
         return;
     }
 

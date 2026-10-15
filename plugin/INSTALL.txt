@@ -18,9 +18,9 @@ USE
 3. ROOM listens to that sound and builds a room from it.
 
 LAYOUT
-ROOM is three pieces of hardware:
+ROOM is one unit with three panels:
 
-  the console (dust white)
+  the console (dust white, top left)
     top        room by eville, the studios window (< name >), heart, save,
                shuffle (randomize; right-click to choose what moves),
                wet, out, and the bypass switch (the red light = ROOM is on)
@@ -28,25 +28,26 @@ ROOM is three pieces of hardware:
                on it to build a room, right-click for more (sound file,
                clear). record: play / clap / sing into the track, press
                again to stop (max 30 s). save: keep this room as a ROOM.
-    room       the room itself, drawn live. it moves with the knobs:
-               intensity = glow, tail = how far the decay reaches,
-               space = width, size = depth, damping = colour, pre-delay =
-               gap, ducking and incoming sound = pulse, freeze = holds.
+    room       the room itself: a box in 3D, turning slowly. it moves with
+               the knobs: space = width, size = depth and height,
+               intensity = glow, tail = how far the decay reaches across
+               the floor, damping = colour, pre-delay = gap, ducking and
+               incoming sound = pulse, freeze = stops it and holds.
                click it for the room's numbers.
     tone       the tone the room puts on a sound (the red dot = its
                strongest resonance)
     knobs      intensity, balance (+ auto), tail, space
 
-  advanced (black, on the right)
+  advanced (black, the whole right side)
     pre-delay, size, damping, ducking, release, freeze
     lfo 1 / lfo 2: click a card to open its controls right there (shape,
     rate or sync, retrig, what it moves). drag a card or the lfo handle
     onto any knob to assign it. a dot appears next to the knob: drag it
     up / down for the amount, double-click to remove. "done" goes back.
 
-  finish (black, below)
+  finish (black, along the bottom)
     eq (drag the 5 bands, scroll = width, double-click = reset), tape,
-    auto eq
+    auto eq, the power light and the out jack
 
 The window can be resized from the bottom-right corner.
 

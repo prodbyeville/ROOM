@@ -6,10 +6,11 @@
 
 // The black "advanced" section bolted to the right of the console:
 //   advanced
-//   (pre-delay) (size)    (damping)
-//   (ducking)   (release) [freeze]
+//   (pre-delay) (size)
+//   (damping)   (ducking)
+//   (release)   [freeze]
 //   [ lfo 1 card ]
-//   [ lfo 2 card ]
+//   [ lfo 2 card ]   (down to the bottom of the unit)
 // Clicking an LFO card swaps the knobs and cards for that LFO's full controls
 // (shape, rate / sync, retrig, drag handle, what it moves), in the same place,
 // so the console stays in view while you shape it.

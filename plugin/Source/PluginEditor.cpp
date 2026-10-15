@@ -211,6 +211,8 @@ void RoomScreen::timerCallback()
     }
     const auto frozen = proc.apvts.getRawParameterValue (ParamIDs::freeze)->load() > 0.5f;
     phase += frozen ? 0.012f : 0.05f;
+    if (! frozen)
+        yaw += 0.0035f;   // the box turns slowly (about 6 degrees a second); freeze holds it
 
     // Sound coming in: a pulse travels from the front of the room to the back.
     const auto level = proc.getInputLevel();
@@ -244,43 +246,61 @@ void RoomScreen::paint (juce::Graphics& g)
     const auto frozen = proc.apvts.getRawParameterValue (ParamIDs::freeze)->load() > 0.5f;
     const auto valid = analysis.valid;
 
-    // --- the room: front frame -> back wall, one-point perspective ---
-    const auto front = glass.reduced (5.0f);
-    const auto depth = juce::jlimit (0.45f, 1.25f, 1.12f - 0.5f * size.norm);           // size: deeper room, smaller back wall
-    const auto widthK = 0.62f + 0.55f * juce::jlimit (0.0f, 1.0f, space.norm);              // space: wider
-    auto back = juce::Rectangle<float> (front.getWidth() * 0.34f * depth * widthK, front.getHeight() * 0.42f * depth)
-                    .withCentre ({ front.getCentreX(), front.getY() + front.getHeight() * 0.47f });
-    auto at = [&] (float z)   // the room's cross-section at depth z (0 front, 1 back)
+    // --- the room: a box in 3D, turning slowly. space = width, size = depth and height ---
+    const auto hw = 0.55f + 0.45f * juce::jlimit (0.0f, 1.0f, space.norm);
+    const auto hd = 0.50f + 0.60f * juce::jlimit (0.0f, 1.0f, size.norm);
+    const auto hh = 0.38f + 0.25f * juce::jlimit (0.0f, 1.0f, size.norm);
+    const auto pitch = 0.42f, dist = 7.0f;
+    const auto cy = std::cos (yaw), sy = std::sin (yaw), cp = std::cos (pitch), sp = std::sin (pitch);
+    const auto view = glass.reduced (10.0f).withTrimmedTop (12.0f);
+    const auto f = std::min (view.getWidth() * 0.46f / 1.49f, view.getHeight() * 0.46f / (0.63f * cp + 1.49f * sp)) * dist;
+    const juce::Point<float> centre (view.getCentreX(), view.getCentreY() + view.getHeight() * 0.04f);
+    struct P { juce::Point<float> xy; float depth; };
+    auto project = [&] (float x, float y, float z)
     {
-        const auto k = (1.0f - 1.0f / (1.0f + 3.0f * z)) / 0.75f;
-        return juce::Rectangle<float>::leftTopRightBottom (
-            juce::jmap (k, front.getX(), back.getX()), juce::jmap (k, front.getY(), back.getY()),
-            juce::jmap (k, front.getRight(), back.getRight()), juce::jmap (k, front.getBottom(), back.getBottom()));
+        const auto x1 = x * cy - z * sy, z1 = x * sy + z * cy;
+        const auto y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+        const auto d = dist - z2;
+        return P { { centre.x + f * x1 / d, centre.y - f * y2 / d }, z2 };
     };
+    const auto duckDim = 1.0f - 0.6f * duck.norm * levelSmooth;
+    const auto glow = 0.3f + 0.7f * juce::jlimit (0.0f, 1.0f, intensity.norm * 1.4f);
 
-    const auto wallAlpha = (valid ? 0.35f + 0.5f * balance : 0.22f) * (1.0f - 0.35f * duck.norm * levelSmooth);
-    const auto wallCol = Colours::screenText.withAlpha (wallAlpha);
-    juce::Path walls;
-    walls.addRectangle (back);
-    for (auto [a, b] : { std::pair { front.getTopLeft(), back.getTopLeft() }, { front.getTopRight(), back.getTopRight() },
-                         { front.getBottomLeft(), back.getBottomLeft() }, { front.getBottomRight(), back.getBottomRight() } })
-        walls.addLineSegment ({ a, b }, 0.0f);
-    for (float z : { 0.22f, 0.45f, 0.68f })   // panels on the side walls and ceiling
+    // The floor the box stands on: a faint grid that turns with it.
     {
-        const auto s = at (z);
-        walls.addLineSegment ({ s.getTopLeft(), s.getBottomLeft() }, 0.0f);
-        walls.addLineSegment ({ s.getTopRight(), s.getBottomRight() }, 0.0f);
-        walls.addLineSegment ({ s.getTopLeft(), s.getTopRight() }, 0.0f);
+        juce::Path grid;
+        for (int i = -4; i <= 4; ++i)
+        {
+            const auto t = 1.7f * (float) i / 4.0f;
+            grid.addLineSegment ({ project (t, -hh, -1.7f).xy, project (t, -hh, 1.7f).xy }, 0.0f);
+            grid.addLineSegment ({ project (-1.7f, -hh, t).xy, project (1.7f, -hh, t).xy }, 0.0f);
+        }
+        juce::ColourGradient fade (Colours::screenText.withAlpha (0.07f), centre.x, centre.y,
+                                   Colours::screenText.withAlpha (0.0f), centre.x + view.getWidth() * 0.5f, centre.y, true);
+        g.setGradientFill (fade);
+        g.strokePath (grid, juce::PathStrokeType (0.8f));
     }
-    // A doorway in the back wall
-    const auto door = juce::Rectangle<float> (back.getWidth() * 0.15f, back.getHeight() * 0.42f)
-                          .withCentre ({ back.getCentreX(), back.getBottom() - back.getHeight() * 0.21f });
-    walls.addLineSegment ({ door.getBottomLeft(), door.getTopLeft() }, 0.0f);
-    walls.addLineSegment ({ door.getTopLeft(), door.getTopRight() }, 0.0f);
-    walls.addLineSegment ({ door.getTopRight(), door.getBottomRight() }, 0.0f);
-    Hw::strokeGlow (g, walls, wallCol, 1.0f, 0.5f);
 
-    // --- the decay per band, laid on the floor ---
+    // The box: twelve edges, the far ones dimmer.
+    const float xs[2] = { -hw, hw }, ys[2] = { -hh, hh }, zs[2] = { -hd, hd };
+    const auto wallAlpha = (valid ? 0.45f + 0.45f * balance : 0.3f) * duckDim * (0.6f + 0.4f * glow);
+    auto edge = [&] (P a, P b)
+    {
+        const auto near = juce::jlimit (0.0f, 1.0f, 0.5f + 0.5f * (a.depth + b.depth) * 0.5f / std::max (hw, hd));
+        juce::Path e;
+        e.startNewSubPath (a.xy);
+        e.lineTo (b.xy);
+        Hw::strokeGlow (g, e, Colours::screenText.withAlpha (wallAlpha * (0.35f + 0.65f * near)), 1.1f, 0.35f + 0.5f * near * glow);
+    };
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j)
+        {
+            edge (project (xs[0], ys[i], zs[j]), project (xs[1], ys[i], zs[j]));
+            edge (project (xs[i], ys[0], zs[j]), project (xs[i], ys[1], zs[j]));
+            edge (project (xs[i], ys[j], zs[0]), project (xs[i], ys[j], zs[1]));
+        }
+
+    // --- the decay per band, laid across the floor of the box, front to back ---
     if (valid)
     {
         const auto nb = analysis.numBands();
@@ -298,45 +318,42 @@ void RoomScreen::paint (juce::Graphics& g)
             median = sorted.empty() ? 0.0f : sorted[sorted.size() / 2];
         }
 
-        const auto glow = 0.3f + 0.7f * juce::jlimit (0.0f, 1.0f, intensity.norm * 1.4f);
         const auto gap = 0.22f * preDelay.norm;                      // pre-delay: the floor starts further back
         const auto reach = 0.3f + 0.7f * tail.norm;                  // tail: how far back the decay reaches
         const auto dark = damping.norm - 0.5f;                       // damping: darker / brighter red
         const auto baseCol = dark > 0.0f ? Colours::crimson.interpolatedWith (juce::Colour (0xff5e1010), dark * 1.4f)
                                          : Colours::crimson.interpolatedWith (juce::Colour (0xffff8a7a), -dark * 1.2f);
-        const auto duckDim = 1.0f - 0.6f * duck.norm * levelSmooth;
+        auto zAt = [&] (float t) { return hd - 2.0f * hd * juce::jlimit (0.0f, 1.0f, t); };   // t: 0 front, 1 back
 
-        // Warm haze on the floor
+        // Warm haze on the floor where the decay lives
         {
-            const auto floorBack = at (gap + reach);
+            const auto z0 = zAt (gap), z1 = zAt (gap + reach);
             juce::Path floor;
-            floor.startNewSubPath (front.getBottomLeft());
-            floor.lineTo (front.getBottomRight());
-            floor.lineTo (floorBack.getBottomRight());
-            floor.lineTo (floorBack.getBottomLeft());
+            floor.startNewSubPath (project (-hw, -hh, z0).xy);
+            floor.lineTo (project (hw, -hh, z0).xy);
+            floor.lineTo (project (hw, -hh, z1).xy);
+            floor.lineTo (project (-hw, -hh, z1).xy);
             floor.closeSubPath();
-            juce::ColourGradient haze (baseCol.withAlpha (0.0f), 0.0f, front.getBottom(),
-                                       baseCol.withAlpha (0.16f * glow * duckDim), 0.0f, floorBack.getBottom(), false);
-            g.setGradientFill (haze);
+            g.setColour (baseCol.withAlpha (0.10f * glow * duckDim));
             g.fillPath (floor);
         }
 
         for (int b = 0; b < nb; ++b)
         {
-            const auto z = gap + reach * ((float) b + 0.6f) / (float) nb;
-            const auto s = at (z);
+            const auto t = gap + reach * ((float) b + 0.6f) / (float) nb;
+            const auto z = zAt (t);
             auto a = (0.25f + 0.75f * decay[(size_t) b] / maxT) * glow * duckDim;
-            a *= 1.0f - std::max (0.0f, dark) * 1.3f * z;            // dark rooms lose their highs early
+            a *= 1.0f - std::max (0.0f, dark) * 1.3f * t;            // dark rooms lose their highs early
             if (frozen)
                 a *= 0.75f + 0.25f * std::sin (phase * 3.0f);
             else
                 a *= 0.86f + 0.14f * std::sin (phase * 2.0f + (float) b * 0.8f);
-            a += 0.8f * std::exp (-std::pow (z - pulsePos, 2.0f) / 0.004f) * glow;   // the pulse from incoming sound
+            a += 0.8f * std::exp (-std::pow (t - pulsePos, 2.0f) / 0.004f) * glow;   // the pulse from incoming sound
             if (! analysis.bandConfident[(size_t) b])
                 a *= 0.6f;
             juce::Path line;
-            line.startNewSubPath (s.getBottomLeft());
-            line.lineTo (s.getBottomRight());
+            line.startNewSubPath (project (-hw * 0.94f, -hh, z).xy);
+            line.lineTo (project (hw * 0.94f, -hh, z).xy);
             Hw::strokeGlow (g, line, baseCol.withAlpha (juce::jlimit (0.0f, 1.0f, a)), 1.1f, 1.2f);
         }
 
@@ -548,20 +565,20 @@ void IconButton::mouseDown (const juce::MouseEvent& e)
 
 void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
-    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    auto r = getLocalBounds().toFloat();
     Hw::drawKey (g, r, true, over, down);
-    r = r.withTrimmedBottom (2.0f).translated (0.0f, down ? 0.8f : 0.0f);
-    const auto c = r.getCentre();
+    r = Hw::keyCap (r).translated (0.0f, down ? 0.6f : 0.0f);
+    const auto c = r.getCentre().translated (0.0f, -0.5f);
     const auto s = std::min (r.getWidth(), r.getHeight()) * 0.5f;
-    g.setColour (Colours::ink);
-    juce::PathStrokeType stroke (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+    g.setColour (Colours::ink.withAlpha (0.88f));
+    juce::PathStrokeType stroke (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
     juce::Path p;
     switch (icon)
     {
         case Icon::record:
         {
             const auto on = getToggleState();
-            g.drawEllipse (juce::Rectangle<float> (s * 1.1f, s * 1.1f).withCentre (c), 2.2f);
+            g.drawEllipse (juce::Rectangle<float> (s * 1.1f, s * 1.1f).withCentre (c), 1.8f);
             const auto blink = ! on || (juce::Time::getMillisecondCounter() / 450) % 2 == 0;
             g.setColour (on ? Colours::crimson.withAlpha (blink ? 1.0f : 0.45f) : Colours::ink);
             g.fillEllipse (juce::Rectangle<float> (s * 0.48f, s * 0.48f).withCentre (c));
@@ -602,20 +619,17 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 
 void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool)
 {
-    // Toggle lever (up = on) and the power LED: lit while ROOM is running.
+    // A chrome bat toggle (up = on) and the power LED: lit while ROOM is running.
     const auto bypassed = getToggleState();
     auto r = getLocalBounds().toFloat();
-    const auto lever = r.removeFromLeft (16.0f).withSizeKeepingCentre (12.0f, 24.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.2f));
-    g.fillRoundedRectangle (lever.translated (0.0f, 1.5f), 5.0f);
-    juce::ColourGradient body (juce::Colour (0xff3a3a3a), lever.getX(), lever.getY(), juce::Colour (0xff111111), lever.getRight(), lever.getBottom(), false);
-    g.setGradientFill (body);
-    g.fillRoundedRectangle (lever, 5.0f);
-    const auto knob = juce::Rectangle<float> (8.0f, 9.0f).withCentre ({ lever.getCentreX(), bypassed ? lever.getBottom() - 6.0f : lever.getY() + 6.0f });
-    juce::ColourGradient metal (juce::Colour (over ? 0xfff2f0eb : 0xffdedbd4), knob.getX(), knob.getY(), juce::Colour (0xff7c7972), knob.getRight(), knob.getBottom(), false);
-    g.setGradientFill (metal);
-    g.fillRoundedRectangle (knob, 3.0f);
-    Hw::drawLed (g, r.withTrimmedLeft (8.0f).getCentre(), ! bypassed, 4.5f);
+    const auto toggleArea = r.removeFromLeft (r.getHeight());
+    Hw::drawToggle (g, toggleArea.getCentre(), ! bypassed, toggleArea.getHeight());
+    if (over)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillEllipse (toggleArea.reduced (toggleArea.getWidth() * 0.3f));
+    }
+    Hw::drawLed (g, r.getCentre(), ! bypassed, 4.5f);
 }
 
 //==============================================================================
@@ -629,8 +643,6 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.painter = [this] (juce::Graphics& g) { paintContent (g); };
     content.layout = [this] { layoutContent(); };
 
-    consoleGrain = Hw::grain ((int) consoleArea.getWidth(), (int) consoleArea.getHeight(), false, 7);
-    blackGrain = Hw::grain ((int) advancedArea.getWidth(), (int) advancedArea.getHeight(), true, 11);
     paperTexture = Hw::asset ("tex_paper.jpg");    // painted steel and powder coat, made in Higgsfield
     blackTexture = Hw::asset ("tex_black.jpg");
 
@@ -805,102 +817,132 @@ void RoomAudioProcessorEditor::timerCallback()
 }
 
 //==============================================================================
-// Painting: backdrop, the console with its printed path, the black modules
+// Painting: the desk, the unit sitting on it, the print on the console
 
 void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
 {
+    // Everything that doesn't move is drawn once into an image at the window's
+    // real pixel size (the soft shadows are expensive), then reused.
+    const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+    if (! staticLayer.isValid() || std::abs (scale - staticScale) > 0.001f)
+    {
+        staticScale = scale;
+        staticLayer = juce::Image (juce::Image::RGB, std::max (1, juce::roundToInt (baseWidth * scale)),
+                                   std::max (1, juce::roundToInt (baseHeight * scale)), true);
+        juce::Graphics sg (staticLayer);
+        sg.addTransform (juce::AffineTransform::scale (scale));
+        paintUnit (sg);
+    }
+    g.drawImage (staticLayer, juce::Rectangle<float> (0.0f, 0.0f, (float) baseWidth, (float) baseHeight));
+
+    // The power LED on finish follows bypass.
+    Hw::drawLed (g, finishLed, ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f), 4.5f);
+}
+
+void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
+{
+    const auto unit = consoleArea.getUnion (advancedArea).getUnion (finishArea);
+    const auto corner = 10.0f;
+
+    // --- the desk: light grey, lit from the top left ---
     g.fillAll (Colours::backdrop);
-
-    auto plate = [&] (juce::Rectangle<float> r, bool black, float corner)
+    if (auto desk = Hw::asset ("tex_desk.jpg"); desk.isValid())
     {
-        g.setColour (juce::Colours::black.withAlpha (0.18f));
-        g.fillRoundedRectangle (r.translated (0.0f, 6.0f).expanded (2.0f), corner + 2.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.10f));
-        g.fillRoundedRectangle (r.translated (0.0f, 12.0f).expanded (5.0f), corner + 5.0f);
-        juce::ColourGradient body (black ? juce::Colour (0xff1c1c1c) : Colours::paper.brighter (0.03f), 0.0f, r.getY(),
-                                   black ? juce::Colour (0xff0d0d0d) : Colours::paper.darker (0.04f), 0.0f, r.getBottom(), false);
-        if (const auto& tex = black ? blackTexture : paperTexture; tex.isValid())
-        {
-            g.setTiledImageFill (tex, 0, 0, 1.0f);
-            g.fillRoundedRectangle (r, corner);
-            if (black)   // calm the powder coat down: it should read as matte, not rough
-            {
-                g.setColour (juce::Colour (0xff111111).withAlpha (0.55f));
-                g.fillRoundedRectangle (r, corner);
-            }
-            // light falls off a touch toward the bottom
-            juce::ColourGradient shade (juce::Colours::white.withAlpha (black ? 0.03f : 0.10f), 0.0f, r.getY(),
-                                        juce::Colours::black.withAlpha (black ? 0.30f : 0.06f), 0.0f, r.getBottom(), false);
-            g.setGradientFill (shade);
-            g.fillRoundedRectangle (r, corner);
-        }
-        else
-        {
-            g.setGradientFill (body);
-            g.fillRoundedRectangle (r, corner);
-        }
         g.setOpacity (1.0f);
-        g.drawImage (black ? blackGrain : consoleGrain, r, juce::RectanglePlacement::stretchToFit);
-        g.setColour (black ? juce::Colours::white.withAlpha (0.07f) : juce::Colours::white.withAlpha (0.6f));
-        g.drawLine (r.getX() + corner, r.getY() + 0.8f, r.getRight() - corner, r.getY() + 0.8f, 1.0f);
-        g.setColour (black ? juce::Colours::black : juce::Colour (0xffa29d93));
-        g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
-    };
-
-    // Cable from the console down into finish
+        g.drawImage (desk, juce::Rectangle<float> (0.0f, 0.0f, (float) baseWidth, (float) baseHeight),
+                     juce::RectanglePlacement::fillDestination);
+    }
     {
-        const auto x = consoleArea.getCentreX() - 30.0f;
-        juce::Path cable;
-        cable.startNewSubPath (x, consoleArea.getBottom() - 4.0f);
-        cable.lineTo (x, finishArea.getY() + 4.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.strokePath (cable, juce::PathStrokeType (12.0f), juce::AffineTransform::translation (2.0f, 2.0f));
-        g.setColour (juce::Colour (0xff121212));
-        g.strokePath (cable, juce::PathStrokeType (10.0f));
-        g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.drawLine (x - 2.5f, consoleArea.getBottom(), x - 2.5f, finishArea.getY(), 1.5f);
-        for (auto y : { consoleArea.getBottom() + 2.0f, finishArea.getY() - 6.0f })
-        {
-            g.setColour (juce::Colour (0xff2a2a2a));
-            g.fillRoundedRectangle (x - 9.0f, y, 18.0f, 6.0f, 2.0f);
-        }
+        juce::ColourGradient light (juce::Colours::white.withAlpha (0.18f), 0.0f, 0.0f,
+                                    juce::Colours::black.withAlpha (0.10f), (float) baseWidth, (float) baseHeight, true);
+        g.setGradientFill (light);
+        g.fillAll();
     }
 
-    plate (finishArea, true, 6.0f);
-    plate (advancedArea, true, 6.0f);
-    plate (consoleArea, false, 6.0f);
+    // --- the unit's shadows on the desk: a wide soft one, a closer one, and contact ---
+    juce::Path body;
+    body.addRoundedRectangle (unit, corner);
+    juce::DropShadow (juce::Colours::black.withAlpha (0.20f), 70, { 6, 40 }).drawForPath (g, body);
+    juce::DropShadow (juce::Colours::black.withAlpha (0.28f), 26, { 2, 14 }).drawForPath (g, body);
+    juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 5, { 0, 4 }).drawForPath (g, body);
+
+    // The front edge of the slab: you see a sliver of it from above.
+    {
+        const auto front = unit.withTop (unit.getBottom() - corner * 2.0f).withHeight (corner * 2.0f + 7.0f);
+        juce::ColourGradient side (juce::Colour (0xff1a1a1a), 0.0f, unit.getBottom(), juce::Colour (0xff050505), 0.0f, front.getBottom(), false);
+        g.setGradientFill (side);
+        g.fillRoundedRectangle (front, corner);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawHorizontalLine ((int) unit.getBottom() + 1, unit.getX() + corner, unit.getRight() - corner);
+    }
+
+    // --- the three panels, clipped to the unit's rounded outline ---
+    g.saveState();
+    g.reduceClipRegion (body);
+    auto panel = [&] (juce::Rectangle<float> r, bool black)
+    {
+        g.setColour (black ? juce::Colour (0xff161616) : Colours::paper);
+        g.fillRect (r);
+        if (const auto& tex = black ? blackTexture : paperTexture; tex.isValid())
+        {
+            // One piece of the photo per panel (no tiling, so no seams), kept
+            // subtle: fine powder coat, satin paint.
+            const auto src = juce::Rectangle<int> (std::min (tex.getWidth(), (int) r.getWidth()), std::min (tex.getHeight(), (int) r.getHeight()));
+            g.setOpacity (black ? 0.30f : 0.55f);
+            g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(), src.getX(), src.getY(), src.getWidth(), src.getHeight());
+            g.setOpacity (1.0f);
+        }
+        // light falls off a touch toward the bottom
+        juce::ColourGradient shade (juce::Colours::white.withAlpha (black ? 0.035f : 0.09f), 0.0f, unit.getY(),
+                                    juce::Colours::black.withAlpha (black ? 0.22f : 0.05f), 0.0f, unit.getBottom(), false);
+        g.setGradientFill (shade);
+        g.fillRect (r);
+        // the panel's edges: lit along the top and left, in shade at the bottom and right
+        g.setColour (juce::Colours::white.withAlpha (black ? 0.09f : 0.8f));
+        g.fillRect (r.withHeight (1.0f));
+        g.fillRect (r.withWidth (1.0f));
+        g.setColour (juce::Colours::black.withAlpha (black ? 0.6f : 0.16f));
+        g.fillRect (r.withTop (r.getBottom() - 1.0f));
+        g.fillRect (r.withLeft (r.getRight() - 1.0f));
+    };
+    panel (consoleArea, false);
+    panel (finishArea, true);
+    panel (advancedArea, true);
+
+    // The joints between the panels: a dark hairline gap.
+    g.setColour (juce::Colour (0xff050505));
+    g.fillRect (juce::Rectangle<float> (consoleArea.getX(), consoleArea.getBottom() - 0.5f, consoleArea.getWidth(), 1.5f));
+    g.fillRect (juce::Rectangle<float> (advancedArea.getX() - 0.5f, unit.getY(), 1.5f, unit.getHeight()));
+    g.restoreState();
+
+    // The unit's outer edge: a bright lip along the top, rolled corners.
+    g.setColour (juce::Colours::white.withAlpha (0.5f));
+    g.drawHorizontalLine ((int) unit.getY(), consoleArea.getX() + corner, consoleArea.getRight());
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.drawRoundedRectangle (unit.expanded (0.5f), corner + 0.5f, 1.0f);
 
     paintConsoleArt (g);
 
-    // Screws
+    // Screws: four on each panel, each at its own angle.
     for (auto r : { consoleArea, advancedArea, finishArea })
     {
         const auto black = r != consoleArea;
-        const auto in = r.reduced (14.0f);
+        const auto in = r.reduced (15.0f);
         for (auto p : { in.getTopLeft(), in.getTopRight(), in.getBottomLeft(), in.getBottomRight() })
-            Hw::drawScrew (g, p, black);
+            Hw::drawScrew (g, p, black, 13.0f);
     }
 
-    // Finish module print
+    // Finish: name, the out jack
     g.setColour (Colours::dustWhite);
     g.setFont (Fonts::sans (26.0f, Fonts::bold));
-    g.drawText ("finish", juce::Rectangle<float> (finishArea.getX() + 36.0f, finishArea.getY() + 16.0f, 200.0f, 34.0f),
+    g.drawText ("finish", juce::Rectangle<float> (finishArea.getX() + 34.0f, finishArea.getY() + 22.0f, 200.0f, 34.0f),
                 juce::Justification::centredLeft);
-    {
-        // LED and the out jack
-        const juce::Point<float> led (finishArea.getRight() - 72.0f, finishArea.getY() + 64.0f);
-        Hw::drawLed (g, led, ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f));
-        const juce::Point<float> jack (finishArea.getRight() - 72.0f, finishArea.getY() + 128.0f);
-        g.setColour (juce::Colour (0xff8f8c86));
-        g.fillEllipse (juce::Rectangle<float> (34.0f, 34.0f).withCentre (jack));
-        g.setColour (juce::Colour (0xff2c2c2c));
-        g.fillEllipse (juce::Rectangle<float> (26.0f, 26.0f).withCentre (jack));
-        g.setColour (juce::Colours::black);
-        g.fillEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (jack));
-        g.setColour (Colours::dustWhite);
-        g.setFont (Fonts::sans (13.0f));
-        g.drawText ("out", juce::Rectangle<float> (60.0f, 18.0f).withCentre (jack.translated (0.0f, 32.0f)), juce::Justification::centred);
-    }
+    Hw::drawGroove (g, { finishArea.getX() + 34.0f, finishArea.getY() + 66.0f }, { finishArea.getX() + 160.0f, finishArea.getY() + 66.0f }, true);
+    Hw::drawJack (g, finishJack, 34.0f);
+    g.setColour (Colours::dustWhite);
+    g.setFont (Fonts::sans (13.0f));
+    g.drawText ("out", juce::Rectangle<float> (60.0f, 18.0f).withCentre (finishJack.translated (0.0f, 34.0f)), juce::Justification::centred);
+    g.drawText ("on", juce::Rectangle<float> (60.0f, 18.0f).withCentre (finishLed.translated (0.0f, -20.0f)), juce::Justification::centred);
 }
 
 void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
@@ -918,104 +960,56 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     g.setColour (Colours::ink.withAlpha (0.85f));
     g.drawText ("by eville", juce::Rectangle<float> (wordX + wordW + 12.0f, c.getY() + 42.0f, 100.0f, 30.0f), juce::Justification::centredLeft);
 
-    // Top bar print
+    // Top bar print and the crease under it
     g.setFont (Fonts::sans (13.0f));
     g.setColour (Colours::ink);
-    g.drawText ("bypass", bypassButton.getBounds().translated (0, -20).withHeight (18).withSizeKeepingCentre (70, 18),
-                juce::Justification::centred);
-    g.setColour (Colours::paperLine);
-    g.drawLine (c.getX() + 24.0f, c.getY() + 100.0f, c.getRight() - 24.0f, c.getY() + 100.0f, 1.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.55f));
-    g.drawLine (c.getX() + 24.0f, c.getY() + 101.0f, c.getRight() - 24.0f, c.getY() + 101.0f, 1.0f);
+    g.drawText ("bypass", bypassButton.getBounds().translated (0, -17).withHeight (16), juce::Justification::centred);
+    Hw::drawGroove (g, { c.getX() + 26.0f, c.getY() + 104.0f }, { c.getRight() - 26.0f, c.getY() + 104.0f }, false);
 
-    // Faint contour lines (printed, dotted), behind everything else
-    {
-        juce::Random rng (5);
-        for (int i = 0; i < 7; ++i)
-        {
-            juce::Path contour;
-            const auto y0 = c.getY() + 372.0f + (float) i * 26.0f;
-            const auto ph = rng.nextFloat() * 6.0f;
-            for (int k = 0; k <= 60; ++k)
-            {
-                const auto x = c.getX() + 30.0f + (c.getWidth() - 60.0f) * (float) k / 60.0f;
-                const auto y = y0 + 9.0f * std::sin ((float) k * 0.21f + ph) + 5.0f * std::sin ((float) k * 0.07f + ph * 2.0f);
-                if (k == 0) contour.startNewSubPath (x, y); else contour.lineTo (x, y);
-            }
-            Hw::drawDottedPath (g, contour, Colours::inkDim.withAlpha (0.28f), 5.5f, 0.6f);
-        }
-    }
-
-    // Bay frames with their names on the frame line
+    // Bay frames pressed into the panel, with their names on the frame line
     const char* names[3] = { "load", "room", "tone" };
     for (int i = 0; i < 3; ++i)
     {
         const auto b = bays[i].toFloat();
-        g.setColour (Colours::paperLine);
-        g.drawRoundedRectangle (b, 7.0f, 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.5f));
-        g.drawRoundedRectangle (b.translated (0.5f, 1.0f), 7.0f, 0.6f);
         g.setFont (Fonts::sans (16.0f));
         const auto tw = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), names[i]);
         const auto label = juce::Rectangle<float> (b.getX() + 14.0f, b.getY() - 10.0f, tw + 12.0f, 20.0f);
-        g.setColour (Colours::paper);
-        g.fillRect (label);
+        g.saveState();
+        g.excludeClipRegion (label.toNearestInt());
+        Hw::drawGrooveRect (g, b, 8.0f, false);
+        g.restoreState();
         g.setColour (Colours::ink);
         g.drawText (names[i], label, juce::Justification::centred);
     }
 
-    // Labels under the record / save keys
+    // Labels beside the record / save keys
     g.setFont (Fonts::sans (12.5f));
     g.setColour (Colours::ink);
     for (auto* b : { (juce::Component*) &recordButton, (juce::Component*) &roomSaveButton })
-        g.drawText (b == &recordButton ? "record" : "save", b->getBounds().translated (b->getWidth() + 6, 0).withWidth (60),
+        g.drawText (b == &recordButton ? "record" : "save", b->getBounds().translated (b->getWidth() + 4, 0).withWidth (60),
                     juce::Justification::centredLeft);
 
-    // The signal path: crimson dots with a faint black companion, through tiny rooms.
+    // The one printed path left: intensity -> balance -> tail -> space,
+    // crimson dots with a faint black companion.
     const auto red = Colours::crimson.withAlpha (0.85f);
-    const auto blk = Colours::ink.withAlpha (0.5f);
-    auto path = [&] (std::initializer_list<juce::Point<float>> pts)
-    {
-        // Smooth curve through the points (Catmull-Rom as cubic beziers)
-        std::vector<juce::Point<float>> v (pts);
-        juce::Path p;
-        p.startNewSubPath (v.front());
-        for (size_t i = 0; i + 1 < v.size(); ++i)
-        {
-            const auto p0 = v[i == 0 ? 0 : i - 1], p1 = v[i], p2 = v[i + 1], p3 = v[std::min (v.size() - 1, i + 2)];
-            p.cubicTo (p1 + (p2 - p0) / 6.0f, p2 - (p3 - p1) / 6.0f, p2);
-        }
-        Hw::drawDottedPath (g, p, red, 5.0f, 1.0f);
-        juce::Path off (p);
-        off.applyTransform (juce::AffineTransform::translation (0.0f, 4.0f));
-        Hw::drawDottedPath (g, off, blk, 7.0f, 0.6f);
-    };
-    const auto ox = c.getX(), oy = c.getY();
-    const auto b0 = bays[0].toFloat(), b1 = bays[1].toFloat(), b2 = bays[2].toFloat();
-    // load -> room -> tone (over the top of the bays)
-    path ({ { b0.getRight() - 30.0f, b0.getY() - 2.0f }, { b0.getRight() + 10.0f, b0.getY() - 16.0f }, { b1.getX() + 60.0f, b1.getY() - 10.0f } });
-    path ({ { b1.getRight() - 60.0f, b1.getY() - 10.0f }, { b1.getRight() + 10.0f, b1.getY() - 18.0f }, { b2.getX() + 50.0f, b2.getY() - 10.0f } });
-    // out of the load bay, under the screens, round to the knobs
-    const juce::Point<float> roomA (ox + 58.0f, b0.getBottom() + 34.0f), roomB (ox + 858.0f, b0.getBottom() + 36.0f);
-    path ({ { b0.getCentreX() - 30.0f, b0.getBottom() }, { ox + 100.0f, b0.getBottom() + 22.0f }, roomA + juce::Point<float> (14.0f, -6.0f) });
-    path ({ roomA + juce::Point<float> (14.0f, 8.0f), { ox + 200.0f, b0.getBottom() + 34.0f }, { ox + 300.0f, b0.getBottom() + 26.0f }, { ox + 480.0f, b0.getBottom() + 20.0f },
-            { ox + 680.0f, b0.getBottom() + 34.0f }, roomB - juce::Point<float> (16.0f, 0.0f) });
-    // knob to knob
+    const auto blk = Colours::ink.withAlpha (0.45f);
     const auto ky = (float) intensity.slider.getBounds().getCentreY();
     juce::Component* knobs[4] = { &intensity.slider, &balance.slider, &tail.slider, &space.slider };
     for (int i = 0; i < 3; ++i)
     {
-        const auto x0 = (float) knobs[i]->getBounds().getCentreX() + 56.0f, x1 = (float) knobs[i + 1]->getBounds().getCentreX() - 56.0f;
-        path ({ { x0, ky + 4.0f }, { juce::jmap (0.33f, x0, x1), ky + 16.0f }, { juce::jmap (0.66f, x0, x1), ky - 8.0f }, { x1, ky + 4.0f } });
+        const auto x0 = (float) knobs[i]->getBounds().getCentreX() + 58.0f, x1 = (float) knobs[i + 1]->getBounds().getCentreX() - 58.0f;
+        const juce::Point<float> v[4] = { { x0, ky + 4.0f }, { juce::jmap (0.33f, x0, x1), ky + 16.0f }, { juce::jmap (0.66f, x0, x1), ky - 8.0f }, { x1, ky + 4.0f } };
+        juce::Path p;   // smooth curve through the points (Catmull-Rom as cubic beziers)
+        p.startNewSubPath (v[0]);
+        for (int k = 0; k < 3; ++k)
+        {
+            const auto p0 = v[std::max (0, k - 1)], p1 = v[k], p2 = v[k + 1], p3 = v[std::min (3, k + 2)];
+            p.cubicTo (p1 + (p2 - p0) / 6.0f, p2 - (p3 - p1) / 6.0f, p2);
+        }
+        Hw::drawDottedPath (g, p, red, 5.0f, 1.0f);
+        p.applyTransform (juce::AffineTransform::translation (0.0f, 4.0f));
+        Hw::drawDottedPath (g, p, blk, 7.0f, 0.6f);
     }
-    // space -> the room on the right -> into advanced
-    const juce::Point<float> roomC (ox + 872.0f, ky + 64.0f);
-    path ({ { (float) space.slider.getBounds().getCentreX() + 56.0f, ky + 4.0f }, { ox + 846.0f, ky + 30.0f }, roomC - juce::Point<float> (0.0f, 14.0f) });
-    path ({ roomB + juce::Point<float> (0.0f, 14.0f), { ox + 880.0f, ky - 40.0f }, { ox + 900.0f, ky - 10.0f } });
-
-    for (auto p : { roomA, roomB, roomC })
-        Hw::drawTinyRoom (g, p, 15.0f, Colours::ink.withAlpha (0.55f));
-    Hw::drawTinyRoom (g, { ox + 470.0f, oy + 532.0f }, 12.0f, Colours::ink.withAlpha (0.28f));
 }
 
 void RoomAudioProcessorEditor::resized()
@@ -1034,55 +1028,59 @@ void RoomAudioProcessorEditor::layoutContent()
     roomSaveDialog.setBounds (full);
 
     const auto c = consoleArea.toNearestInt();
+    staticLayer = {};   // the print follows the layout
 
     // --- Top bar ---
-    presetBar.setBounds (c.getX() + 290, c.getY() + 32, 370, 40);
-    randomButton.setBounds (c.getX() + 678, c.getY() + 33, 40, 38);
-    for (auto [k, x] : { std::pair { &mix, 760 }, { &output, 816 } })
+    presetBar.setBounds (c.getX() + 278, c.getY() + 32, 360, 42);
+    randomButton.setBounds (c.getX() + 650, c.getY() + 31, 44, 44);
+    for (auto [k, x] : { std::pair { &mix, 732 }, { &output, 786 } })
     {
-        k->slider.setBounds (juce::Rectangle<int> (54, 48).withCentre ({ c.getX() + x, c.getY() + 46 }));
-        k->label.setBounds (juce::Rectangle<int> (54, 16).withCentre ({ c.getX() + x, c.getY() + 80 }));
+        k->slider.setBounds (juce::Rectangle<int> (54, 50).withCentre ({ c.getX() + x, c.getY() + 47 }));
+        k->label.setBounds (juce::Rectangle<int> (54, 16).withCentre ({ c.getX() + x, c.getY() + 83 }));
     }
-    bypassButton.setBounds (c.getX() + 846, c.getY() + 44, 36, 30);
+    bypassButton.setBounds (c.getX() + 810, c.getY() + 30, 66, 50);
 
     // --- Row 1: three identical bays ---
-    const int bayW = 268, bayH = 216, bayY = c.getY() + 124, gap = 20;
+    const int bayW = 264, bayH = 220, bayY = c.getY() + 128, gap = 20;
+    const int bayX = c.getX() + (c.getWidth() - (bayW * 3 + gap * 2)) / 2;
     for (int i = 0; i < 3; ++i)
-        bays[i] = { c.getX() + 28 + i * (bayW + gap), bayY, bayW, bayH };
+        bays[i] = { bayX + i * (bayW + gap), bayY, bayW, bayH };
     const auto screenOf = [] (juce::Rectangle<int> bay) { return bay.reduced (14).withTrimmedTop (6); };
     {
         auto s = screenOf (bays[0]);
-        auto keys = s.removeFromBottom (40);
-        s.removeFromBottom (8);
+        auto keys = s.removeFromBottom (44);
+        s.removeFromBottom (6);
         loadScreen.setBounds (s);
-        recordButton.setBounds (keys.getX() + 8, keys.getY() + 2, 38, 36);
-        roomSaveButton.setBounds (keys.getX() + 126, keys.getY() + 2, 38, 36);
+        recordButton.setBounds (keys.getX() + 4, keys.getY() + 2, 42, 42);
+        roomSaveButton.setBounds (keys.getX() + 124, keys.getY() + 2, 42, 42);
     }
     roomScreen.setBounds (screenOf (bays[1]));
     toneScreen.setBounds (screenOf (bays[2]));
 
     // --- Row 2: the four knobs ---
-    const int kx0 = c.getX() + 28, kw = (c.getWidth() - 56) / 4, ky = c.getY() + 444;
+    const int kx0 = c.getX() + 28, kw = (c.getWidth() - 56) / 4, ky = c.getY() + 458;
     Knob* knobs[4] = { &intensity, &balance, &tail, &space };
     for (int i = 0; i < 4; ++i)
     {
         const auto cx = kx0 + kw * i + kw / 2;
-        knobs[i]->slider.setBounds (juce::Rectangle<int> (150, 124).withCentre ({ cx, ky }));
-        knobs[i]->label.setBounds (juce::Rectangle<int> (140, 22).withCentre ({ cx, ky + 70 }));
+        knobs[i]->slider.setBounds (juce::Rectangle<int> (150, 128).withCentre ({ cx, ky }));
+        knobs[i]->label.setBounds (juce::Rectangle<int> (140, 22).withCentre ({ cx, ky + 72 }));
     }
-    autoBalance.setBounds (juce::Rectangle<int> (60, 18).withCentre ({ kx0 + kw + kw / 2 + 4, ky + 92 }));
+    autoBalance.setBounds (juce::Rectangle<int> (60, 18).withCentre ({ kx0 + kw + kw / 2 + 4, ky + 95 }));
 
-    // --- Advanced (attached on the right) ---
+    // --- Advanced (the right side, full height) ---
     advancedPanel.setBounds (advancedArea.toNearestInt());
 
-    // --- Finish ---
+    // --- Finish (along the bottom) ---
     const auto f = finishArea.toNearestInt();
-    eqPanel.setBounds (f.getX() + 32, f.getY() + 58, 560, f.getHeight() - 84);
-    for (auto [k, x] : { std::pair { &tape, 660 }, { &autoEq, 770 } })
+    eqPanel.setBounds (f.getX() + 32, f.getY() + 80, 520, f.getHeight() - 106);
+    for (auto [k, x] : { std::pair { &tape, 626 }, { &autoEq, 746 } })
     {
-        k->slider.setBounds (juce::Rectangle<int> (110, 100).withCentre ({ f.getX() + x, f.getY() + 120 }));
-        k->label.setBounds (juce::Rectangle<int> (100, 20).withCentre ({ f.getX() + x, f.getY() + 182 }));
+        k->slider.setBounds (juce::Rectangle<int> (124, 124).withCentre ({ f.getX() + x, f.getY() + 136 }));
+        k->label.setBounds (juce::Rectangle<int> (100, 20).withCentre ({ f.getX() + x, f.getY() + 200 }));
     }
+    finishLed = { finishArea.getRight() - 52.0f, finishArea.getY() + 96.0f };
+    finishJack = { finishArea.getRight() - 52.0f, finishArea.getY() + 160.0f };
 }
 
 //==============================================================================

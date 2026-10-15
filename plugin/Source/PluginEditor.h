@@ -6,22 +6,20 @@
 #include "EvilleLookAndFeel.h"
 #include "presets/PresetBrowser.h"
 
-// The ROOM console (eville). Three pieces of hardware:
+// The ROOM unit (eville): one piece of hardware sitting on a desk.
 //
 //   +-------------------------------------------------+-------------+
-//   | room by eville  [< studios / name >] [♥][save]   | advanced    |
-//   |                 [shuffle]   (wet) (out)  bypass  |  knobs      |
-//   | ( load )        ( room )        ( tone )         |  freeze     |
-//   |  (intensity)  (balance)  (tail)  (space)         |  lfo 1 / 2  |
+//   | room by eville  [< studios / name >] [shuffle]  | advanced    |
+//   |                            (wet) (out)  bypass  |  knobs      |
+//   | ( load )        ( room )        ( tone )        |  freeze     |
+//   |  (intensity)  (balance)  (tail)  (space)        |             |
+//   +-------------------------------------------------+  lfo 1      |
+//   | finish   [ eq screen ]   (tape) (auto eq)  out  |  lfo 2      |
 //   +-------------------------------------------------+-------------+
-//          | cable
-//   +----------------------------------------------+
-//   | finish   [ eq screen ]   (tape) (auto eq)  out |
-//   +----------------------------------------------+
 //
-// The dust-white console carries the printed signal path (dotted lines and
-// tiny rooms). Everything is laid out at 1200 x 880 and drawn through a scale
-// transform, so the window resizes freely (fixed aspect).
+// Dust-white console, black finish and advanced. Everything is laid out at
+// 1240 x 936 and drawn through a scale transform, so the window resizes
+// freely (fixed aspect).
 
 class RoomAudioProcessorEditor;
 
@@ -56,9 +54,9 @@ private:
     bool hovering = false;
 };
 
-/** The room itself, drawn live: a one-point-perspective room whose floor holds
+/** The room itself, drawn live: a box in 3D, turning slowly, whose floor holds
     the decay per band. It moves with the knobs (and the LFOs): intensity = glow,
-    tail = how far back the decay reaches, space = width, size = depth,
+    tail = how far back the decay reaches, space = width, size = depth and height,
     damping = colour and fade, pre-delay = gap, ducking and input = pulse,
     freeze = holds. Click it for the full room info. */
 class RoomScreen : public juce::Component,
@@ -81,7 +79,7 @@ private:
     room::RoomAnalysis analysis;
     int shownVersion = -1;
     bool showInfo = false;
-    float phase = 0.0f, pulsePos = 2.0f, lastLevel = 0.0f, levelSmooth = 0.0f;
+    float phase = 0.0f, yaw = 0.62f, pulsePos = 2.0f, lastLevel = 0.0f, levelSmooth = 0.0f;
 };
 
 /** The tone the room puts on a sound: its EQ curve, with the strongest
@@ -135,7 +133,7 @@ public:
 
     void resized() override;
 
-    static constexpr int baseWidth = 1200, baseHeight = 880;
+    static constexpr int baseWidth = 1240, baseHeight = 936;
 
     /** Open (or close) the LFO controls in the advanced section. */
     void setAdvanced (bool showLfos);
@@ -146,6 +144,7 @@ private:
     void timerCallback() override;
     void layoutContent();
     void paintContent (juce::Graphics&);
+    void paintUnit (juce::Graphics&);
     void paintConsoleArt (juce::Graphics&);
 
     struct Knob
@@ -172,12 +171,15 @@ private:
     Content content;
     juce::TooltipWindow tooltips { this, 600 };
 
-    // Fixed geometry of the three pieces of hardware (base coordinates)
-    const juce::Rectangle<float> consoleArea { 20.0f, 20.0f, 900.0f, 560.0f };
-    const juce::Rectangle<float> advancedArea { 920.0f, 20.0f, 260.0f, 560.0f };
-    const juce::Rectangle<float> finishArea { 60.0f, 614.0f, 900.0f, 246.0f };
+    // Fixed geometry of the unit's three panels (base coordinates)
+    const juce::Rectangle<float> consoleArea { 44.0f, 34.0f, 892.0f, 588.0f };
+    const juce::Rectangle<float> finishArea { 44.0f, 622.0f, 892.0f, 264.0f };
+    const juce::Rectangle<float> advancedArea { 936.0f, 34.0f, 260.0f, 852.0f };
     juce::Rectangle<int> bays[3];
-    juce::Image consoleGrain, blackGrain, paperTexture, blackTexture;
+    juce::Point<float> finishLed, finishJack;
+    juce::Image paperTexture, blackTexture;   // painted steel and powder coat, made in Higgsfield
+    juce::Image staticLayer;   // the desk, the unit and its print, at the window's pixel size
+    float staticScale = 0.0f;
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
@@ -200,10 +202,10 @@ private:
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
 
-    // Advanced (attached black section)
+    // Advanced (black, the right side)
     AdvancedPanel advancedPanel { proc };
 
-    // Finish (separate black module)
+    // Finish (black, along the bottom)
     EqPanel eqPanel { proc };
     Knob tape, autoEq;
 

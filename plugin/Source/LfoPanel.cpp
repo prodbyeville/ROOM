@@ -247,7 +247,7 @@ void LfoModule::resized()
     shape.setBounds (top.reduced (0, 2));
     r.removeFromTop (8);
 
-    waveArea = r.removeFromTop (std::max (60, std::min (130, r.getHeight() - 110)));
+    waveArea = r.removeFromTop (std::max (60, std::min (330, r.getHeight() - 220)));
     r.removeFromTop (10);
 
     auto controls = r.removeFromTop (26);

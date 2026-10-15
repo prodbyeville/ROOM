@@ -4,21 +4,25 @@
 
 juce::Rectangle<float> Hw::drawScreen (juce::Graphics& g, juce::Rectangle<float> b)
 {
-    // Bezel: a dark frame set into the panel, lit from above.
-    g.setColour (juce::Colours::black.withAlpha (0.18f));
-    g.fillRoundedRectangle (b.translated (0.0f, 1.5f).expanded (1.0f), 7.0f);
-    juce::ColourGradient bezel (juce::Colour (0xff2b2b2b), 0.0f, b.getY(), juce::Colour (0xff0d0d0d), 0.0f, b.getBottom(), false);
+    // A window cut into the panel: light catches the lower lip of the cut,
+    // the top of the recess is in shadow.
+    g.setColour (juce::Colours::white.withAlpha (0.28f));
+    g.fillRoundedRectangle (b.translated (0.0f, 1.0f), 7.5f);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (b.translated (0.0f, -0.6f), 7.5f);
+
+    // Bezel: black anodised frame, brighter at the top edge
+    juce::ColourGradient bezel (juce::Colour (0xff2e2e2e), 0.0f, b.getY(), juce::Colour (0xff0c0c0c), 0.0f, b.getBottom(), false);
     g.setGradientFill (bezel);
     g.fillRoundedRectangle (b, 7.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.10f));
-    g.drawRoundedRectangle (b.reduced (0.5f), 7.0f, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.drawLine (b.getX() + 7.0f, b.getY() + 1.0f, b.getRight() - 7.0f, b.getY() + 1.0f, 1.0f);
 
-    // Glass
-    const auto glass = b.reduced (4.0f);
+    // Glass, sunk into the bezel
+    const auto glass = b.reduced (4.5f);
     g.setColour (Colours::glass);
     g.fillRoundedRectangle (glass, 4.5f);
-    // Vignette: the centre of the tube is a touch lighter.
-    juce::ColourGradient vig (juce::Colour (0xff1a1a1a), glass.getCentreX(), glass.getCentreY(),
+    juce::ColourGradient vig (juce::Colour (0xff181818), glass.getCentreX(), glass.getCentreY(),
                               Colours::glass.withAlpha (0.0f), glass.getX(), glass.getY(), true);
     g.setGradientFill (vig);
     g.fillRoundedRectangle (glass, 4.5f);
@@ -29,17 +33,28 @@ void Hw::drawScreenOverlay (juce::Graphics& g, juce::Rectangle<float> glass)
 {
     g.saveState();
     g.reduceClipRegion (glass.toNearestInt());
-    g.setColour (juce::Colours::black.withAlpha (0.16f));
+    g.setColour (juce::Colours::black.withAlpha (0.12f));
     for (auto y = glass.getY(); y < glass.getBottom(); y += 3.0f)
         g.fillRect (glass.getX(), y, glass.getWidth(), 1.0f);
-    // A soft reflection across the top of the glass.
-    juce::ColourGradient refl (juce::Colours::white.withAlpha (0.045f), 0.0f, glass.getY(),
-                               juce::Colours::white.withAlpha (0.0f), 0.0f, glass.getY() + glass.getHeight() * 0.45f, false);
+
+    // A broad, soft reflection across the glass from the top left
+    juce::Path sheen;
+    sheen.startNewSubPath (glass.getX(), glass.getY());
+    sheen.lineTo (glass.getX() + glass.getWidth() * 0.62f, glass.getY());
+    sheen.lineTo (glass.getX() + glass.getWidth() * 0.30f, glass.getBottom());
+    sheen.lineTo (glass.getX(), glass.getBottom());
+    sheen.closeSubPath();
+    juce::ColourGradient refl (juce::Colours::white.withAlpha (0.045f), glass.getX(), glass.getY(),
+                               juce::Colours::white.withAlpha (0.0f), glass.getX() + glass.getWidth() * 0.4f, glass.getBottom(), false);
     g.setGradientFill (refl);
-    g.fillRect (glass.withHeight (glass.getHeight() * 0.45f));
-    // Inner shadow at the edges
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
-    g.drawRoundedRectangle (glass.reduced (0.5f), 4.5f, 1.5f);
+    g.fillPath (sheen);
+
+    // Inner shadow: the bezel's edge throws a little shade onto the glass.
+    for (int i = 0; i < 4; ++i)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.32f - 0.07f * (float) i));
+        g.drawRoundedRectangle (glass.reduced (0.5f + (float) i).translated (0.0f, (float) i * 0.5f), 4.5f, 1.0f);
+    }
     g.restoreState();
 }
 
@@ -64,72 +79,180 @@ juce::Image Hw::asset (const char* fileName)
     return {};
 }
 
+namespace
+{
+    // Draws a photographed part so that `partSize` (the part itself) lands on `area`;
+    // fraction = how much of the photo the part takes up.
+    void drawPart (juce::Graphics& g, const juce::Image& img, juce::Point<float> centre, float partSize, float fraction,
+                   bool flipVertically = false)
+    {
+        const auto s = partSize / fraction;
+        const auto r = juce::Rectangle<float> (s, s).withCentre (centre);
+        g.setOpacity (1.0f);
+        auto t = juce::AffineTransform::scale (s / (float) img.getWidth(), s / (float) img.getHeight());
+        if (flipVertically)
+            t = juce::AffineTransform::scale (1.0f, -1.0f).translated (0.0f, (float) img.getHeight()).followedBy (t);
+        g.drawImageTransformed (img, t.translated (r.getX(), r.getY()), false);
+    }
+}
+
 void Hw::drawKey (juce::Graphics& g, juce::Rectangle<float> r, bool light, bool over, bool down)
 {
-    // Photographed key caps (made in Higgsfield), with a drawn shadow under them.
-    if (auto img = asset (light ? "key_light.png" : "key_dark.png"); img.isValid())
+    // Photographed key caps set into the panel (made in Higgsfield). The photo
+    // carries the key well and the cap's own contact shadow.
+    static const auto paperKey = asset ("key_paper.png");
+    static const auto blackKey = asset ("key_black.png");
+    const auto& img = light ? paperKey : blackKey;
+    if (img.isValid())
     {
-        const auto s = std::min (r.getWidth(), r.getHeight()) + 4.0f;
-        auto cap = juce::Rectangle<float> (s, s).withCentre (r.getCentre()).translated (0.0f, down ? 1.2f : 0.0f);
-        g.setColour (juce::Colours::black.withAlpha (light ? (down ? 0.10f : 0.2f) : 0.45f));
-        g.fillRoundedRectangle (r.reduced (2.0f).translated (0.0f, down ? 1.0f : 2.5f), 6.0f);
-        g.setOpacity (1.0f);
-        g.drawImage (img, cap, juce::RectanglePlacement::stretchToFit);
+        const auto s = std::min (r.getWidth(), r.getHeight());
+        const auto cap = juce::Rectangle<float> (s * 0.78f, s * 0.78f).withCentre (r.getCentre());
+        if (r.getWidth() > r.getHeight() * 1.15f || r.getHeight() > r.getWidth() * 1.15f)
+        {
+            // A wide key: stretch the photo by slicing it into nine pieces.
+            const auto iw = img.getWidth(), ih = img.getHeight(), e = iw * 3 / 10;
+            const auto scale = s / (float) ih, ed = e * scale;
+            const float xs[] = { r.getX(), r.getX() + ed, r.getRight() - ed, r.getRight() };
+            const float ys[] = { r.getY(), r.getY() + ed, r.getBottom() - ed, r.getBottom() };
+            const int sx[] = { 0, e, iw - e, iw }, sy[] = { 0, e, ih - e, ih };
+            g.setOpacity (1.0f);
+            for (int yi = 0; yi < 3; ++yi)
+                for (int xi = 0; xi < 3; ++xi)
+                    g.drawImage (img, xs[xi], ys[yi], xs[xi + 1] - xs[xi], ys[yi + 1] - ys[yi],
+                                 sx[xi], sy[yi], sx[xi + 1] - sx[xi], sy[yi + 1] - sy[yi]);
+            const auto wide = keyCap (r);
+            if (over || down)
+            {
+                g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? (light ? 0.10f : 0.25f) : (light ? 0.10f : 0.05f)));
+                g.fillRoundedRectangle (wide.reduced (s * 0.05f), s * 0.08f);
+            }
+            return;
+        }
+
+        drawPart (g, img, r.getCentre(), s, 1.0f);
         if (over || down)
         {
-            g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? 0.08f : 0.06f));
-            g.fillRoundedRectangle (cap.reduced (s * 0.08f), 6.0f);
+            // pressed: the cap sinks a touch and catches less light
+            g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? (light ? 0.10f : 0.25f) : (light ? 0.10f : 0.05f)));
+            g.fillRoundedRectangle (cap.reduced (s * 0.03f), s * 0.08f);
         }
         return;
     }
 
     const auto lift = down ? 0.8f : 2.2f;
-    // Shadow and the key's side
     g.setColour (juce::Colours::black.withAlpha (light ? 0.22f : 0.5f));
     g.fillRoundedRectangle (r.translated (0.0f, lift), 6.0f);
-    g.setColour (light ? juce::Colour (0xffb9b3a7) : juce::Colour (0xff050505));
-    g.fillRoundedRectangle (r.translated (0.0f, lift * 0.5f), 6.0f);
-    // Top
-    auto top = r.withTrimmedBottom (lift * 0.5f).translated (0.0f, down ? 0.8f : 0.0f);
-    juce::ColourGradient grad (light ? juce::Colour (over ? 0xfffbfaf6 : 0xfff6f4ef) : juce::Colour (over ? 0xff333333 : 0xff2a2a2a),
-                               0.0f, top.getY(),
-                               light ? juce::Colour (0xffe2ded5) : juce::Colour (0xff141414), 0.0f, top.getBottom(), false);
+    juce::ColourGradient grad (light ? juce::Colour (0xfff6f4ef) : juce::Colour (0xff2a2a2a), 0.0f, r.getY(),
+                               light ? juce::Colour (0xffe2ded5) : juce::Colour (0xff141414), 0.0f, r.getBottom(), false);
     g.setGradientFill (grad);
-    g.fillRoundedRectangle (top, 6.0f);
-    g.setColour (light ? juce::Colour (0xffa8a296) : juce::Colours::white.withAlpha (0.08f));
-    g.drawRoundedRectangle (top.reduced (0.5f), 6.0f, 1.0f);
+    g.fillRoundedRectangle (r.withTrimmedBottom (lift), 6.0f);
+}
+
+juce::Rectangle<float> Hw::keyCap (juce::Rectangle<float> r)
+{
+    const auto s = std::min (r.getWidth(), r.getHeight());
+    return juce::Rectangle<float> (r.getWidth() - s * 0.22f, r.getHeight() - s * 0.22f).withCentre (r.getCentre());
 }
 
 void Hw::drawLed (juce::Graphics& g, juce::Point<float> c, bool on, float radius)
 {
-    const auto r = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c);
-    if (on)
+    static const auto ledOn = asset ("led_on.png");
+    static const auto ledOff = asset ("led_off.png");
+    if (const auto& img = on ? ledOn : ledOff; img.isValid())
     {
-        g.setColour (Colours::crimson.withAlpha (0.25f));
-        g.fillEllipse (r.expanded (radius * 1.4f));
-        g.setColour (Colours::crimson.withAlpha (0.35f));
-        g.fillEllipse (r.expanded (radius * 0.6f));
+        if (on)
+        {
+            // light spilling onto the panel around the lens
+            juce::ColourGradient spill (Colours::crimson.withAlpha (0.3f), c.x, c.y,
+                                        Colours::crimson.withAlpha (0.0f), c.x + radius * 2.4f, c.y, true);
+            g.setGradientFill (spill);
+            g.fillEllipse (juce::Rectangle<float> (radius * 4.8f, radius * 4.8f).withCentre (c));
+        }
+        drawPart (g, img, c, radius * 2.0f, 0.62f);
+        return;
     }
-    juce::ColourGradient led (on ? juce::Colour (0xffff6b5e) : juce::Colour (0xff4a2522), c.x - radius * 0.4f, c.y - radius * 0.4f,
-                              on ? Colours::crimson : juce::Colour (0xff1c0e0d), c.x + radius, c.y + radius, true);
-    g.setGradientFill (led);
+    const auto r = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c);
+    g.setColour (on ? Colours::crimson : juce::Colour (0xff3a1a18));
     g.fillEllipse (r);
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
-    g.drawEllipse (r, 0.8f);
 }
 
-void Hw::drawScrew (juce::Graphics& g, juce::Point<float> c, bool onBlack)
+void Hw::drawScrew (juce::Graphics& g, juce::Point<float> c, bool onBlack, float size)
 {
-    const auto r = juce::Rectangle<float> (11.0f, 11.0f).withCentre (c);
-    g.setColour (juce::Colours::black.withAlpha (onBlack ? 0.6f : 0.25f));
-    g.fillEllipse (r.translated (0.0f, 1.0f).expanded (0.8f));
-    juce::ColourGradient grad (juce::Colour (onBlack ? 0xff4a4a4a : 0xff8d8a84), r.getX(), r.getY(),
-                               juce::Colour (onBlack ? 0xff151515 : 0xff3c3a36), r.getRight(), r.getBottom(), false);
-    g.setGradientFill (grad);
+    static const auto paperScrew = asset ("screw_paper.png");
+    static const auto blackScrew = asset ("screw_black.png");
+    if (const auto& img = onBlack ? blackScrew : paperScrew; img.isValid())
+    {
+        // Each screw sits at its own angle, like it was driven in by hand.
+        const auto angle = (float) ((int) (c.x * 7.0f + c.y * 13.0f) % 360) * juce::MathConstants<float>::pi / 180.0f;
+        const auto s = size / 0.8f;
+        const auto t = juce::AffineTransform::translation (-img.getWidth() * 0.5f, -img.getHeight() * 0.5f)
+                           .rotated (angle)
+                           .scaled (s / (float) img.getWidth())
+                           .translated (c.x, c.y);
+        g.setOpacity (1.0f);
+        g.saveState();
+        juce::Path round;
+        round.addEllipse (juce::Rectangle<float> (s, s).withCentre (c));
+        g.reduceClipRegion (round);
+        g.drawImageTransformed (img, t, false);
+        g.restoreState();
+        return;
+    }
+    const auto r = juce::Rectangle<float> (size, size).withCentre (c);
+    g.setColour (juce::Colour (onBlack ? 0xff2a2a2a : 0xff8d8a84));
     g.fillEllipse (r);
-    g.setColour (juce::Colours::black.withAlpha (0.65f));
-    g.drawLine ({ c.translated (-3.3f, -3.3f), c.translated (3.3f, 3.3f) }, 1.4f);
-    g.drawLine ({ c.translated (-3.3f, 3.3f), c.translated (3.3f, -3.3f) }, 1.4f);
+}
+
+void Hw::drawToggle (juce::Graphics& g, juce::Point<float> c, bool up, float size)
+{
+    static const auto img = asset ("toggle.png");
+    if (img.isValid())
+    {
+        // The photo is lit from above; flipped, the lever points down (bypassed).
+        drawPart (g, img, c, size, 1.0f, ! up);
+        return;
+    }
+    g.setColour (juce::Colour (0xff9a9690));
+    g.fillEllipse (juce::Rectangle<float> (size * 0.4f, size * 0.4f).withCentre (c));
+    g.drawLine (c.x, c.y, c.x, c.y + (up ? -size * 0.4f : size * 0.4f), size * 0.1f);
+}
+
+void Hw::drawJack (juce::Graphics& g, juce::Point<float> c, float size)
+{
+    static const auto img = asset ("jack.png");
+    if (img.isValid())
+    {
+        drawPart (g, img, c, size, 0.77f);
+        return;
+    }
+    g.setColour (juce::Colour (0xff3a3a3a));
+    g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (c));
+    g.setColour (juce::Colours::black);
+    g.fillEllipse (juce::Rectangle<float> (size * 0.45f, size * 0.45f).withCentre (c));
+}
+
+void Hw::drawGroove (juce::Graphics& g, juce::Point<float> a, juce::Point<float> b, bool onBlack)
+{
+    // A line pressed into the metal: a dark cut with a lit lip on its far side.
+    const auto horizontal = std::abs (b.y - a.y) < std::abs (b.x - a.x);
+    const juce::Point<float> off = horizontal ? juce::Point<float> (0.0f, 1.0f) : juce::Point<float> (1.0f, 0.0f);
+    g.setColour (juce::Colours::black.withAlpha (onBlack ? 0.55f : 0.16f));
+    g.drawLine ({ a - off * 0.5f, b - off * 0.5f }, 1.0f);
+    g.setColour (juce::Colours::black.withAlpha (onBlack ? 0.35f : 0.07f));
+    g.drawLine ({ a - off * 1.5f, b - off * 1.5f }, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (onBlack ? 0.07f : 0.75f));
+    g.drawLine ({ a + off * 0.6f, b + off * 0.6f }, 1.0f);
+}
+
+void Hw::drawGrooveRect (juce::Graphics& g, juce::Rectangle<float> r, float corner, bool onBlack)
+{
+    // Inset frame: shadow on the top/left inner edge, light on the bottom/right.
+    g.setColour (juce::Colours::black.withAlpha (onBlack ? 0.55f : 0.15f));
+    g.drawRoundedRectangle (r, corner, 1.0f);
+    g.setColour (juce::Colours::black.withAlpha (onBlack ? 0.25f : 0.06f));
+    g.drawRoundedRectangle (r.reduced (1.0f).translated (0.5f, 0.5f), corner, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (onBlack ? 0.06f : 0.7f));
+    g.drawRoundedRectangle (r.expanded (1.0f).translated (0.5f, 0.8f), corner + 1.0f, 0.8f);
 }
 
 void Hw::drawDottedPath (juce::Graphics& g, const juce::Path& p, juce::Colour c, float spacing, float dotRadius)
@@ -150,31 +273,6 @@ void Hw::drawDottedPath (juce::Graphics& g, const juce::Path& p, juce::Colour c,
         }
         carry = d - len;
     }
-}
-
-void Hw::drawTinyRoom (juce::Graphics& g, juce::Point<float> c, float s, juce::Colour col)
-{
-    // Isometric box: front face, a receding top and side, and a doorway.
-    const auto w = s, h = s * 1.1f, d = s * 0.45f;
-    const juce::Point<float> f0 (c.x - w * 0.5f, c.y - h * 0.4f), f1 (f0.x + w, f0.y),
-                             f2 (f1.x, f0.y + h), f3 (f0.x, f2.y);
-    const juce::Point<float> off (d, -d * 0.6f);
-    juce::Path p;
-    p.addLineSegment ({ f0, f1 }, 0.0f); p.addLineSegment ({ f1, f2 }, 0.0f);
-    p.addLineSegment ({ f2, f3 }, 0.0f); p.addLineSegment ({ f3, f0 }, 0.0f);
-    p.addLineSegment ({ f0, f0 + off }, 0.0f); p.addLineSegment ({ f1, f1 + off }, 0.0f);
-    p.addLineSegment ({ f2, f2 + off }, 0.0f);
-    p.addLineSegment ({ f0 + off, f1 + off }, 0.0f); p.addLineSegment ({ f1 + off, f2 + off }, 0.0f);
-    // Inner back wall lines, seen through the open front
-    p.addLineSegment ({ f3 + off * 0.6f, f0 + off * 0.6f }, 0.0f);
-    // Doorway
-    const auto dw = w * 0.22f, dh = h * 0.45f;
-    const juce::Point<float> dx (c.x + w * 0.05f, f2.y);
-    p.addLineSegment ({ dx, dx.translated (0.0f, -dh) }, 0.0f);
-    p.addLineSegment ({ dx.translated (0.0f, -dh), dx.translated (dw, -dh) }, 0.0f);
-    p.addLineSegment ({ dx.translated (dw, -dh), dx.translated (dw, 0.0f) }, 0.0f);
-    g.setColour (col);
-    g.strokePath (p, juce::PathStrokeType (0.8f));
 }
 
 juce::Image Hw::grain (int w, int h, bool dark, int seed)

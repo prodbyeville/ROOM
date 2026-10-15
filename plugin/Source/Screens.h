@@ -3,7 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 // Drawing helpers for the hardware look: glass screens, keys, LEDs, screws,
-// printed dotted paths and the little room outlines on the faceplate.
+// the printed dotted path and the creases in the metal.
 namespace Hw
 {
     /** A recessed dark glass screen: bezel, vignette, faint scanlines. Returns the glass area. */
@@ -18,14 +18,21 @@ namespace Hw
     /** Tactile square key. light = dust-white plastic, otherwise black. */
     void drawKey (juce::Graphics&, juce::Rectangle<float>, bool light, bool over, bool down);
 
+    /** The face of a key drawn by drawKey (inside its well), for icons and text. */
+    juce::Rectangle<float> keyCap (juce::Rectangle<float> keyBounds);
+
+    /** Photographed parts (made in Higgsfield). radius / size = the part itself. */
     void drawLed (juce::Graphics&, juce::Point<float> centre, bool on, float radius = 3.5f);
-    void drawScrew (juce::Graphics&, juce::Point<float> centre, bool onBlack = false);
+    void drawScrew (juce::Graphics&, juce::Point<float> centre, bool onBlack = false, float size = 12.0f);
+    void drawToggle (juce::Graphics&, juce::Point<float> centre, bool up, float size);
+    void drawJack (juce::Graphics&, juce::Point<float> centre, float size);
+
+    /** Lines pressed into the metal (panel creases, frames). */
+    void drawGroove (juce::Graphics&, juce::Point<float> a, juce::Point<float> b, bool onBlack);
+    void drawGrooveRect (juce::Graphics&, juce::Rectangle<float>, float corner, bool onBlack);
 
     /** A printed dotted line along a path (dots every `spacing` px). */
     void drawDottedPath (juce::Graphics&, const juce::Path&, juce::Colour, float spacing, float dotRadius);
-
-    /** A tiny wireframe room (a box with a doorway), drawn like an engraving. */
-    void drawTinyRoom (juce::Graphics&, juce::Point<float> centre, float size, juce::Colour);
 
     /** An embedded image asset (cached). Invalid if it isn't there. */
     juce::Image asset (const char* fileName);

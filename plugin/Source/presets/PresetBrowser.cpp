@@ -990,7 +990,7 @@ void PresetBar::setPreset (const juce::String& n, bool mod, bool fav, bool canFa
 juce::Rectangle<int> PresetBar::nameArea() const
 {
     auto r = getLocalBounds();
-    r.removeFromRight (2 * (40 + 10));
+    r.removeFromRight (2 * (getHeight() + 8));
     return r;
 }
 
@@ -1011,10 +1011,11 @@ void PresetBar::paint (juce::Graphics& g)
 void PresetBar::paintOverChildren (juce::Graphics& g)
 {
     // Heart and disk glyphs on their keys
-    const auto hb = heart.getBounds().toFloat().reduced (11.0f, 10.0f).translated (0.0f, -1.0f);
+    const auto down = [] (juce::Button& b) { return b.isDown() ? 0.6f : 0.0f; };
+    const auto hb = Hw::keyCap (heart.getBounds().toFloat()).reduced (8.0f, 7.5f).translated (0.0f, down (heart) - 0.5f);
     drawHeart (g, hb, favorite, ! canFavorite ? Colours::inkDim.withAlpha (0.5f) : favorite ? Colours::crimson : Colours::ink);
-    const auto sb = save.getBounds().toFloat().reduced (12.0f, 11.0f).translated (0.0f, -1.0f);
-    g.setColour (Colours::ink);
+    const auto sb = Hw::keyCap (save.getBounds().toFloat()).reduced (9.5f).translated (0.0f, down (save) - 0.5f);
+    g.setColour (Colours::ink.withAlpha (0.88f));
     g.drawRoundedRectangle (sb, 2.0f, 1.6f);
     g.fillRect (sb.getX() + sb.getWidth() * 0.25f, sb.getY(), sb.getWidth() * 0.5f, sb.getHeight() * 0.35f);
     g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.58f, sb.getWidth() * 0.56f, sb.getHeight() * 0.42f, 1.2f);
@@ -1023,10 +1024,10 @@ void PresetBar::paintOverChildren (juce::Graphics& g)
 void PresetBar::resized()
 {
     auto r = getLocalBounds();
-    save.setBounds (r.removeFromRight (40));
-    r.removeFromRight (10);
-    heart.setBounds (r.removeFromRight (40));
-    r.removeFromRight (10);
+    save.setBounds (r.removeFromRight (getHeight()));
+    r.removeFromRight (8);
+    heart.setBounds (r.removeFromRight (getHeight()));
+    r.removeFromRight (8);
     prev.setBounds (r.removeFromLeft (34).reduced (0, 4));
     next.setBounds (r.removeFromRight (34).reduced (0, 4));
 }

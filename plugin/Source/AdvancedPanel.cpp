@@ -34,13 +34,13 @@ void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::Stri
     k.slider.setPopupDisplayEnabled (true, true, this);
     auto& props = k.slider.getProperties();
     props.set ("surface", "black");
-    props.set ("knobRadius", 19.0f);
+    props.set ("knobRadius", 24.0f);
     props.set ("scaleMin", lo);
     props.set ("scaleMid", mid);
     props.set ("scaleMax", hi);
     k.label.setText (name, juce::dontSendNotification);
     k.label.setJustificationType (juce::Justification::centred);
-    k.label.setFont (Fonts::sans (13.0f));
+    k.label.setFont (Fonts::sans (14.0f));
     k.label.setColour (juce::Label::textColourId, Colours::dustWhite);
     k.label.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (k.slider);
@@ -73,35 +73,42 @@ void AdvancedPanel::paint (juce::Graphics& g)
 {
     g.setColour (Colours::dustWhite);
     g.setFont (Fonts::sans (22.0f, Fonts::bold));
-    g.drawText (lfoPanel.isVisible() ? "lfo" : "advanced", 24, 26, 200, 30, juce::Justification::centredLeft);
+    g.drawText (lfoPanel.isVisible() ? "lfo" : "advanced", 26, 30, 200, 30, juce::Justification::centredLeft);
 
+    Hw::drawGroove (g, { 18.0f, 70.0f }, { (float) getWidth() - 18.0f, 70.0f }, true);
     if (! lfoPanel.isVisible())
     {
+        Hw::drawGroove (g, { 18.0f, 420.0f }, { (float) getWidth() - 18.0f, 420.0f }, true);
         // Freeze: LED above the key, label below
-        Hw::drawLed (g, { (float) freeze.getBounds().getCentreX(), (float) freeze.getY() - 11.0f }, freeze.getToggleState());
-        g.setFont (Fonts::sans (13.0f));
+        Hw::drawLed (g, { (float) freeze.getBounds().getCentreX(), (float) freeze.getY() - 12.0f }, freeze.getToggleState(), 4.0f);
+        g.setFont (Fonts::sans (14.0f));
         g.setColour (Colours::dustWhite);
-        g.drawText ("freeze", freeze.getBounds().translated (0, freeze.getHeight() + 2).withSizeKeepingCentre (80, 18),
+        g.drawText ("freeze", freeze.getBounds().translated (0, freeze.getHeight() + 1).withSizeKeepingCentre (80, 18),
                     juce::Justification::centred);
     }
 }
 
 void AdvancedPanel::resized()
 {
-    const float cols[3] = { 48.0f, 130.0f, 212.0f };
-    auto place = [&] (Knob& k, int col, float cy)
+    // Two columns, three rows; each knob gets room for its printed scale.
+    const int cols[2] = { 70, getWidth() - 70 };
+    const int rows[3] = { 128, 244, 360 };
+    auto place = [&] (Knob& k, int col, int row)
     {
-        k.slider.setBounds (juce::Rectangle<int> (82, 70).withCentre ({ (int) cols[col], (int) cy }));
-        k.label.setBounds (juce::Rectangle<int> (90, 18).withCentre ({ (int) cols[col], (int) cy + 40 }));
+        k.slider.setBounds (juce::Rectangle<int> (124, 112).withCentre ({ cols[col], rows[row] }));
+        k.label.setBounds (juce::Rectangle<int> (110, 18).withCentre ({ cols[col], rows[row] + 50 }));
     };
-    place (preDelay, 0, 112.0f);
-    place (size, 1, 112.0f);
-    place (damping, 2, 112.0f);
-    place (duck, 0, 210.0f);
-    place (duckRelease, 1, 210.0f);
-    freeze.setBounds (juce::Rectangle<int> (34, 30).withCentre ({ (int) cols[2], 210 }));
+    place (preDelay, 0, 0);
+    place (size, 1, 0);
+    place (damping, 0, 1);
+    place (duck, 1, 1);
+    place (duckRelease, 0, 2);
+    freeze.setBounds (juce::Rectangle<int> (50, 50).withCentre ({ cols[1], rows[2] + 4 }));
 
-    card1.setBounds (16, 278, getWidth() - 32, 128);
-    card2.setBounds (16, 414, getWidth() - 32, 128);
-    lfoPanel.setBounds (16, 70, getWidth() - 32, getHeight() - 86);
+    // The two LFO cards fill the rest, down to the bottom of the unit.
+    const int top = 436, bottom = getHeight() - 34, gap = 14;
+    const int h = (bottom - top - gap) / 2;
+    card1.setBounds (18, top, getWidth() - 36, h);
+    card2.setBounds (18, top + h + gap, getWidth() - 36, h);
+    lfoPanel.setBounds (18, 72, getWidth() - 36, getHeight() - 106);
 }
