@@ -1344,6 +1344,8 @@ namespace
             ed.setAdvancedOpen (true);
         if (mode == "info")
             ed.showRoomInfo (true);
+        if (mode == "about")
+            ed.openAbout();
         if (mode == "longname")
             p.setCurrentPreset ("Factory/x", "small room with a very long name");
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5

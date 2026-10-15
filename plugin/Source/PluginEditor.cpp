@@ -879,12 +879,17 @@ void RoomAudioProcessorEditor::showMainMenu()
 
 void RoomAudioProcessorEditor::showAbout()
 {
-    const auto message = juce::String (juce::CharPointer_UTF8 (
-        "by eville \xc2\xb7 v")) + UpdateChecker::currentVersion() + "\n\n"
-        "build a reverb from any sound: drop it in, shape the room, finish it.\n\n"
-        + juce::String (juce::CharPointer_UTF8 ("\xc2\xa9 ")) + juce::String (juce::Time::getCurrentTime().getYear()) + " eville\n"
-        "fonts: satoshi (indian type foundry), cormorant garamond (sil open font license)\n\n"
-        "prodbyeville.com\n" + UpdateChecker::supportEmail;
+    const auto dot = juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+    const auto message = "by eville" + dot + "v" + UpdateChecker::currentVersion() + "\n\n"
+        "every sound carries the space it was made in. room pulls that space out and lets you put anything else inside it.\n\n"
+        "drop in any sound (a clap in a stairwell, a voice memo, a tap on a glass bottle, a few seconds of room tone) "
+        "or record one. room listens for the space inside it: how it decays in every band, the tone it puts on things, "
+        "the notes that ring. then it rebuilds that space so your own sounds can live in it.\n\n"
+        "shape it (how much of the room, tone vs space, tail, width), finish it (eq, tape, auto eq), "
+        "and keep it: a ROOM is just the space, a STUDIO is the whole sound.\n\n"
+        + juce::String (juce::CharPointer_UTF8 ("\xc2\xa9 ")) + juce::String (juce::Time::getCurrentTime().getYear()) + " eville" + dot
+        + "prodbyeville.com" + dot + UpdateChecker::supportEmail + "\n"
+        "fonts: satoshi (indian type foundry), cormorant garamond (sil open font license)";
     EvilleLookAndFeel::showDialog (content, "room", message, { "close", "visit website" }, {},
                                    [] (int result, const juce::String&)
                                    {

@@ -152,6 +152,7 @@ public:
     bool areTipsEnabled() const { return tooltips != nullptr; }
     /** Menu actions (public for tests). */
     void newPreset();
+    void openAbout() { showAbout(); }
 
     /** Show the full room info on the room screen. */
     void showRoomInfo (bool show) { roomScreen.setShowInfo (show); }
