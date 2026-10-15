@@ -1,5 +1,6 @@
 #include "Screens.h"
 #include "UiColours.h"
+#include "EvilleLookAndFeel.h"
 
 juce::Rectangle<float> Hw::drawScreen (juce::Graphics& g, juce::Rectangle<float> b)
 {
@@ -55,8 +56,33 @@ void Hw::strokeGlow (juce::Graphics& g, const juce::Path& p, juce::Colour c, flo
     g.strokePath (p, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
+juce::Image Hw::asset (const char* fileName)
+{
+    int size = 0;
+    if (auto* data = UiAssetFiles::get (fileName, size))
+        return juce::ImageCache::getFromMemory (data, size);
+    return {};
+}
+
 void Hw::drawKey (juce::Graphics& g, juce::Rectangle<float> r, bool light, bool over, bool down)
 {
+    // Photographed key caps (made in Higgsfield), with a drawn shadow under them.
+    if (auto img = asset (light ? "key_light.png" : "key_dark.png"); img.isValid())
+    {
+        const auto s = std::min (r.getWidth(), r.getHeight()) + 4.0f;
+        auto cap = juce::Rectangle<float> (s, s).withCentre (r.getCentre()).translated (0.0f, down ? 1.2f : 0.0f);
+        g.setColour (juce::Colours::black.withAlpha (light ? (down ? 0.10f : 0.2f) : 0.45f));
+        g.fillRoundedRectangle (r.reduced (2.0f).translated (0.0f, down ? 1.0f : 2.5f), 6.0f);
+        g.setOpacity (1.0f);
+        g.drawImage (img, cap, juce::RectanglePlacement::stretchToFit);
+        if (over || down)
+        {
+            g.setColour ((down ? juce::Colours::black : juce::Colours::white).withAlpha (down ? 0.08f : 0.06f));
+            g.fillRoundedRectangle (cap.reduced (s * 0.08f), 6.0f);
+        }
+        return;
+    }
+
     const auto lift = down ? 0.8f : 2.2f;
     // Shadow and the key's side
     g.setColour (juce::Colours::black.withAlpha (light ? 0.22f : 0.5f));

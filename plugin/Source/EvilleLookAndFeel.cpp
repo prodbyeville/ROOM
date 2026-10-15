@@ -136,7 +136,7 @@ void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int,
     const auto kb = knobBounds (s);
     const auto c = kb.getCentre();
     const auto r = kb.getWidth() * 0.5f;
-    const auto alpha = s.isEnabled() ? 1.0f : 0.5f;
+    const auto alpha = s.isEnabled() ? 1.0f : 0.8f;
     const auto printCol = (dark ? Colours::dim : Colours::ink).withMultipliedAlpha (alpha);
     auto pointAt = [&] (float angle, float radius)
     {
@@ -172,6 +172,20 @@ void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int,
     g.fillEllipse (kb.translated (0.0f, r * 0.12f).expanded (1.5f));
     g.setColour (juce::Colours::black.withAlpha (0.12f * alpha));
     g.fillEllipse (kb.translated (0.0f, r * 0.22f).expanded (3.0f));
+
+    // The knob itself: a photographed knurled cap (made in Higgsfield). It doesn't
+    // rotate (its light comes from the top-left like the room's); the pointer does.
+    if (static auto knobImg = Hw::asset ("knob.png"); knobImg.isValid())
+    {
+        const auto img = kb.expanded (r * 0.06f).translated (0.0f, r * 0.05f);
+        g.setOpacity (alpha);
+        g.drawImage (knobImg, img, juce::RectanglePlacement::stretchToFit);
+        g.setOpacity (1.0f);
+        const auto a = startAngle + pos * (endAngle - startAngle);
+        g.setColour (Colours::dustWhite.withAlpha (0.95f * alpha));
+        g.drawLine ({ pointAt (a, r * 0.18f), pointAt (a, r * 0.78f) }, std::max (2.0f, r * 0.07f));
+        return;
+    }
 
     // Knurled skirt
     juce::ColourGradient skirt (juce::Colour (0xff2c2c2c), c.x - r, c.y - r, juce::Colour (0xff050505), c.x + r, c.y + r, false);

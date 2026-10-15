@@ -36,9 +36,9 @@ LoadScreen::LoadScreen (RoomAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setTooltip ("click for ROOMS, drop a sound here, right-click for more");
-    int size = 0;
-    if (auto* data = UiAssetFiles::get ("load_hall.jpg", size))
-        photo = juce::ImageCache::getFromMemory (data, size);
+    const char* files[5] = { "room_hall.jpg", "room_booth.jpg", "room_chamber.jpg", "room_objects.jpg", "room_tape.jpg" };
+    for (int i = 0; i < 5; ++i)
+        photos[i] = Hw::asset (files[i]);
     startTimerHz (15);
 }
 
@@ -93,6 +93,18 @@ void LoadScreen::mouseUp (const juce::MouseEvent& e)
         onOpenLibrary();
 }
 
+juce::Image LoadScreen::photoFor (const room::RoomAnalysis& a) const
+{
+    // A glimpse that fits the room: hiss and hum = the tape room, ringing
+    // tonal sounds = objects, then by how long the room rings.
+    if (! a.valid)            return photos[0];
+    if (a.steady)             return photos[4];
+    if (a.balance < 0.42f && a.peaks.size() >= 2) return photos[3];
+    if (a.medianT60 > 1.2f)   return photos[0];
+    if (a.medianT60 > 0.6f)   return photos[2];
+    return photos[1];
+}
+
 void LoadScreen::timerCallback()
 {
     repaint();
@@ -134,11 +146,13 @@ void LoadScreen::paint (juce::Graphics& g)
     if (status == RoomAudioProcessor::Status::empty) photoAlpha = 0.18f;
     if (status == RoomAudioProcessor::Status::analyzing) photoAlpha = 0.35f + 0.25f * std::sin (t * 4.0f);
     if (status == RoomAudioProcessor::Status::recording) photoAlpha = 0.3f;
-    if (photo.isValid())
+    if (const auto photo = photoFor (proc.getAnalysis()); photo.isValid())
     {
+        g.saveState();
+        g.reduceClipRegion (photoArea.toNearestInt());
         g.setOpacity (juce::jlimit (0.0f, 1.0f, photoAlpha));
         g.drawImage (photo, photoArea, juce::RectanglePlacement::fillDestination);
-        g.setOpacity (1.0f);
+        g.restoreState();
     }
     juce::ColourGradient fade (Colours::glass, 0.0f, photoArea.getY(), Colours::glass.withAlpha (0.0f), 0.0f, photoArea.getY() + 18.0f, false);
     g.setGradientFill (fade);
@@ -617,6 +631,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     consoleGrain = Hw::grain ((int) consoleArea.getWidth(), (int) consoleArea.getHeight(), false, 7);
     blackGrain = Hw::grain ((int) advancedArea.getWidth(), (int) advancedArea.getHeight(), true, 11);
+    paperTexture = Hw::asset ("tex_paper.jpg");    // painted steel and powder coat, made in Higgsfield
+    blackTexture = Hw::asset ("tex_black.jpg");
 
     // --- Top bar ---
     content.addAndMakeVisible (presetBar);
@@ -803,8 +819,26 @@ void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
         g.fillRoundedRectangle (r.translated (0.0f, 12.0f).expanded (5.0f), corner + 5.0f);
         juce::ColourGradient body (black ? juce::Colour (0xff1c1c1c) : Colours::paper.brighter (0.03f), 0.0f, r.getY(),
                                    black ? juce::Colour (0xff0d0d0d) : Colours::paper.darker (0.04f), 0.0f, r.getBottom(), false);
-        g.setGradientFill (body);
-        g.fillRoundedRectangle (r, corner);
+        if (const auto& tex = black ? blackTexture : paperTexture; tex.isValid())
+        {
+            g.setTiledImageFill (tex, 0, 0, 1.0f);
+            g.fillRoundedRectangle (r, corner);
+            if (black)   // calm the powder coat down: it should read as matte, not rough
+            {
+                g.setColour (juce::Colour (0xff111111).withAlpha (0.55f));
+                g.fillRoundedRectangle (r, corner);
+            }
+            // light falls off a touch toward the bottom
+            juce::ColourGradient shade (juce::Colours::white.withAlpha (black ? 0.03f : 0.10f), 0.0f, r.getY(),
+                                        juce::Colours::black.withAlpha (black ? 0.30f : 0.06f), 0.0f, r.getBottom(), false);
+            g.setGradientFill (shade);
+            g.fillRoundedRectangle (r, corner);
+        }
+        else
+        {
+            g.setGradientFill (body);
+            g.fillRoundedRectangle (r, corner);
+        }
         g.setOpacity (1.0f);
         g.drawImage (black ? blackGrain : consoleGrain, r, juce::RectanglePlacement::stretchToFit);
         g.setColour (black ? juce::Colours::white.withAlpha (0.07f) : juce::Colours::white.withAlpha (0.6f));

@@ -51,7 +51,8 @@ private:
 
     RoomAudioProcessor& proc;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Image photo;
+    juce::Image photos[5];   // hall, booth, chamber, objects, tape (made in Higgsfield)
+    juce::Image photoFor (const room::RoomAnalysis&) const;
     bool hovering = false;
 };
 
@@ -176,7 +177,7 @@ private:
     const juce::Rectangle<float> advancedArea { 920.0f, 20.0f, 260.0f, 560.0f };
     const juce::Rectangle<float> finishArea { 60.0f, 614.0f, 900.0f, 246.0f };
     juce::Rectangle<int> bays[3];
-    juce::Image consoleGrain, blackGrain;
+    juce::Image consoleGrain, blackGrain, paperTexture, blackTexture;
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };

@@ -27,6 +27,9 @@ namespace Hw
     /** A tiny wireframe room (a box with a doorway), drawn like an engraving. */
     void drawTinyRoom (juce::Graphics&, juce::Point<float> centre, float size, juce::Colour);
 
+    /** An embedded image asset (cached). Invalid if it isn't there. */
+    juce::Image asset (const char* fileName);
+
     /** Painted-steel / paper grain, pre-rendered (cached by size). */
     juce::Image grain (int width, int height, bool dark, int seed = 3);
 }

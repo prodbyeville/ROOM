@@ -84,7 +84,8 @@ juce_add_binary_data(ROOM_FactoryPresets
 file(GLOB ROOM_UI_ASSETS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.otf"
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.ttf"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.jpg")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.jpg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.png")
 juce_add_binary_data(ROOM_UiAssets
     HEADER_NAME UiAssets.h
     NAMESPACE UiAssets
