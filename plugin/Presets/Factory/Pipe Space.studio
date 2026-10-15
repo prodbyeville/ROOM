@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Pipe Space" author="Eville" type="FX" styles="Metallic,Wide,Experimental"
              notes="The pipe, stretched and wide." madeFor="FX,Synth" roomName="Metal Pipe"
-             created="2026-10-14T11:32:55.696Z">
+             created="2026-10-15T19:28:16.221Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.5"/>

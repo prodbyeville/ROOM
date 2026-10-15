@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Glass Plate" author="Eville" type="Plate" styles="Bright,Clean,Wide"
              notes="Smooth, bright, all space." madeFor="Vocals,Synth" roomName="Clap Hall"
-             created="2026-10-14T11:32:48.175Z">
+             created="2026-10-15T19:28:10.780Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.8999999761581421"/>

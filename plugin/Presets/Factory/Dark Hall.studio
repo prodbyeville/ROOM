@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Dark Hall" author="Eville" type="Hall" styles="Dark,Ambient"
              notes="The hall, through old tape." madeFor="Vocals,Guitar" roomName="Clap Hall"
-             created="2026-10-14T11:32:45.832Z">
+             created="2026-10-15T19:28:08.831Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.5"/>

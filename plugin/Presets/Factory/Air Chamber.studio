@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Air Chamber" author="Eville" type="Chamber"
              styles="Bright,Airy,Clean" notes="Shorter and brighter than the hall."
-             madeFor="Drums,Vocals" roomName="Clap Hall" created="2026-10-14T11:32:47.027Z">
+             madeFor="Drums,Vocals" roomName="Clap Hall" created="2026-10-15T19:28:09.769Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.4000000059604645"/>
     <PARAM id="balance" value="0.5"/>

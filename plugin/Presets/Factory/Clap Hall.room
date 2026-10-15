@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <ROOM version="2" name="Clap Hall" author="Eville" type="Hall" styles="Ambient,Wide,Airy"
-      notes="A handclap in a big, open hall." created="2026-10-14T11:32:37.459Z">
+      notes="A handclap in a big, open hall." created="2026-10-15T19:27:42.348Z">
   <ROOM_ANALYSIS valid="1" sourceName="Clap Hall" origin="Factory" durationS="3.5"
                  bandEdgesHz="60.0000,85.0696,120.6139,171.0096,242.4619,343.7688,487.4045,691.0549,979.7959,1389.1804,1969.6167,2792.5745,3959.3855,5613.7212,7959.2817,11284.8799,16000.0000"
                  bandCentersHz="71.4435,101.2945,143.6180,203.6254,288.7054,409.3342,580.3648,822.8565,1166.6676,1654.1321,2345.2720,3325.1885,4714.5400,6684.3989,9477.3174,13437.1904"

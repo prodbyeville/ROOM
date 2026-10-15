@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Bottle Lo-Fi" author="Eville" type="Lo-Fi"
              styles="Vintage,Metallic" notes="The bottle, on a worn tape."
-             madeFor="Drums,Keys" roomName="Glass Bottle" created="2026-10-14T11:32:52.996Z">
+             madeFor="Drums,Keys" roomName="Glass Bottle" created="2026-10-15T19:28:14.288Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.5"/>

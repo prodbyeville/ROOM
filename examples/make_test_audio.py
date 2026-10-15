@@ -181,8 +181,9 @@ def _t60_curve(points):
     return lambda f: float(np.interp(np.log2(f), lf, ts_))
 
 
-def diffuse_tail(n, t60_at, delay_s=0.0, bands=26):
-    """Noise in third-ish octave bands, each fading at its own T60."""
+def diffuse_tail(n, t60_at, delay_s=0.0, bands=26, tilt=0.0):
+    """Noise in third-ish octave bands, each fading at its own T60. Pink like a
+    real room (equal energy per octave), plus `tilt` dB per octave (+ brighter)."""
     t = np.arange(n) / SR
     edges = np.geomspace(40, 18000, bands + 1)
     tail = np.zeros(n)
@@ -191,7 +192,8 @@ def diffuse_tail(n, t60_at, delay_s=0.0, bands=26):
         sos = signal.butter(3, [lo, min(hi, 0.45 * SR)], btype="bandpass", fs=SR, output="sos")
         band = signal.sosfilt(sos, lib_rng.standard_normal(n))
         band *= np.exp(-6.91 * np.maximum(t - delay_s, 0.0) / max(0.03, t60_at(fc)))
-        tail += band
+        weight = (fc / 1000.0) ** -0.5 * 10 ** (tilt * np.log2(fc / 1000.0) / 20.0)
+        tail += band * weight
     # build-up: diffuse energy rises over the first few ms after the delay
     rise = np.clip((t - delay_s) / 0.012, 0.0, 1.0)
     return tail * rise
@@ -234,7 +236,7 @@ def thump(n, f0=90.0):
 
 
 def space(dur, dims, t60_points, er_gain=0.5, tail_gain=0.25, absorb=0.3, exciter=clap,
-          src=None, mic=None, extra=None):
+          src=None, mic=None, extra=None, tilt=0.0):
     """A recording of an exciter in a shoebox space."""
     n = int(dur * SR)
     src = src or [dims[0] * 0.3, dims[1] * 0.4, min(1.5, dims[2] * 0.5)]
@@ -243,7 +245,8 @@ def space(dur, dims, t60_points, er_gain=0.5, tail_gain=0.25, absorb=0.3, excite
     direct_d = np.sqrt(sum((a - b) ** 2 for a, b in zip(src, mic)))
     er = early_reflections(n, dims, src, mic, absorb=absorb) * er_gain
     first = direct_d / C_AIR
-    tail = diffuse_tail(n, _t60_curve(t60_points), delay_s=first + 0.004) * tail_gain
+    tail = diffuse_tail(n, _t60_curve(t60_points), delay_s=first + 0.004, tilt=tilt) * tail_gain
+    tail /= max(1e-9, np.sqrt(np.mean(tail[: int(0.2 * SR)] ** 2)) * 8)   # pink weighting changes the scale
     ir = er + tail
     ir[0] += 1.0 / max(direct_d, 0.3)
     if extra is not None:
@@ -288,31 +291,31 @@ def flutter(period_s, decay_s, gain=0.5):
 def stairwell():
     """Concrete stairwell: tall, hard, a flutter between the walls."""
     return space(4.0, [3.0, 3.2, 14.0], [(60, 2.8), (500, 2.4), (4000, 1.5), (16000, 0.7)],
-                 er_gain=0.6, tail_gain=0.3, absorb=0.12, extra=flutter(0.0175, 1.2, 0.35))
+                 er_gain=0.6, tail_gain=0.3, absorb=0.12, extra=flutter(0.0175, 1.2, 0.35), tilt=0.5)
 
 
 def tiled_bathroom():
     """Small, hard and bright: tiles everywhere."""
     return space(2.5, [2.2, 2.6, 2.4], [(60, 0.9), (500, 1.2), (4000, 1.1), (16000, 0.6)],
-                 er_gain=0.8, tail_gain=0.35, absorb=0.06)
+                 er_gain=0.8, tail_gain=0.35, absorb=0.06, tilt=1.5)
 
 
 def concrete_garage():
     """Wide, low, concrete: long and a little metallic."""
     return space(4.5, [30.0, 16.0, 2.6], [(60, 3.2), (500, 2.6), (4000, 1.8), (16000, 0.8)],
-                 er_gain=0.5, tail_gain=0.28, absorb=0.1, extra=flutter(0.0152, 0.9, 0.3))
+                 er_gain=0.5, tail_gain=0.28, absorb=0.1, extra=flutter(0.0152, 0.9, 0.3), tilt=0.0)
 
 
 def cathedral():
     """Stone nave: huge, slow, dark at the top."""
     return space(9.0, [26.0, 64.0, 30.0], [(60, 7.0), (500, 5.5), (4000, 3.0), (16000, 1.2)],
-                 er_gain=0.25, tail_gain=0.3, absorb=0.08)
+                 er_gain=0.25, tail_gain=0.3, absorb=0.08, tilt=-7.0)
 
 
 def wooden_closet():
     """A small cupboard of wood and clothes: warm and short."""
     return space(1.2, [1.0, 1.3, 2.4], [(60, 0.35), (500, 0.25), (4000, 0.12), (16000, 0.05)],
-                 er_gain=0.7, tail_gain=0.2, absorb=0.45)
+                 er_gain=0.7, tail_gain=0.2, absorb=0.45, tilt=-6.5)
 
 
 def car_interior():
@@ -321,37 +324,37 @@ def car_interior():
         t = np.arange(n) / SR
         return 0.15 * np.sin(2 * np.pi * 118 * t) * np.exp(-6.91 * t / 0.25)
     return space(1.0, [1.5, 2.0, 1.2], [(60, 0.22), (500, 0.15), (4000, 0.08), (16000, 0.04)],
-                 er_gain=0.8, tail_gain=0.15, absorb=0.5, extra=boom)
+                 er_gain=0.8, tail_gain=0.15, absorb=0.5, extra=boom, tilt=-1.5)
 
 
 def tunnel():
     """Underpass: long, with slap echoes running away from you."""
     return space(5.0, [4.0, 80.0, 4.0], [(60, 3.0), (500, 2.6), (4000, 1.6), (16000, 0.6)],
-                 er_gain=0.45, tail_gain=0.25, absorb=0.1, extra=flutter(0.21, 2.2, 0.45))
+                 er_gain=0.45, tail_gain=0.25, absorb=0.1, extra=flutter(0.21, 2.2, 0.45), tilt=-0.5)
 
 
 def empty_gym():
     """A school gym: big, bright, a ringing flutter between the walls."""
     return space(4.0, [30.0, 20.0, 9.0], [(60, 2.2), (500, 2.0), (4000, 1.6), (16000, 0.8)],
-                 er_gain=0.4, tail_gain=0.3, absorb=0.12, extra=flutter(0.026, 1.4, 0.3))
+                 er_gain=0.4, tail_gain=0.3, absorb=0.12, extra=flutter(0.026, 1.4, 0.3), tilt=0.8)
 
 
 def live_room():
     """A good studio live room: even, short, open."""
     return space(2.0, [8.0, 6.0, 3.6], [(60, 0.75), (500, 0.6), (4000, 0.5), (16000, 0.3)],
-                 er_gain=0.45, tail_gain=0.22, absorb=0.3)
+                 er_gain=0.45, tail_gain=0.22, absorb=0.3, tilt=-0.5)
 
 
 def vocal_booth():
     """A treated booth: almost nothing, a little wood."""
     return space(0.8, [1.8, 1.8, 2.2], [(60, 0.14), (500, 0.1), (4000, 0.06), (16000, 0.03)],
-                 er_gain=0.35, tail_gain=0.08, absorb=0.7)
+                 er_gain=0.35, tail_gain=0.08, absorb=0.7, tilt=-1.5)
 
 
 def init_room():
     """A plain, short room: the neutral starting point."""
     return space(1.8, [5.0, 4.0, 3.0], [(60, 0.55), (500, 0.5), (4000, 0.38), (16000, 0.2)],
-                 er_gain=0.4, tail_gain=0.22, absorb=0.3)
+                 er_gain=0.4, tail_gain=0.22, absorb=0.3, tilt=0.0)
 
 
 # --- objects --------------------------------------------------------------
@@ -379,18 +382,25 @@ def piano_body():
 
 
 def spring_tank():
-    """A spring reverb tank, kicked: dispersive chirps that repeat."""
+    """A spring reverb tank, kicked: falling "boing" chirps that repeat and fade."""
     n = int(3.0 * SR)
     x = np.zeros(n)
+    m = int(0.03 * SR)
+    tc = np.arange(m) / SR
+    # one echo: a chirp sweeping from 3.5 kHz down to 250 Hz (dispersion), short fade
+    f_inst = 250 + 3250 * np.exp(-tc / 0.008)
+    chirp = np.sin(2 * np.pi * np.cumsum(f_inst) / SR) * np.exp(-tc / 0.012)
     period = 0.037
     k = 0
-    while int(k * period * SR) < n:
-        x[int(k * period * SR)] += np.exp(-6.91 * k * period / 2.5) * (1.0 if k == 0 else 0.7)
+    while int(k * period * SR) + m < n:
+        at = int(k * period * SR + lib_rng.uniform(-0.002, 0.002) * SR * (k > 0))
+        at = max(0, at)
+        g = np.exp(-6.91 * k * period / 2.4) * (1.0 if k == 0 else 0.75)
+        x[at:at + m] += g * chirp
         k += 1
-    for _ in range(60):   # a chain of allpasses smears each tick into a chirp
-        x = signal.lfilter([-0.6, 1.0], [1.0, -0.6], x)
-    sos = signal.butter(2, [120, 5000], btype="bandpass", fs=SR, output="sos")
+    sos = signal.butter(2, [150, 5000], btype="bandpass", fs=SR, output="sos")
     x = signal.sosfilt(sos, x)
+    x += 0.15 * signal.fftconvolve(x, diffuse_tail(int(1.2 * SR), _t60_curve([(100, 1.6), (4000, 0.9)])))[:n]
     x += 1e-4 * lib_rng.standard_normal(n)
     return x / np.max(np.abs(x)) * 0.8
 

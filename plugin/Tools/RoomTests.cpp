@@ -1093,6 +1093,143 @@ namespace
         return nullptr;
     }
 
+    /** A test phrase: kick / snare at 120 bpm and a saw melody, 4 s, stereo. */
+    juce::AudioBuffer<float> testPhrase (double sr)
+    {
+        const int n = (int) (4.0 * sr);
+        juce::AudioBuffer<float> b (2, n);
+        b.clear();
+        juce::Random rng (3);
+        const double beat = 0.5;
+        for (int k = 0; k < 8; ++k)
+        {
+            const int at = (int) (k * beat * sr);
+            for (int i = 0; i < (int) (0.3 * sr) && at + i < n; ++i)
+            {
+                const auto t = i / sr;
+                float v = 0.0f;
+                if (k % 2 == 0) v += (float) (std::sin (2.0 * juce::MathConstants<double>::pi * (50.0 + 90.0 * std::exp (-t * 30.0)) * t) * std::exp (-t * 9.0));
+                else            v += (rng.nextFloat() * 2.0f - 1.0f) * (float) std::exp (-t * 22.0) * 0.6f;
+                for (int c = 0; c < 2; ++c) b.addSample (c, at + i, v * 0.5f);
+            }
+        }
+        const double notes[] = { 220.0, 261.63, 329.63, 293.66, 220.0, 196.0, 246.94, 220.0 };
+        for (int k = 0; k < 8; ++k)
+        {
+            const int at = (int) (k * beat * sr);
+            for (int i = 0; i < (int) (beat * sr) && at + i < n; ++i)
+            {
+                const auto t = i / sr;
+                double saw = 0.0;
+                for (int h = 1; h <= 10; ++h) saw += std::sin (2.0 * juce::MathConstants<double>::pi * notes[k] * h * t) / h;
+                const auto env = std::min (1.0, t / 0.01) * std::exp (-t * 2.5);
+                for (int c = 0; c < 2; ++c) b.addSample (c, at + i, (float) (saw * env * 0.18));
+            }
+        }
+        return b;
+    }
+
+    struct PresetLevels { float peakDb, rmsDiffDb, tailDb; bool finite; };
+
+    /** Render the test phrase (plus 9 s of silence) through a factory STUDIO. */
+    PresetLevels measurePreset (const juce::String& key, juce::AudioBuffer<float>* keep = nullptr)
+    {
+        const double sr = 48000.0;
+        const int block = 512;
+        RoomAudioProcessor p;
+        p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_level_presets"));
+        p.setPlayConfigDetails (2, 2, sr, block);
+        p.prepareToPlay (sr, block);
+        auto& lib = p.getLibrary();
+        if (auto* e = lib.find (key))
+            p.applyPreset (lib.loadPreset (*e), e->key);
+        waitForAnalysis (p);
+        juce::Thread::sleep (500);
+
+        const auto dry = testPhrase (sr);
+        const int total = dry.getNumSamples() + (int) (9.0 * sr);
+        juce::AudioBuffer<float> out (2, total);
+        out.clear();
+        for (int c = 0; c < 2; ++c) out.copyFrom (c, 0, dry, c, 0, dry.getNumSamples());
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const auto m = std::min (block, total - pos);
+            juce::AudioBuffer<float> part (out.getArrayOfWritePointers(), 2, pos, m);
+            p.processBlock (part, midi);
+        }
+        const auto lat = p.getLatencySamples();
+        PresetLevels r {};
+        r.finite = true;
+        float peak = 0.0f;
+        double eWet = 0.0, eDry = 0.0, eTail = 0.0, eBody = 0.0;
+        const int dn = dry.getNumSamples();
+        for (int c = 0; c < 2; ++c)
+        {
+            for (int i = 0; i < total; ++i)
+            {
+                const auto v = out.getSample (c, i);
+                r.finite = r.finite && std::isfinite (v);
+                peak = std::max (peak, std::abs (v));
+                if (i >= lat && i < dn + lat) eWet += (double) v * v;
+                if (i >= lat && i < lat + (int) sr) eBody += (double) v * v;
+                if (i >= dn + lat + (int) (8.0 * sr)) eTail += (double) v * v;
+            }
+            for (int i = 0; i < dn; ++i) eDry += (double) dry.getSample (c, i) * dry.getSample (c, i);
+        }
+        r.peakDb = juce::Decibels::gainToDecibels (peak, -120.0f);
+        r.rmsDiffDb = (float) (10.0 * std::log10 ((eWet + 1e-12) / (eDry + 1e-12)));
+        const auto tailLen = (double) (total - (dn + lat + (int) (8.0 * sr)));
+        r.tailDb = (float) (10.0 * std::log10 ((eTail / std::max (1.0, tailLen) + 1e-20) / (eBody / sr + 1e-20)));
+        if (keep != nullptr) *keep = out;
+        return r;
+    }
+
+    void testFactoryPresets (const juce::File& root)
+    {
+        std::cout << "Factory library\n";
+        RoomAudioProcessor p;
+        p.setPresetRoot (root);
+        auto& lib = p.getLibrary();
+        int rooms = 0, studios = 0;
+        bool allLevels = true, allFinite = true, allPeaks = true, allTails = true;
+        juce::StringArray bad;
+        for (auto& e : lib.getEntries())
+            if (e.factory) ++studios;
+        for (auto& e : p.getRoomLibrary().getEntries())
+            if (e.factory) ++rooms;
+        check (rooms >= 20 && studios >= 40, "the factory library has 20+ ROOMS and 40+ STUDIOS");
+        for (auto& e : lib.getEntries())
+        {
+            if (! e.factory) continue;
+            const auto r = measurePreset (e.key);
+            allFinite = allFinite && r.finite;
+            if (r.peakDb > -0.1f) { allPeaks = false; bad.add (e.meta.name + " peak " + juce::String (r.peakDb, 1)); }
+            if (std::abs (r.rmsDiffDb) > 5.0f) { allLevels = false; bad.add (e.meta.name + " level " + juce::String (r.rmsDiffDb, 1)); }
+            if (r.tailDb > -60.0f) { allTails = false; bad.add (e.meta.name + " tail " + juce::String (r.tailDb, 1)); }
+        }
+        check (allFinite, "every STUDIO's output stays finite");
+        check (allPeaks, "no STUDIO clips the test phrase");
+        check (allLevels, "every STUDIO is within 5 dB of the dry level (output knob untouched)");
+        check (allTails, "every STUDIO's tail dies away (60 dB down 8 s after the music stops)");
+        for (auto& b : bad) std::cout << "    " << b << "\n";
+    }
+
+    /** --levels: the numbers behind testFactoryPresets, one line per STUDIO. */
+    int levels()
+    {
+        RoomAudioProcessor p;
+        p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_level_presets"));
+        std::printf ("%-20s %8s %10s %8s\n", "studio", "peak dB", "level dB", "tail dB");
+        for (auto& e : p.getLibrary().getEntries())
+            if (e.factory)
+            {
+                const auto r = measurePreset (e.key);
+                std::printf ("%-20s %8.1f %10.1f %8.1f%s\n", e.meta.name.toRawUTF8(), r.peakDb, r.rmsDiffDb, r.tailDb, r.finite ? "" : "  NaN!");
+            }
+        return 0;
+    }
+
     void testSuppressorIdle()
     {
         std::cout << "Auto EQ idle path\n";
@@ -1628,6 +1765,8 @@ int main (int argc, char* argv[])
         return screenshot (args);
     if (args[0] == "--bench" || args[0] == "--bench-rt")
         return bench (args);
+    if (args[0] == "--levels")
+        return levels();
 
     const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
                           .getChildFile ("room_tests_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)))
@@ -1659,6 +1798,7 @@ int main (int argc, char* argv[])
     testRoomsAndStudios (root, roomSource);
     testConvolver();
     testSuppressorIdle();
+    testFactoryPresets (root);
     testModulationUi (root);
 
     root.getParentDirectory().deleteRecursively();

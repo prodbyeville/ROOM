@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Glass Bottle" author="Eville" type="Object"
              styles="Bright,Metallic" notes="Rings at the bottle's notes."
-             madeFor="FX,Keys" roomName="Glass Bottle" created="2026-10-14T11:32:51.695Z">
+             madeFor="FX,Keys" roomName="Glass Bottle" created="2026-10-15T19:28:13.415Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.5"/>

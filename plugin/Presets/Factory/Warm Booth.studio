@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Warm Booth" author="Eville" type="Small Space"
              styles="Warm,Tight" notes="Close and warm." madeFor="Vocals,Bass"
-             roomName="Small Room" created="2026-10-14T11:32:50.451Z">
+             roomName="Small Room" created="2026-10-15T19:28:12.514Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
     <PARAM id="balance" value="0.5"/>

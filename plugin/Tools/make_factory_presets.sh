@@ -78,7 +78,7 @@ studio concrete_garage  "Concrete Garage" "Garage"           Room          "Wide
 studio concrete_garage  "Concrete Garage" "Garage Band"      Room          "Dirty,Vintage"              "Guitar,Bass"        "The garage, after a few too many takes."  --mix 0.35 --tape 0.5 --param damping=0.3
 studio cathedral        "Cathedral"       "Cathedral"        Hall          "Ambient,Dark,Wide"          "Vocals,Keys,Synth"  "Huge and slow."                           --mix 0.4 --param preDelay=40
 studio cathedral        "Cathedral"       "Choir Loft"       Hall          "Ambient,Airy"               "Vocals"             "The nave, brighter and ducked."           --mix 0.4 --param preDelay=60,duck=0.4,damping=-0.3
-studio cathedral        "Cathedral"       "Stone Pad"        FX            "Ambient,Experimental"       "Synth,FX"           "Everything turned into a pad."            --mix 0.7 --intensity 1.6 --space 1.8 --param size=1.6
+studio cathedral        "Cathedral"       "Stone Pad"        FX            "Ambient,Experimental"       "Synth,FX"           "Everything turned into a pad."            --mix 0.45 --intensity 1.3 --space 1.3 --param size=1.6
 studio wooden_closet    "Wooden Closet"   "Closet"           "Small Space" "Warm,Tight"                 "Vocals,Bass"        "Close, warm, a little boxy."              --mix 0.35
 studio wooden_closet    "Wooden Closet"   "Acoustic Box"     "Small Space" "Warm,Clean"                 "Guitar,Keys"        "Body for dry acoustic parts."             --mix 0.3 --eq 1:180:2:0.71
 studio car_interior     "Car Interior"    "Parked Car"       "Small Space" "Tight,Dirty"                "Drums,Bass"         "Boxy and close."                          --mix 0.35

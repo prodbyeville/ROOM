@@ -2,7 +2,7 @@
 
 <ROOM_PRESET version="1" name="Worn Tape Room" author="Eville" type="Lo-Fi"
              styles="Vintage,Dirty" notes="Old tape, quiet room, tamed highs."
-             madeFor="Bus/Master,Drums" roomName="Room Tone" created="2026-10-14T11:32:58.377Z">
+             madeFor="Bus/Master,Drums" roomName="Room Tone" created="2026-10-15T19:28:18.158Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.300000011920929"/>
     <PARAM id="balance" value="0.5"/>
