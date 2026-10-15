@@ -1215,6 +1215,37 @@ namespace
         for (auto& b : bad) std::cout << "    " << b << "\n";
     }
 
+    /** --render-presets DIR: every factory STUDIO on the test phrase, one WAV each (for listening). */
+    int renderPresets (const juce::File& dir)
+    {
+        dir.createDirectory();
+        RoomAudioProcessor p;
+        p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_level_presets"));
+        juce::WavAudioFormat wav;
+        {
+            auto dry = testPhrase (48000.0);
+            auto f = dir.getChildFile ("_dry.wav");
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> os (f.createOutputStream());
+            if (auto w = wav.createWriterFor (os, juce::AudioFormatWriterOptions{}.withSampleRate (48000).withNumChannels (2).withBitsPerSample (16)))
+                w->writeFromAudioSampleBuffer (dry, 0, dry.getNumSamples());
+        }
+        for (auto& e : p.getLibrary().getEntries())
+            if (e.factory)
+            {
+                juce::AudioBuffer<float> out;
+                measurePreset (e.key, &out);
+                const int len = std::min (out.getNumSamples(), (int) (7.5 * 48000));   // the phrase and 3.5 s of tail
+                auto f = dir.getChildFile (e.meta.name + ".wav");
+                f.deleteFile();
+                std::unique_ptr<juce::OutputStream> os (f.createOutputStream());
+                if (auto w = wav.createWriterFor (os, juce::AudioFormatWriterOptions{}.withSampleRate (48000).withNumChannels (2).withBitsPerSample (16)))
+                    w->writeFromAudioSampleBuffer (out, 0, len);
+                std::cout << e.meta.name << "\n";
+            }
+        return 0;
+    }
+
     /** --levels: the numbers behind testFactoryPresets, one line per STUDIO. */
     int levels()
     {
@@ -1767,6 +1798,8 @@ int main (int argc, char* argv[])
         return bench (args);
     if (args[0] == "--levels")
         return levels();
+    if (args[0] == "--render-presets" && args.size() > 1)
+        return renderPresets (juce::File (args[1]));
 
     const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
                           .getChildFile ("room_tests_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)))
