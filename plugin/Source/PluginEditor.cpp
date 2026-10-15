@@ -32,15 +32,10 @@ namespace
 //==============================================================================
 // Load screen
 
-int LoadScreen::conceptStyle = juce::SystemStats::getEnvironmentVariable ("ROOM_LOAD_STYLE", "0").getIntValue();
-
 LoadScreen::LoadScreen (RoomAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setTooltip ("click for ROOMS, drop a sound here, right-click for more");
-    const char* files[5] = { "room_hall.jpg", "room_booth.jpg", "room_chamber.jpg", "room_objects.jpg", "room_tape.jpg" };
-    for (int i = 0; i < 5; ++i)
-        photos[i] = Hw::asset (files[i]);
     startTimerHz (15);
 }
 
@@ -95,18 +90,6 @@ void LoadScreen::mouseUp (const juce::MouseEvent& e)
         onOpenLibrary();
 }
 
-juce::Image LoadScreen::photoFor (const room::RoomAnalysis& a) const
-{
-    // A glimpse that fits the room: hiss and hum = the tape room, ringing
-    // tonal sounds = objects, then by how long the room rings.
-    if (! a.valid)            return photos[0];
-    if (a.steady)             return photos[4];
-    if (a.balance < 0.42f && a.peaks.size() >= 2) return photos[3];
-    if (a.medianT60 > 1.2f)   return photos[0];
-    if (a.medianT60 > 0.6f)   return photos[2];
-    return photos[1];
-}
-
 void LoadScreen::timerCallback()
 {
     repaint();
@@ -118,13 +101,6 @@ void LoadScreen::paint (juce::Graphics& g)
     auto r = glass.reduced (12.0f, 8.0f);
     const auto status = proc.getStatus();
     const auto t = (float) (juce::Time::getMillisecondCounter() % 100000) * 0.001f;
-
-    if (conceptStyle == 4 && status == RoomAudioProcessor::Status::ready && proc.getAnalysis().valid)
-    {
-        paintConcept (g, glass.withTrimmedTop (-8.0f), t);
-        Hw::drawScreenOverlay (g, glass);
-        return;
-    }
 
     // Title row: the room's name (or what's happening)
     juce::String title;
@@ -149,32 +125,14 @@ void LoadScreen::paint (juce::Graphics& g)
     g.drawHorizontalLine (juce::roundToInt (r.getY()), r.getX(), r.getRight());
     r.removeFromTop (6.0f);
 
-    // A glimpse of the room
-    const auto photoArea = juce::Rectangle<float> (glass.getX(), r.getY(), glass.getWidth(), glass.getBottom() - r.getY());
-    if (conceptStyle > 0 && status != RoomAudioProcessor::Status::recording && status != RoomAudioProcessor::Status::empty)
-        paintConcept (g, photoArea, t);
-    else if (conceptStyle == 0)
-    {
-    float photoAlpha = 0.85f;
-    if (status == RoomAudioProcessor::Status::empty) photoAlpha = 0.18f;
-    if (status == RoomAudioProcessor::Status::analyzing) photoAlpha = 0.35f + 0.25f * std::sin (t * 4.0f);
-    if (status == RoomAudioProcessor::Status::recording) photoAlpha = 0.3f;
-    if (const auto photo = photoFor (proc.getAnalysis()); photo.isValid())
-    {
-        g.saveState();
-        g.reduceClipRegion (photoArea.toNearestInt());
-        g.setOpacity (juce::jlimit (0.0f, 1.0f, photoAlpha));
-        g.drawImage (photo, photoArea, juce::RectanglePlacement::fillDestination);
-        g.restoreState();
-    }
-    juce::ColourGradient fade (Colours::glass, 0.0f, photoArea.getY(), Colours::glass.withAlpha (0.0f), 0.0f, photoArea.getY() + 18.0f, false);
-    g.setGradientFill (fade);
-    g.fillRect (photoArea.withHeight (18.0f));
-    }
+    // The room's fingerprint: decay per band over time
+    const auto bodyArea = juce::Rectangle<float> (glass.getX(), r.getY(), glass.getWidth(), glass.getBottom() - r.getY());
+    if (status != RoomAudioProcessor::Status::recording && status != RoomAudioProcessor::Status::empty)
+        paintFingerprint (g, bodyArea, t, status == RoomAudioProcessor::Status::analyzing);
 
     if (status == RoomAudioProcessor::Status::recording)
     {
-        auto meter = photoArea.reduced (14.0f, 0.0f).withHeight (4.0f).withY (photoArea.getCentreY());
+        auto meter = bodyArea.reduced (14.0f, 0.0f).withHeight (4.0f).withY (bodyArea.getCentreY());
         g.setColour (Colours::graphite);
         g.fillRoundedRectangle (meter, 2.0f);
         const auto lvl = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (proc.getRecordLevel(), -60.0f) + 60.0f) / 60.0f);
@@ -188,7 +146,7 @@ void LoadScreen::paint (juce::Graphics& g)
     {
         g.setColour (Colours::screenDim);
         g.setFont (Fonts::mono (10.5f));
-        g.drawFittedText ("(record one, or click for rooms)", photoArea.reduced (10.0f).toNearestInt(),
+        g.drawFittedText ("(record one, or click for rooms)", bodyArea.reduced (10.0f).toNearestInt(),
                           juce::Justification::centred, 2);
     }
 
@@ -200,189 +158,45 @@ void LoadScreen::paint (juce::Graphics& g)
     }
 }
 
-void LoadScreen::paintConcept (juce::Graphics& g, juce::Rectangle<float> body, float t)
+void LoadScreen::paintFingerprint (juce::Graphics& g, juce::Rectangle<float> body, float t, bool listening)
 {
+    // Lows at the bottom, highs at the top, time to the right. Each band glows
+    // white, then crimson, and goes dark as it dies away (60 dB down), so every
+    // room has its own shape.
     const auto& a = proc.getAnalysis();
     if (! a.valid)
         return;
     const auto nb = a.numBands();
     float maxT = 0.3f;
     for (auto v : a.bandT60s) maxT = std::max (maxT, v);
-    const auto span = juce::jlimit (0.6f, 6.0f, maxT * 1.1f);            // seconds shown
-    auto decayAt = [&] (int b, float sec) { return std::exp (-6.91f * sec / std::max (0.05f, a.bandT60s[(size_t) b])); };
-    juce::Random rng ((juce::int64) a.sourceName.hashCode());
-    auto inner = body.reduced (12.0f, 8.0f);
-    const auto decayWord = a.medianT60 < 0.6f ? "short" : a.medianT60 < 1.6f ? "medium" : "long";
-    float tilt = 0.0f;
-    if (a.toneCurveDb.size() > 2)
-        tilt = a.toneCurveDb.back() - a.toneCurveDb.front();
-    const auto toneWord = tilt > 3.0f ? "bright" : tilt < -3.0f ? "dark" : "neutral";
-    const auto caption = juce::String (a.steady ? "steady" : "a hit") + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "))
-                         + juce::String (a.durationS, 1) + " s" + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "))
+    const auto span = juce::jlimit (0.6f, 6.0f, maxT * 1.1f);   // seconds across the screen
+    const auto dot = juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
+    const auto caption = juce::String (a.steady ? "steady" : "a hit") + dot + juce::String (a.durationS, 1) + " s" + dot
                          + (a.origin.isEmpty() ? juce::String ("file") : a.origin.toLowerCase());
 
-    switch (conceptStyle)
-    {
-        case 1:   // decay print: the room's impulse, drawn like a waveform
+    auto inner = body.reduced (12.0f, 8.0f);
+    auto cap = inner.removeFromBottom (14.0f);
+    auto area = inner.withTrimmedBottom (2.0f);
+    const int cols = 40;
+    const auto cw = area.getWidth() / (float) cols, rh = area.getHeight() / (float) std::max (1, nb);
+    const auto sweep = listening ? std::fmod (t * 0.6f, 1.0f) : 2.0f;   // listening: a column of light runs across
+    for (int b = 0; b < nb; ++b)
+        for (int c = 0; c < cols; ++c)
         {
-            auto area = inner.withTrimmedBottom (16.0f);
-            const auto mid = area.getCentreY();
-            const int bars = (int) (area.getWidth() / 2.0f);
-            for (int i = 0; i < bars; ++i)
-            {
-                const auto x = area.getX() + (float) i * 2.0f;
-                const auto sec = span * (float) i / (float) bars;
-                float env = 0.0f;
-                for (int b = 0; b < nb; ++b) env += decayAt (b, sec);
-                env /= (float) std::max (1, nb);
-                env = a.steady ? 0.35f : juce::jlimit (0.0f, 1.0f, 1.0f + juce::Decibels::gainToDecibels (env, -100.0f) / 48.0f);   // dB scale: the tail stays readable
-                const auto n = 0.45f + 0.55f * rng.nextFloat();
-                const auto h = area.getHeight() * 0.48f * env * n;
-                const auto hot = sec < 0.05f;
-                g.setColour ((hot ? Colours::crimson.brighter (0.3f) : Colours::screenText).withAlpha (hot ? 1.0f : 0.35f + 0.55f * env));
-                g.fillRect (x, mid - h, 1.2f, std::max (0.8f, h * 2.0f));
-            }
-            // median decay marker
-            const auto mx = area.getX() + area.getWidth() * juce::jlimit (0.0f, 1.0f, a.medianT60 / span);
-            g.setColour (Colours::crimson.withAlpha (0.8f));
-            g.drawVerticalLine (juce::roundToInt (mx), area.getY(), area.getBottom());
-            g.setFont (Fonts::mono (10.5f));
-            g.drawText (juce::String (a.medianT60, 1) + " s", juce::Rectangle<float> (mx + 3.0f, area.getY(), 50.0f, 12.0f), juce::Justification::centredLeft);
-            g.setColour (Colours::screenDim);
-            g.drawText (caption, inner.removeFromBottom (14.0f), juce::Justification::centredLeft);
-            break;
+            const auto x = ((float) c + 0.5f) / (float) cols;
+            const auto v = juce::jlimit (0.0f, 1.0f, 1.0f - span * x / std::max (0.05f, a.bandT60s[(size_t) b]));
+            auto col = v > 0.5f ? Colours::crimson.interpolatedWith (Colours::screenText, (v - 0.5f) * 2.0f)
+                                : Colours::glass.interpolatedWith (Colours::crimson, v * 2.0f);
+            auto alpha = a.bandConfident[(size_t) b] ? 1.0f : 0.55f;   // bands it couldn't measure read fainter
+            if (listening)
+                alpha *= 0.35f + 0.65f * std::exp (-std::pow ((x - sweep) * 9.0f, 2.0f));
+            g.setColour (col.withAlpha (alpha));
+            g.fillRect (juce::Rectangle<float> (area.getX() + (float) c * cw, area.getBottom() - (float) (b + 1) * rh, cw, rh).reduced (0.6f));
         }
-        case 2:   // fingerprint: decay per band over time, as a glowing grid
-        {
-            auto area = inner.withTrimmedBottom (16.0f);
-            const int cols = 40;
-            const auto cw = area.getWidth() / (float) cols, rh = area.getHeight() / (float) std::max (1, nb);
-            for (int b = 0; b < nb; ++b)
-                for (int c = 0; c < cols; ++c)
-                {
-                    const auto sec = span * ((float) c + 0.5f) / (float) cols;
-                    const auto v = juce::jlimit (0.0f, 1.0f, 1.0f - sec / std::max (0.05f, a.bandT60s[(size_t) b]));   // 60 dB down = dark
-                    const auto col = v > 0.5f ? Colours::crimson.interpolatedWith (Colours::screenText, (v - 0.5f) * 2.0f)
-                                              : Colours::glass.interpolatedWith (Colours::crimson, v * 2.0f);
-                    g.setColour (col.withAlpha (a.bandConfident[(size_t) b] ? 1.0f : 0.6f));
-                    g.fillRect (juce::Rectangle<float> (area.getX() + (float) c * cw, area.getBottom() - (float) (b + 1) * rh, cw, rh).reduced (0.6f));
-                }
-            g.setFont (Fonts::mono (10.5f));
-            g.setColour (Colours::screenDim);
-            auto cap = inner.removeFromBottom (14.0f);
-            g.drawText (caption, cap, juce::Justification::centredLeft);
-            g.drawText (juce::String (span, 1) + " s", cap, juce::Justification::centredRight);
-            break;
-        }
-        case 3:   // sonar: decay per band as a radar shape, a sweep going round
-        {
-            auto area = inner;
-            const auto rad = std::min (area.getWidth(), area.getHeight()) * 0.5f;
-            const auto c = juce::Point<float> (area.getX() + rad + 4.0f, area.getCentreY());
-            g.setColour (Colours::screenDim.withAlpha (0.25f));
-            for (float k : { 0.33f, 0.66f, 1.0f })
-                g.drawEllipse (juce::Rectangle<float> (rad * 2.0f * k, rad * 2.0f * k).withCentre (c), 0.8f);
-            g.drawLine (c.x - rad, c.y, c.x + rad, c.y, 0.6f);
-            g.drawLine (c.x, c.y - rad, c.x, c.y + rad, 0.6f);
-            juce::Path shape;
-            for (int b = 0; b < nb; ++b)
-            {
-                const auto ang = juce::MathConstants<float>::twoPi * (float) b / (float) nb;
-                const auto len = rad * juce::jlimit (0.08f, 1.0f, a.bandT60s[(size_t) b] / maxT);
-                const juce::Point<float> pt (c.x + len * std::sin (ang), c.y - len * std::cos (ang));
-                if (b == 0) shape.startNewSubPath (pt); else shape.lineTo (pt);
-            }
-            shape.closeSubPath();
-            g.setColour (Colours::crimson.withAlpha (0.18f));
-            g.fillPath (shape);
-            Hw::strokeGlow (g, shape, Colours::screenText.withAlpha (0.85f), 1.1f, 0.6f);
-            const auto sweep = t * 1.6f;
-            for (int k = 0; k < 14; ++k)
-            {
-                const auto ang = sweep - (float) k * 0.05f;
-                g.setColour (Colours::crimson.withAlpha (0.5f * (1.0f - (float) k / 14.0f)));
-                g.drawLine (c.x, c.y, c.x + rad * std::sin (ang), c.y - rad * std::cos (ang), 1.2f);
-            }
-            auto text = area.withTrimmedLeft (rad * 2.0f + 18.0f);
-            g.setFont (Fonts::mono (11.0f));
-            auto row = [&] (const juce::String& k, const juce::String& v)
-            {
-                auto rr = text.removeFromTop (15.0f);
-                g.setColour (Colours::screenDim);
-                g.drawText (k, rr, juce::Justification::centredLeft);
-                g.setColour (Colours::screenText);
-                g.drawText (v, rr, juce::Justification::centredRight);
-            };
-            text = text.withSizeKeepingCentre (text.getWidth(), 47.0f);
-            row ("decay", juce::String (a.medianT60, 2) + " s");
-            row ("tone", toneWord);
-            row ("length", juce::String (a.durationS, 1) + " s");
-            break;
-        }
-        case 4:   // tape label: a cassette with the room's name written on it
-        {
-            auto card = body.reduced (12.0f, 12.0f);
-            g.setColour (Colours::screenText.withAlpha (0.55f));
-            g.drawRoundedRectangle (card, 6.0f, 1.0f);
-            auto label = card.reduced (10.0f, 8.0f);
-            g.setFont (Fonts::serif (20.0f));
-            g.setColour (Colours::screenText);
-            g.drawText (lower (a.sourceName), label.removeFromTop (22.0f), juce::Justification::centredLeft, true);
-            g.setColour (Colours::screenDim.withAlpha (0.4f));
-            g.drawHorizontalLine (juce::roundToInt (label.getY() + 1.0f), label.getX(), label.getRight());
-            label.removeFromTop (6.0f);
-            // window with two reels
-            auto win = label.removeFromTop (std::min (44.0f, label.getHeight() - 20.0f)).reduced (label.getWidth() * 0.14f, 0.0f);
-            label.removeFromTop (4.0f);
-            g.setColour (Colours::screenDim.withAlpha (0.5f));
-            g.drawRoundedRectangle (win, win.getHeight() * 0.5f, 1.0f);
-            const auto rr = win.getHeight() * 0.36f;
-            for (auto cx : { win.getX() + win.getHeight() * 0.5f, win.getRight() - win.getHeight() * 0.5f })
-            {
-                const juce::Point<float> c (cx, win.getCentreY());
-                g.setColour (Colours::screenText.withAlpha (0.8f));
-                g.drawEllipse (juce::Rectangle<float> (rr * 2.0f, rr * 2.0f).withCentre (c), 1.2f);
-                for (int k = 0; k < 3; ++k)
-                {
-                    const auto ang = t * 0.8f + (float) k * juce::MathConstants<float>::twoPi / 3.0f;
-                    g.drawLine (c.x, c.y, c.x + rr * 0.8f * std::sin (ang), c.y - rr * 0.8f * std::cos (ang), 1.2f);
-                }
-            }
-            g.setFont (Fonts::mono (10.5f));
-            g.setColour (Colours::crimson.brighter (0.2f));
-            g.drawText (juce::String (decayWord) + "  " + toneWord + "  " + juce::String (a.medianT60, 1) + " s", label, juce::Justification::centredLeft);
-            break;
-        }
-        case 5:   // data sheet: the numbers, set like a spec plate, and a row of band bars
-        {
-            auto area = inner;
-            g.setFont (Fonts::mono (11.0f));
-            auto cell = [&] (juce::Rectangle<float> rr, const juce::String& k, const juce::String& v)
-            {
-                g.setColour (Colours::screenDim);
-                g.drawText (k, rr.removeFromTop (13.0f), juce::Justification::centredLeft);
-                g.setColour (Colours::screenText);
-                g.setFont (Fonts::mono (15.0f));
-                g.drawText (v, rr.removeFromTop (18.0f), juce::Justification::centredLeft);
-                g.setFont (Fonts::mono (11.0f));
-            };
-            auto top = area.removeFromTop (34.0f);
-            const auto w = top.getWidth() / 3.0f;
-            cell (top.removeFromLeft (w), "decay", juce::String (a.medianT60, 2) + " s");
-            cell (top.removeFromLeft (w), "tone", toneWord);
-            cell (top, "length", juce::String (a.durationS, 1) + " s");
-            area.removeFromTop (8.0f);
-            const auto bw = area.getWidth() / (float) std::max (1, nb);
-            for (int b = 0; b < nb; ++b)
-            {
-                const auto h = area.getHeight() * a.bandT60s[(size_t) b] / maxT;
-                g.setColour ((b % 4 == 0 ? Colours::crimson : Colours::screenText).withAlpha (a.bandConfident[(size_t) b] ? 0.85f : 0.4f));
-                g.fillRect (area.getX() + bw * (float) b + bw * 0.25f, area.getBottom() - h, bw * 0.5f, h);
-            }
-            break;
-        }
-        default: break;
-    }
+    g.setFont (Fonts::mono (10.5f));
+    g.setColour (Colours::screenDim);
+    g.drawText (caption, cap, juce::Justification::centredLeft);
+    g.drawText (juce::String (span, 1) + " s", cap, juce::Justification::centredRight);
 }
 
 //==============================================================================

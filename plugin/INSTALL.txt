@@ -28,7 +28,9 @@ ROOM is one unit with three panels:
                shuffle (right-click to choose what moves), advanced (opens
                the advanced section on the right; the window grows to fit),
                wet, out, and bypass (the key glows red while ROOM is on)
-    load       the loaded room. click it for the ROOMS library, drop a sound
+    load       the loaded room and its fingerprint (lows at the bottom,
+               highs at the top, time to the right: each band fades as
+               it dies away). click it for the ROOMS library, drop a sound
                on it to build a room, right-click for more (sound file,
                clear). record: play / clap / sing into the track, press
                again to stop (max 30 s). save: keep this room as a ROOM.

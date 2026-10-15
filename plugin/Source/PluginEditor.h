@@ -25,8 +25,8 @@
 
 class RoomAudioProcessorEditor;
 
-/** The load screen: the loaded room's name and a glimpse of it. Drop a sound
-    here, click to open ROOMS, right-click for more. */
+/** The load screen: the loaded room's name and its fingerprint (decay per band
+    over time). Drop a sound here, click to open ROOMS, right-click for more. */
 class LoadScreen : public juce::Component,
                    public juce::SettableTooltipClient,
                    public juce::FileDragAndDropTarget,
@@ -51,15 +51,7 @@ private:
 
     RoomAudioProcessor& proc;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Image photos[5];   // hall, booth, chamber, objects, tape (made in Higgsfield)
-    juce::Image photoFor (const room::RoomAnalysis&) const;
-    void paintConcept (juce::Graphics&, juce::Rectangle<float> body, float t);
-
-public:
-    /** Load-screen design concepts (prototype, picked with ROOM_LOAD_STYLE): 0 photo,
-        1 decay print, 2 fingerprint, 3 sonar, 4 tape label, 5 data sheet. */
-    static int conceptStyle;
-private:
+    void paintFingerprint (juce::Graphics&, juce::Rectangle<float> body, float t, bool listening);
     bool hovering = false;
 };
 
