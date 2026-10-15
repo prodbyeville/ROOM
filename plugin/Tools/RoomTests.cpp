@@ -1198,7 +1198,7 @@ namespace
             if (e.factory) ++studios;
         for (auto& e : p.getRoomLibrary().getEntries())
             if (e.factory) ++rooms;
-        check (rooms >= 20 && studios >= 40, "the factory library has 20+ ROOMS and 40+ STUDIOS");
+        check (rooms >= 45 && studios >= 40, "the factory library has 45+ ROOMS and 40+ STUDIOS");
         for (auto& e : lib.getEntries())
         {
             if (! e.factory) continue;

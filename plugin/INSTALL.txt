@@ -119,6 +119,8 @@ FIRST RUN
   hear it straight away. Projects you saved keep whatever they had.
 
 FACTORY LIBRARY
-  24 ROOMS (spaces, objects and textures) and 46 STUDIOS built on them,
-  covering every "made for" and character tag. All of them are made from
-  sounds synthesized for ROOM, so there's no third-party audio inside.
+  49 ROOMS (spaces, objects and textures) and 46 STUDIOS, covering every
+  "made for" and character tag. 24 ROOMS come from sounds synthesized for
+  ROOM (plugin/Tools/make_factory_presets.sh) and 25 from Eville's own
+  recordings (plugin/Tools/make_pack_rooms.sh). A ROOM keeps only the
+  analysis, never the audio.

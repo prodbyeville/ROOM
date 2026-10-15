@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Regenerates the built-in "Factory" ROOMS (.room) and STUDIOS (.studio) in
 # plugin/Presets/Factory/.
-# Every source is synthesized by examples/make_test_audio.py, so no
-# third-party audio ends up inside the plugin.
+# Every source here is synthesized by examples/make_test_audio.py. The ROOMS
+# made from Eville's own recordings come from make_pack_rooms.sh and are kept.
 #
 #   bash plugin/Tools/make_factory_presets.sh path/to/room_render
 set -euo pipefail
@@ -11,7 +11,12 @@ cd "$(dirname "$0")/../.."
 python3 examples/make_test_audio.py > /dev/null
 OUT=plugin/Presets/Factory
 mkdir -p "$OUT"
-rm -f "$OUT"/*.room "$OUT"/*.studio
+PACK_ROOMS=$(sed -nE 's/^packroom +"[^"]*" +"([^"]+)".*/\1/p' plugin/Tools/make_pack_rooms.sh)
+for f in "$OUT"/*.room "$OUT"/*.studio; do
+    [ -e "$f" ] || continue
+    [[ "$f" == *.room ]] && grep -qxF "$(basename "$f" .room)" <<< "$PACK_ROOMS" && continue
+    rm -f "$f"
+done
 A=examples/audio
 TMP=$(mktemp -d)
 
