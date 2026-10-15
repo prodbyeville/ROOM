@@ -1261,6 +1261,40 @@ namespace
         return 0;
     }
 
+    void testFirstRun()
+    {
+        std::cout << "First run\n";
+        RoomAudioProcessor::startWithDefaultStudio = true;
+        {
+            RoomAudioProcessor p;
+            check (p.getAnalysis().valid && p.getCurrentPresetName() == "Init Room" && ! p.isPresetModified(),
+                   "a new ROOM starts with Init Room loaded");
+            // A project saved with an empty bay stays empty.
+            RoomAudioProcessor emptyOne;
+            RoomAudioProcessor::startWithDefaultStudio = false;
+            RoomAudioProcessor blank;
+            juce::MemoryBlock state;
+            blank.getStateInformation (state);
+            emptyOne.setStateInformation (state.getData(), (int) state.getSize());
+            check (! emptyOne.getAnalysis().valid, "loading a project with no room clears the default room");
+        }
+        RoomAudioProcessor::startWithDefaultStudio = false;
+        {
+            RoomAudioProcessor p;
+            RoomAudioProcessorEditor ed (p);
+            ed.showTour (0);
+            auto* tour = findChild<TourOverlay> (ed);
+            check (tour != nullptr && tour->isVisible() && tour->getStep() == 0, "the tour opens on its first step");
+            if (tour != nullptr)
+            {
+                tour->showStep (1); tour->showStep (2);
+                check (tour->isVisible() && tour->getStep() == 2, "the tour steps through");
+                tour->showStep (3);
+                check (! tour->isVisible(), "done closes the tour");
+            }
+        }
+    }
+
     void testSuppressorIdle()
     {
         std::cout << "Auto EQ idle path\n";
@@ -1624,6 +1658,8 @@ namespace
             ed.showRoomInfo (true);
         if (mode == "about")
             ed.openAbout();
+        if (mode.startsWith ("tour"))
+            ed.showTour (mode.getTrailingIntValue() - 1);
         if (mode == "longname")
             p.setCurrentPreset ("Factory/x", "small room with a very long name");
         if (args.size() > 5)   // optional scale, e.g. 0.75 or 1.5
@@ -1789,9 +1825,14 @@ int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI init;
     juce::StringArray args;
+    const bool startEmpty = ! (argc > 1 && juce::String (argv[1]) == "--first-run");
     for (int i = 1; i < argc; ++i)
         args.add (argv[i]);
 
+    RoomAudioProcessor::startWithDefaultStudio = ! startEmpty;   // tests start from an empty ROOM
+    RoomAudioProcessorEditor::autoShowTour = false;
+    if (args[0] == "--first-run")
+        args.remove (0);
     if (args[0] == "--screenshot" && args.size() >= 5)
         return screenshot (args);
     if (args[0] == "--bench" || args[0] == "--bench-rt")
@@ -1830,6 +1871,7 @@ int main (int argc, char* argv[])
     testLfo (root);
     testRoomsAndStudios (root, roomSource);
     testConvolver();
+    testFirstRun();
     testSuppressorIdle();
     testFactoryPresets (root);
     testModulationUi (root);

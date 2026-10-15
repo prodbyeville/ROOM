@@ -35,7 +35,7 @@ namespace
 LoadScreen::LoadScreen (RoomAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip ("click for ROOMS, drop a sound here, right-click for more");
+    setTooltip ("drop any sound here to build a room from it. click for the ROOMS library, right-click for more.");
     startTimerHz (15);
 }
 
@@ -205,7 +205,7 @@ void LoadScreen::paintFingerprint (juce::Graphics& g, juce::Rectangle<float> bod
 RoomScreen::RoomScreen (RoomAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip ("the room. click for its numbers");
+    setTooltip ("the room in 3d: space sets its width, size its depth, and the floor shows how each band dies away. click for its numbers.");
     startTimerHz (30);
 }
 
@@ -442,6 +442,7 @@ void RoomScreen::paintInfo (juce::Graphics& g, juce::Rectangle<float> glass)
 
 ToneScreen::ToneScreen (RoomAudioProcessor& p) : proc (p)
 {
+    setTooltip ("the tone this room puts on a sound. the red dot is the note it rings at most.");
     startTimerHz (15);
 }
 
@@ -675,6 +676,117 @@ void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool down)
 }
 
 //==============================================================================
+// First-run tour
+
+TourOverlay::TourOverlay()
+{
+    setInterceptsMouseClicks (true, true);
+    for (auto* b : { &back, &next })
+    {
+        b->getProperties().set ("key", "dark");
+        addAndMakeVisible (b);
+    }
+    skip.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    skip.setColour (juce::TextButton::textColourOffId, Colours::screenDim);
+    addAndMakeVisible (skip);
+    back.onClick = [this] { showStep (step - 1); };
+    next.onClick = [this] { showStep (step + 1); };
+    skip.onClick = [this] { setVisible (false); if (onFinished) onFinished(); };
+}
+
+void TourOverlay::start (std::vector<Step> s)
+{
+    steps = std::move (s);
+    setVisible (true);
+    toFront (false);
+    showStep (0);
+}
+
+void TourOverlay::showStep (int i)
+{
+    if (i >= (int) steps.size())
+    {
+        setVisible (false);
+        if (onFinished) onFinished();
+        return;
+    }
+    step = juce::jlimit (0, (int) steps.size() - 1, i);
+    back.setVisible (step > 0);
+    next.setButtonText (step == (int) steps.size() - 1 ? "done" : "next");
+    resized();
+    repaint();
+}
+
+juce::Rectangle<int> TourOverlay::cardArea() const
+{
+    if (steps.empty())
+        return {};
+    const auto spot = steps[(size_t) step].spot;
+    const int w = 330, h = 168;
+    // below the spotlight if there's room, otherwise above it
+    auto y = spot.getBottom() + 18;
+    if (y + h > getHeight() - 10)
+        y = spot.getY() - 18 - h;
+    const auto x = juce::jlimit (12, getWidth() - w - 12, spot.getCentreX() - w / 2);
+    return { x, juce::jlimit (12, getHeight() - h - 12, y), w, h };
+}
+
+void TourOverlay::resized()
+{
+    auto c = cardArea().reduced (20, 16);
+    auto row = c.removeFromBottom (32);
+    next.setBounds (row.removeFromRight (80));
+    row.removeFromRight (8);
+    back.setBounds (row.removeFromRight (80));
+    skip.setBounds (row.removeFromLeft (60));
+}
+
+void TourOverlay::paint (juce::Graphics& g)
+{
+    if (steps.empty())
+        return;
+    const auto& st = steps[(size_t) step];
+    // Dim everything but the spotlight.
+    juce::Path dim;
+    dim.addRectangle (getLocalBounds().toFloat());
+    dim.addRoundedRectangle (st.spot.toFloat().expanded (6.0f), 10.0f);
+    dim.setUsingNonZeroWinding (false);
+    g.setColour (juce::Colours::black.withAlpha (0.58f));
+    g.fillPath (dim);
+    g.setColour (Colours::crimson.withAlpha (0.85f));
+    g.drawRoundedRectangle (st.spot.toFloat().expanded (6.0f), 10.0f, 1.5f);
+
+    // The card: black glass, like the dialogs
+    const auto card = cardArea().toFloat();
+    for (int i = 0; i < 6; ++i)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.06f));
+        g.fillRoundedRectangle (card.translated (0.0f, 3.0f).expanded ((float) i * 1.4f), 10.0f + (float) i * 1.4f);
+    }
+    juce::ColourGradient body (juce::Colour (0xff1d1d1d), 0.0f, card.getY(), juce::Colour (0xff0e0e0e), 0.0f, card.getBottom(), false);
+    g.setGradientFill (body);
+    g.fillRoundedRectangle (card, 10.0f);
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (card.reduced (0.5f), 10.0f, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.1f));
+    g.drawLine (card.getX() + 10.0f, card.getY() + 1.5f, card.getRight() - 10.0f, card.getY() + 1.5f, 1.0f);
+
+    auto r = card.reduced (20.0f, 16.0f);
+    auto top = r.removeFromTop (22.0f);
+    g.setFont (Fonts::sans (19.0f, Fonts::bold));
+    g.setColour (Colours::dustWhite);
+    g.drawText (st.title, top, juce::Justification::centredLeft);
+    g.setFont (Fonts::mono (11.0f));
+    g.setColour (Colours::screenDim);
+    g.drawText (juce::String (step + 1) + " of " + juce::String ((int) steps.size()), top, juce::Justification::centredRight);
+    r.removeFromTop (8.0f);
+    r.removeFromBottom (40.0f);
+    g.setFont (Fonts::sans (14.5f));
+    g.setColour (Colours::dustWhite.withAlpha (0.88f));
+    g.drawFittedText (st.text, r.toNearestInt(), juce::Justification::topLeft, 5, 1.0f);
+}
+
+//==============================================================================
 // Editor
 
 RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
@@ -799,6 +911,16 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     setTipsEnabled (proc.tipsEnabled);
 
+    content.addChildComponent (tour);
+    tour.onFinished = []
+    {
+        if (auto s = UpdateChecker::openSettings())
+        {
+            s->setValue ("tourDone", true);
+            s->saveIfNeeded();
+        }
+    };
+
     // Resizable, keeping the shape: everything scales together.
     setResizable (true, true);
     setAdvancedOpen (proc.advancedOpen);
@@ -854,6 +976,21 @@ void RoomAudioProcessorEditor::newPreset()
     content.repaint();
 }
 
+void RoomAudioProcessorEditor::showTour (int startStep)
+{
+    const auto knobs = intensity.slider.getBounds().getUnion (space.slider.getBounds()).getUnion (autoBalance.getBounds())
+                           .withTop (intensity.slider.getY());
+    tour.setBounds (0, 0, contentWidth(), baseHeight);
+    tour.start ({
+        { bays[0], "load",
+          "drop any sound here, or press record and play one. room listens for the space inside it: how it decays, the tone it adds, the notes that ring." },
+        { knobs, "shape",
+          "intensity is how much of that room you hear. balance leans to its tone or its space, tail sets how long it rings, space how wide." },
+        { finishArea.toNearestInt().reduced (14, 10), "finish",
+          "eq, tape and auto eq polish the result. advanced (top right) has pre-delay, size, ducking, freeze and two lfos." } });
+    tour.showStep (startStep);
+}
+
 void RoomAudioProcessorEditor::showMainMenu()
 {
     const auto version = UpdateChecker::currentVersion();
@@ -861,6 +998,7 @@ void RoomAudioProcessorEditor::showMainMenu()
     m.addItem ("new preset", [this] { newPreset(); });
     m.addSeparator();
     m.addItem ("tips", true, areTipsEnabled(), [this] { setTipsEnabled (! areTipsEnabled()); });
+    m.addItem ("show the tour", [this] { showTour(); });
     m.addSeparator();
     if (updates.isUpdateAvailable())
     {
@@ -933,6 +1071,9 @@ void RoomAudioProcessorEditor::timerCallback()
 {
     if (ticksUntilUpdateCheck > 0 && --ticksUntilUpdateCheck == 0)
         updates.checkIfDue();
+    if (ticksUntilTour > 0 && --ticksUntilTour == 0 && autoShowTour)
+        if (auto settings = UpdateChecker::openSettings(); settings != nullptr && ! settings->getBoolValue ("tourDone", false))
+            showTour();
 
     {
         auto& lib = proc.getLibrary();
@@ -1236,6 +1377,7 @@ void RoomAudioProcessorEditor::layoutContent()
 {
     const auto full = juce::Rectangle<int> (0, 0, contentWidth(), baseHeight);
     browser.setBounds (full);
+    tour.setBounds (full);
     roomBrowser.setBounds (full);
     saveDialog.setBounds (full);
     roomSaveDialog.setBounds (full);

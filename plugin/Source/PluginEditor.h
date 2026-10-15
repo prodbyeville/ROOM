@@ -86,6 +86,7 @@ private:
 /** The tone the room puts on a sound: its EQ curve, with the strongest
     resonance marked in crimson. */
 class ToneScreen : public juce::Component,
+                   public juce::SettableTooltipClient,
                    private juce::Timer
 {
 public:
@@ -128,6 +129,27 @@ public:
     void paintButton (juce::Graphics&, bool over, bool down) override;
 };
 
+/** The first-run tour: dims the window, lights up one area at a time and
+    explains it on a small card (back / next / skip). */
+class TourOverlay : public juce::Component
+{
+public:
+    struct Step { juce::Rectangle<int> spot; juce::String title, text; };
+    TourOverlay();
+    void start (std::vector<Step>);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    std::function<void()> onFinished;
+    int getStep() const { return step; }
+    void showStep (int);
+
+private:
+    juce::Rectangle<int> cardArea() const;
+    std::vector<Step> steps;
+    int step = 0;
+    juce::TextButton back { "back" }, next { "next" }, skip { "skip" };
+};
+
 class RoomAudioProcessorEditor : public juce::AudioProcessorEditor,
                                  public juce::DragAndDropContainer,
                                  private juce::Timer
@@ -152,6 +174,9 @@ public:
     bool areTipsEnabled() const { return tooltips != nullptr; }
     /** Menu actions (public for tests). */
     void newPreset();
+    void showTour (int startStep = 0);
+    /** Show the tour the first time the editor opens (tests switch it off). */
+    static inline bool autoShowTour = true;
     void openAbout() { showAbout(); }
 
     /** Show the full room info on the room screen. */
@@ -194,7 +219,9 @@ private:
     void showMainMenu();
     void showAbout();
     UpdateChecker updates;
+    TourOverlay tour;
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
+    int ticksUntilTour = 6;           // first open: once the window has settled
 
     // Fixed geometry of the unit's three panels (base coordinates)
     const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 588.0f };

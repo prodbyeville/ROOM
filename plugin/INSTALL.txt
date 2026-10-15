@@ -108,6 +108,17 @@ UPDATES
   menu key and the menu shows "update available" (it opens "url").
   No file, no internet: nothing happens.
 
-TIPS
+TIPS AND THE TOUR
   Rest the mouse on any knob or key for a moment to see what it does.
   Turn tips off (or back on) in the menu.
+  The first time ROOM opens, a three-step tour shows load, shape and
+  finish. See it again any time: menu > show the tour.
+
+FIRST RUN
+  A new ROOM starts with "Init Room" loaded (a plain, short room), so you
+  hear it straight away. Projects you saved keep whatever they had.
+
+FACTORY LIBRARY
+  24 ROOMS (spaces, objects and textures) and 46 STUDIOS built on them,
+  covering every "made for" and character tag. All of them are made from
+  sounds synthesized for ROOM, so there's no third-party audio inside.

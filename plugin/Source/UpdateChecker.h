@@ -30,6 +30,8 @@ public:
     std::function<void()> onResult;
 
     static juce::String currentVersion();
+    /** ROOM's small per-user settings file (eville/room.settings). */
+    static std::unique_ptr<juce::PropertiesFile> openSettings();
     /** True if version a (e.g. "0.2.0") is newer than b. */
     static bool isNewer (const juce::String& a, const juce::String& b);
 
@@ -40,7 +42,6 @@ public:
 private:
     void run() override;
     void handleAsyncUpdate() override;
-    std::unique_ptr<juce::PropertiesFile> openSettings() const;
 
     juce::String latestVersion, downloadUrl;
     juce::CriticalSection lock;

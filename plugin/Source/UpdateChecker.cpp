@@ -39,7 +39,7 @@ bool UpdateChecker::isNewer (const juce::String& a, const juce::String& b)
     return false;
 }
 
-std::unique_ptr<juce::PropertiesFile> UpdateChecker::openSettings() const
+std::unique_ptr<juce::PropertiesFile> UpdateChecker::openSettings()
 {
     juce::PropertiesFile::Options o;
     o.applicationName = "room";

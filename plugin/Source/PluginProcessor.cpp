@@ -141,6 +141,20 @@ RoomAudioProcessor::RoomAudioProcessor()
 
     worker = std::make_unique<Worker> (*this);
     snapshotPreset();
+
+    // A brand-new ROOM starts with a room in it ("Init Room"), so sound passes
+    // through the moment it's inserted. Loading a project replaces it (an
+    // empty saved state stays empty: setStateInformation clears the room).
+    if (startWithDefaultStudio)
+        for (int i = 0; i < FactoryPresets::namedResourceListSize; ++i)
+            if (juce::String (FactoryPresets::getNamedResourceOriginalFilename (FactoryPresets::namedResourceList[i])) == "Init Room.studio")
+            {
+                int size = 0;
+                if (auto* data = FactoryPresets::getNamedResource (FactoryPresets::namedResourceList[i], size))
+                    if (auto tree = room::presets::parse (juce::String::fromUTF8 (data, size)); tree.isValid())
+                        applyPreset (tree, "Factory/Init Room");
+                break;
+            }
 }
 
 RoomAudioProcessor::~RoomAudioProcessor()

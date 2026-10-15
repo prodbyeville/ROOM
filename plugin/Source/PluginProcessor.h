@@ -183,6 +183,9 @@ public:
     /** LFO -> knob assignments (edited by the UI, read by the audio thread). */
     room::Modulation modulation;
 
+    /** Load "Init Room" into every new instance (tests switch it off). */
+    static inline bool startWithDefaultStudio = true;
+
     /** UI state saved with the project. */
     float editorScale = 1.0f;
     bool advancedOpen = false;
