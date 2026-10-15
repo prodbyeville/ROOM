@@ -24,7 +24,7 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     sampleRate = sr;
     numChans = juce::jlimit (1, maxChannels, numChannels);
 
-    convolution.prepare ({ sr, (juce::uint32) maxBlockSize, (juce::uint32) numChans });
+    convolution.prepare (sr, numChans, maxIrSeconds);
     tonalBuf.setSize (numChans, maxBlockSize);
     spatialBuf.setSize (numChans, maxBlockSize);
 
@@ -81,9 +81,27 @@ float RoomEngine::freezeGrainSample (int ch)
 
 void RoomEngine::submitRoom (juce::AudioBuffer<float>&& ir, double irRate, const ToneSettings& newTone)
 {
+    // All the heavy work happens here, off the audio thread: match the
+    // sample rate, cap the length, and transform the IR into partitions.
+    const auto sr = sampleRate;
+    if (std::abs (irRate - sr) > 0.5 && ir.getNumSamples() > 0)
+    {
+        const auto ratio = irRate / sr;
+        juce::AudioBuffer<float> resampled (ir.getNumChannels(), std::max (1, (int) std::floor ((ir.getNumSamples() - 4) / ratio)));
+        for (int c = 0; c < ir.getNumChannels(); ++c)
+        {
+            juce::LagrangeInterpolator interp;
+            interp.process (ratio, ir.getReadPointer (c), resampled.getWritePointer (c), resampled.getNumSamples());
+        }
+        ir = std::move (resampled);
+    }
+    const auto maxLen = (int) (maxIrSeconds * sr);
+    if (ir.getNumSamples() > maxLen)
+        ir.setSize (ir.getNumChannels(), maxLen, true);
+    auto kernel = PartitionedConvolver::makeKernel (ir, numChans);
+
     const juce::SpinLock::ScopedLockType lock (pendingLock);
-    pendingIR = std::move (ir);   // any old, unused pending IR is freed here, off the audio thread
-    pendingIRRate = irRate;
+    pendingKernel = std::move (kernel);   // any old, unused pending kernel is freed here, off the audio thread
     pendingTone = newTone;
     hasPending = true;
     pendingClear = false;
@@ -106,13 +124,8 @@ void RoomEngine::applyPending()
     if (! lock.isLocked() || ! hasPending)
         return;
 
-    // Wait-free: the convolution takes ownership and prepares the IR on its
-    // own background thread, then crossfades to it.
-    convolution.loadImpulseResponse (std::move (pendingIR), pendingIRRate,
-                                     numChans > 1 ? juce::dsp::Convolution::Stereo::yes
-                                                  : juce::dsp::Convolution::Stereo::no,
-                                     juce::dsp::Convolution::Trim::no,
-                                     juce::dsp::Convolution::Normalise::no);
+    // Wait-free: the kernel is ready; the convolver crossfades to it stage by stage.
+    convolution.setKernel (std::move (pendingKernel));
     tone = pendingTone;
     hasPending = false;
 
@@ -193,10 +206,7 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
             preDelayWrite = (preDelayWrite + 1) % len;
         }
     }
-    {
-        juce::dsp::AudioBlock<float> block (spatialBuf.getArrayOfWritePointers(), (size_t) chans, (size_t) n);
-        convolution.process (juce::dsp::ProcessContextReplacing<float> (block));
-    }
+    convolution.process (spatialBuf.getArrayOfWritePointers(), chans, n);
 
     // --- Freeze: on the way in, grab the last couple of seconds of wet sound ---
     if (fx.freeze && ! frozenActive)

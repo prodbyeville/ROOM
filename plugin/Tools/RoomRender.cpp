@@ -40,6 +40,7 @@ int main (int argc, char* argv[])
     {
         std::cerr << "usage: room_render SOURCE TARGET OUT [--intensity X] [--mix X] [--balance auto|X] [--tail S]\n"
                      "                   [--tape X] [--auto X] [--space X] [--eq band:freq:gain:q,...] [--raw]\n"
+                     "                   [--param id=value,...]  (any other parameter, saved in the STUDIO)\n"
                      "                   [--room-name R]   (name the room itself)\n"
                      "                   [--save-preset FILE.studio --name N --type T --styles a,b --made-for a,b --notes TEXT]\n"
                      "                   [--save-room FILE.room --room-type T --room-styles a,b --room-notes TEXT]\n";
@@ -150,6 +151,10 @@ int main (int argc, char* argv[])
             params["eq" + n + "Gain"] = bands[b].gainDb;
             params["eq" + n + "Q"] = bands[b].q;
         }
+        // Any other parameter by id: --param preDelay=40,duck=0.3,output=-1.5
+        for (auto& kv : juce::StringArray::fromTokens (option ("--param", ""), ",", ""))
+            if (kv.contains ("="))
+                params[kv.upToFirstOccurrenceOf ("=", false, false).trim()] = kv.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
         auto a = analysis;
         if (roomName.isEmpty())
             a.sourceName = meta.name;

@@ -7,6 +7,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "dsp/PartitionedConvolver.h"
 #include "presets/PresetLibrary.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -1090,6 +1091,81 @@ namespace
         return nullptr;
     }
 
+    void testConvolver()
+    {
+        std::cout << "Convolver\n";
+        using room::PartitionedConvolver;
+        juce::Random rng (11);
+        auto makeIr = [&] (int len, float decay)
+        {
+            juce::AudioBuffer<float> ir (2, len);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < len; ++i)
+                    ir.setSample (c, i, (rng.nextFloat() * 2.0f - 1.0f) * std::exp (-(float) i / decay));
+            return ir;
+        };
+        auto direct = [] (const std::vector<float>& x, const juce::AudioBuffer<float>& ir, int ch, int n)
+        {
+            // y[n] = sum_k x[n-k] h[k]
+            double y = 0.0;
+            const auto* h = ir.getReadPointer (ch);
+            for (int k = 0; k < ir.getNumSamples() && k <= n; ++k)
+                y += (double) x[(size_t) (n - k)] * h[k];
+            return (float) y;
+        };
+
+        const int len = 40000;   // reaches all three stages
+        auto irA = makeIr (len, 9000.0f), irB = makeIr (len, 5000.0f);
+        PartitionedConvolver conv;
+        conv.prepare (48000.0, 2, 2.0);
+        conv.setKernel (PartitionedConvolver::makeKernel (irA, 2));
+
+        const int total = 90000;
+        std::vector<float> in[2];
+        for (auto& v : in) { v.resize (total); for (auto& s : v) s = rng.nextFloat() * 2.0f - 1.0f; }
+        std::vector<float> out[2] = { in[0], in[1] };
+        int pos = 0;
+        while (pos < total)
+        {
+            const auto n = std::min (total - pos, 1 + rng.nextInt (700));
+            float* chans[2] = { out[0].data() + pos, out[1].data() + pos };
+            conv.process (chans, 2, n);
+            pos += n;
+        }
+        float worst = 0.0f, peak = 0.0f;
+        for (int t : { 200, 1000, 2047, 2048, 5000, 16383, 16384, 30000, 41000, 60000, 89999 })
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto ref = direct (in[c], irA, c, t);
+                worst = std::max (worst, std::abs (ref - out[c][(size_t) t]));
+                peak = std::max (peak, std::abs (ref));
+            }
+        check (worst < 1.0e-3f * std::max (1.0f, peak), "partitioned convolution matches direct convolution (all stages, random block sizes)");
+
+        // Switch rooms; once the crossfade is over the output is the new room
+        // convolved with everything played before (the history is kept).
+        conv.setKernel (PartitionedConvolver::makeKernel (irB, 2));
+        const int more = 60000;
+        for (auto& v : in) { v.resize ((size_t) (total + more)); for (int i = total; i < total + more; ++i) v[(size_t) i] = rng.nextFloat() * 2.0f - 1.0f; }
+        for (int c = 0; c < 2; ++c) { out[c].resize ((size_t) (total + more)); std::copy (in[c].begin() + total, in[c].end(), out[c].begin() + total); }
+        pos = total;
+        while (pos < total + more)
+        {
+            const auto n = std::min (total + more - pos, 1 + rng.nextInt (512));
+            float* chans[2] = { out[0].data() + pos, out[1].data() + pos };
+            conv.process (chans, 2, n);
+            pos += n;
+        }
+        worst = 0.0f;
+        for (int t : { total + 40000, total + 50000, total + more - 1 })
+            for (int c = 0; c < 2; ++c)
+                worst = std::max (worst, std::abs (direct (in[c], irB, c, t) - out[c][(size_t) t]));
+        check (worst < 1.0e-3f * std::max (1.0f, peak), "after a room switch, the new room keeps the full history");
+        bool finite = true;
+        for (auto& v : out) for (auto s : v) finite = finite && std::isfinite (s);
+        check (finite, "convolution output stays finite through a switch");
+    }
+
     void testModulationUi (const juce::File& root)
     {
         std::cout << "Modulation UI + Randomize\n";
@@ -1437,6 +1513,56 @@ namespace
     }
 }
 
+
+    /** --bench [preset keys...]: how much of one core ROOM needs. */
+    int bench (const juce::StringArray& args)
+    {
+        juce::StringArray keys;
+        for (int i = 1; i < args.size(); ++i)
+            keys.add (args[i]);
+        if (keys.isEmpty())
+            keys = { "Factory/Small Room", "Factory/Big Hall", "Factory/Pipe Space", "Factory/Dark Hall" };
+
+        std::cout << "preset                     rate    block   % of one core   worst block (% of its time)\n";
+        for (auto& key : keys)
+            for (double sr : { 44100.0, 48000.0, 96000.0 })
+                for (int block : { 64, 256, 512 })
+                {
+                    RoomAudioProcessor p;
+                    p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_bench_presets"));
+                    p.setPlayConfigDetails (2, 2, sr, block);
+                    p.prepareToPlay (sr, block);
+                    auto& lib = p.getLibrary();
+                    if (auto* e = lib.find (key))
+                        p.applyPreset (lib.loadPreset (*e), e->key);
+                    else { std::cout << "  (no preset " << key << ")\n"; break; }
+                    waitForAnalysis (p);
+                    juce::Thread::sleep (400);   // let the room build
+
+                    juce::AudioBuffer<float> io (2, block);
+                    juce::MidiBuffer midi;
+                    juce::Random rng (7);
+                    const int total = (int) (sr * 30.0);
+                    double worst = 0.0;
+                    const auto t0 = juce::Time::getHighResolutionTicks();
+                    for (int pos = 0; pos < total; pos += block)
+                    {
+                        for (int c = 0; c < 2; ++c)
+                            for (int i = 0; i < block; ++i)
+                                io.setSample (c, i, (rng.nextFloat() * 2.0f - 1.0f) * 0.2f);
+                        const auto b0 = juce::Time::getHighResolutionTicks();
+                        p.processBlock (io, midi);
+                        worst = std::max (worst, juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - b0));
+                    }
+                    const auto secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
+                    const auto load = 100.0 * secs / 30.0;
+                    const auto worstPct = 100.0 * worst / (block / sr);
+                    std::printf ("%-26s %6.0f  %5d   %10.2f %%     %10.1f %%\n", key.fromFirstOccurrenceOf ("/", false, false).toRawUTF8(),
+                                 sr, block, load, worstPct);
+                }
+        return 0;
+    }
+
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -1446,6 +1572,8 @@ int main (int argc, char* argv[])
 
     if (args[0] == "--screenshot" && args.size() >= 5)
         return screenshot (args);
+    if (args[0] == "--bench")
+        return bench (args);
 
     const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
                           .getChildFile ("room_tests_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)))
@@ -1475,6 +1603,7 @@ int main (int argc, char* argv[])
     testRecord (root, roomSource);
     testLfo (root);
     testRoomsAndStudios (root, roomSource);
+    testConvolver();
     testModulationUi (root);
 
     root.getParentDirectory().deleteRecursively();

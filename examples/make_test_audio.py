@@ -163,6 +163,285 @@ def melody():
     return x / np.max(np.abs(x)) * 0.8
 
 
+# ---------------------------------------------------------------------------
+# A small acoustics toolkit for the factory library: a shoebox room (image-
+# source early reflections + a band-by-band decaying diffuse tail), modal
+# objects, and a few exciters. Deterministic (seeded), so presets rebuild the
+# same every time.
+# ---------------------------------------------------------------------------
+
+lib_rng = np.random.default_rng(2024)   # separate from rng: the old sources stay bit-identical
+C_AIR = 343.0
+
+
+def _t60_curve(points):
+    """points: [(freq Hz, T60 s), ...] -> function of frequency (log interpolation)."""
+    fs_, ts_ = zip(*points)
+    lf = np.log2(fs_)
+    return lambda f: float(np.interp(np.log2(f), lf, ts_))
+
+
+def diffuse_tail(n, t60_at, delay_s=0.0, bands=26):
+    """Noise in third-ish octave bands, each fading at its own T60."""
+    t = np.arange(n) / SR
+    edges = np.geomspace(40, 18000, bands + 1)
+    tail = np.zeros(n)
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        fc = np.sqrt(lo * hi)
+        sos = signal.butter(3, [lo, min(hi, 0.45 * SR)], btype="bandpass", fs=SR, output="sos")
+        band = signal.sosfilt(sos, lib_rng.standard_normal(n))
+        band *= np.exp(-6.91 * np.maximum(t - delay_s, 0.0) / max(0.03, t60_at(fc)))
+        tail += band
+    # build-up: diffuse energy rises over the first few ms after the delay
+    rise = np.clip((t - delay_s) / 0.012, 0.0, 1.0)
+    return tail * rise
+
+
+def early_reflections(n, dims, src, mic, absorb=0.3, order=3, hf_loss=0.15):
+    """Image-source reflections in a shoebox (dims in m). Returns an impulse train."""
+    out = np.zeros(n)
+    lx, ly, lz = dims
+    for i in range(-order, order + 1):
+        for j in range(-order, order + 1):
+            for k in range(-order, order + 1):
+                refl = abs(i) + abs(j) + abs(k)
+                if refl == 0 or refl > order:
+                    continue
+                img = [(i * lx + (src[0] if i % 2 == 0 else lx - src[0])),
+                       (j * ly + (src[1] if j % 2 == 0 else ly - src[1])),
+                       (k * lz + (src[2] if k % 2 == 0 else lz - src[2]))]
+                d = np.sqrt(sum((a - b) ** 2 for a, b in zip(img, mic)))
+                idx = int(d / C_AIR * SR)
+                if idx < n:
+                    out[idx] += (1.0 - absorb) ** refl / max(d, 0.3)
+    # walls soak up some highs on every bounce: soften the train a little
+    sos = signal.butter(1, 9000 * (1.0 - hf_loss), btype="lowpass", fs=SR, output="sos")
+    return signal.sosfilt(sos, out)
+
+
+def clap(n):
+    x = np.zeros(n)
+    m = int(0.004 * SR)
+    burst = lib_rng.standard_normal(m) * np.exp(-np.arange(m) / (0.0012 * SR))
+    sos = signal.butter(2, [700, 9000], btype="bandpass", fs=SR, output="sos")
+    x[:m] = signal.sosfilt(sos, burst) * 4.0
+    return x
+
+
+def thump(n, f0=90.0):
+    t = np.arange(n) / SR
+    return np.sin(2 * np.pi * f0 * t) * np.exp(-t * 40) * (t < 0.15)
+
+
+def space(dur, dims, t60_points, er_gain=0.5, tail_gain=0.25, absorb=0.3, exciter=clap,
+          src=None, mic=None, extra=None):
+    """A recording of an exciter in a shoebox space."""
+    n = int(dur * SR)
+    src = src or [dims[0] * 0.3, dims[1] * 0.4, min(1.5, dims[2] * 0.5)]
+    mic = mic or [dims[0] * 0.7, dims[1] * 0.6, min(1.6, dims[2] * 0.55)]
+    ex = exciter(n)
+    direct_d = np.sqrt(sum((a - b) ** 2 for a, b in zip(src, mic)))
+    er = early_reflections(n, dims, src, mic, absorb=absorb) * er_gain
+    first = direct_d / C_AIR
+    tail = diffuse_tail(n, _t60_curve(t60_points), delay_s=first + 0.004) * tail_gain
+    ir = er + tail
+    ir[0] += 1.0 / max(direct_d, 0.3)
+    if extra is not None:
+        ir += extra(n)
+    x = signal.fftconvolve(ex, ir)[:n]
+    x += 1e-4 * lib_rng.standard_normal(n)
+    return x / np.max(np.abs(x)) * 0.8
+
+
+def modal(dur, modes, hit=0.4, hit_ms=2.0, room=None):
+    """Decaying resonant modes: [(freq, amp, T60), ...]; optional small room around it."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    x = np.zeros(n)
+    for f, a, t60 in modes:
+        x += a * np.sin(2 * np.pi * f * t + lib_rng.uniform(0, 6.28)) * np.exp(-6.91 * t / t60)
+    m = int(hit_ms * 0.001 * SR)
+    x[:m] += hit * lib_rng.standard_normal(m)
+    if room is not None:
+        x = x + 0.25 * signal.fftconvolve(x, diffuse_tail(int(0.8 * SR), _t60_curve(room)))[:n]
+    x += 1e-4 * lib_rng.standard_normal(n)
+    return x / np.max(np.abs(x)) * 0.8
+
+
+def flutter(period_s, decay_s, gain=0.5):
+    """Slap echoes between two parallel walls."""
+    def f(n):
+        out = np.zeros(n)
+        k = 1
+        while True:
+            idx = int(k * period_s * SR)
+            if idx >= n:
+                break
+            out[idx] += gain * np.exp(-6.91 * k * period_s / decay_s)
+            k += 1
+        sos = signal.butter(1, 5000, btype="lowpass", fs=SR, output="sos")
+        return signal.sosfilt(sos, out)
+    return f
+
+
+# --- spaces ---------------------------------------------------------------
+def stairwell():
+    """Concrete stairwell: tall, hard, a flutter between the walls."""
+    return space(4.0, [3.0, 3.2, 14.0], [(60, 2.8), (500, 2.4), (4000, 1.5), (16000, 0.7)],
+                 er_gain=0.6, tail_gain=0.3, absorb=0.12, extra=flutter(0.0175, 1.2, 0.35))
+
+
+def tiled_bathroom():
+    """Small, hard and bright: tiles everywhere."""
+    return space(2.5, [2.2, 2.6, 2.4], [(60, 0.9), (500, 1.2), (4000, 1.1), (16000, 0.6)],
+                 er_gain=0.8, tail_gain=0.35, absorb=0.06)
+
+
+def concrete_garage():
+    """Wide, low, concrete: long and a little metallic."""
+    return space(4.5, [30.0, 16.0, 2.6], [(60, 3.2), (500, 2.6), (4000, 1.8), (16000, 0.8)],
+                 er_gain=0.5, tail_gain=0.28, absorb=0.1, extra=flutter(0.0152, 0.9, 0.3))
+
+
+def cathedral():
+    """Stone nave: huge, slow, dark at the top."""
+    return space(9.0, [26.0, 64.0, 30.0], [(60, 7.0), (500, 5.5), (4000, 3.0), (16000, 1.2)],
+                 er_gain=0.25, tail_gain=0.3, absorb=0.08)
+
+
+def wooden_closet():
+    """A small cupboard of wood and clothes: warm and short."""
+    return space(1.2, [1.0, 1.3, 2.4], [(60, 0.35), (500, 0.25), (4000, 0.12), (16000, 0.05)],
+                 er_gain=0.7, tail_gain=0.2, absorb=0.45)
+
+
+def car_interior():
+    """Inside a car: tiny, boxy, a low hump."""
+    def boom(n):
+        t = np.arange(n) / SR
+        return 0.15 * np.sin(2 * np.pi * 118 * t) * np.exp(-6.91 * t / 0.25)
+    return space(1.0, [1.5, 2.0, 1.2], [(60, 0.22), (500, 0.15), (4000, 0.08), (16000, 0.04)],
+                 er_gain=0.8, tail_gain=0.15, absorb=0.5, extra=boom)
+
+
+def tunnel():
+    """Underpass: long, with slap echoes running away from you."""
+    return space(5.0, [4.0, 80.0, 4.0], [(60, 3.0), (500, 2.6), (4000, 1.6), (16000, 0.6)],
+                 er_gain=0.45, tail_gain=0.25, absorb=0.1, extra=flutter(0.21, 2.2, 0.45))
+
+
+def empty_gym():
+    """A school gym: big, bright, a ringing flutter between the walls."""
+    return space(4.0, [30.0, 20.0, 9.0], [(60, 2.2), (500, 2.0), (4000, 1.6), (16000, 0.8)],
+                 er_gain=0.4, tail_gain=0.3, absorb=0.12, extra=flutter(0.026, 1.4, 0.3))
+
+
+def live_room():
+    """A good studio live room: even, short, open."""
+    return space(2.0, [8.0, 6.0, 3.6], [(60, 0.75), (500, 0.6), (4000, 0.5), (16000, 0.3)],
+                 er_gain=0.45, tail_gain=0.22, absorb=0.3)
+
+
+def vocal_booth():
+    """A treated booth: almost nothing, a little wood."""
+    return space(0.8, [1.8, 1.8, 2.2], [(60, 0.14), (500, 0.1), (4000, 0.06), (16000, 0.03)],
+                 er_gain=0.35, tail_gain=0.08, absorb=0.7)
+
+
+def init_room():
+    """A plain, short room: the neutral starting point."""
+    return space(1.8, [5.0, 4.0, 3.0], [(60, 0.55), (500, 0.5), (4000, 0.38), (16000, 0.2)],
+                 er_gain=0.4, tail_gain=0.22, absorb=0.3)
+
+
+# --- objects --------------------------------------------------------------
+def singing_bowl():
+    """A struck singing bowl: pairs of close modes that beat slowly."""
+    return modal(8.0, [(220.0, 1.0, 9.0), (221.4, 0.8, 9.0), (597.0, 0.6, 7.0), (599.1, 0.5, 7.0),
+                       (1112.0, 0.35, 5.0), (1731.0, 0.2, 3.5), (2480.0, 0.1, 2.5)], hit=0.15, hit_ms=3.0)
+
+
+def cardboard_box():
+    """A big cardboard box, knocked: papery thud, quick."""
+    return modal(0.8, [(178.0, 1.0, 0.12), (342.0, 0.7, 0.09), (515.0, 0.5, 0.07), (860.0, 0.3, 0.05)],
+                 hit=0.6, hit_ms=6.0, room=[(60, 0.3), (4000, 0.15)])
+
+
+def piano_body():
+    """A thump on a piano with the pedal down: the strings answer."""
+    notes = [65.4, 98.0, 130.8, 164.8, 196.0, 261.6]
+    modes = []
+    for i, f in enumerate(notes):
+        for h in range(1, 6):
+            modes.append((f * h * (1 + 0.0004 * h * h), 0.5 / h, 5.0 / (1 + 0.4 * h) * (1.2 - 0.08 * i)))
+    x = modal(6.0, modes, hit=1.2, hit_ms=8.0, room=[(60, 0.8), (4000, 0.5)])
+    return x
+
+
+def spring_tank():
+    """A spring reverb tank, kicked: dispersive chirps that repeat."""
+    n = int(3.0 * SR)
+    x = np.zeros(n)
+    period = 0.037
+    k = 0
+    while int(k * period * SR) < n:
+        x[int(k * period * SR)] += np.exp(-6.91 * k * period / 2.5) * (1.0 if k == 0 else 0.7)
+        k += 1
+    for _ in range(60):   # a chain of allpasses smears each tick into a chirp
+        x = signal.lfilter([-0.6, 1.0], [1.0, -0.6], x)
+    sos = signal.butter(2, [120, 5000], btype="bandpass", fs=SR, output="sos")
+    x = signal.sosfilt(sos, x)
+    x += 1e-4 * lib_rng.standard_normal(n)
+    return x / np.max(np.abs(x)) * 0.8
+
+
+def wine_glass():
+    """A wine glass, flicked: clean, high, long."""
+    return modal(4.0, [(742.0, 1.0, 3.2), (1991.0, 0.45, 2.1), (3712.0, 0.25, 1.3), (5890.0, 0.1, 0.8)],
+                 hit=0.2, hit_ms=1.5)
+
+
+# --- textures (steady: no hits) -------------------------------------------
+def vinyl_room():
+    """A record's run-out groove in a small room: crackle, hiss, rumble."""
+    n = int(5.0 * SR)
+    t = np.arange(n) / SR
+    x = 0.01 * lib_rng.standard_normal(n)
+    pops = lib_rng.random(n) < 0.0009
+    x[pops] += lib_rng.standard_normal(pops.sum()) * 0.5
+    x += 0.02 * np.sin(2 * np.pi * 0.55 * t) * np.sin(2 * np.pi * 33 * t)
+    sos = signal.butter(2, [30, 9000], btype="bandpass", fs=SR, output="sos")
+    x = signal.sosfilt(sos, x)
+    x = x + 0.3 * signal.fftconvolve(x, diffuse_tail(int(0.5 * SR), _t60_curve([(60, 0.4), (4000, 0.25)])))[:n]
+    return x / np.max(np.abs(x)) * 0.5
+
+
+def rain_window():
+    """Rain on a window, heard from inside: soft hiss and drops."""
+    n = int(5.0 * SR)
+    hiss = signal.sosfilt(signal.butter(2, [400, 7000], btype="bandpass", fs=SR, output="sos"),
+                          lib_rng.standard_normal(n)) * 0.04
+    drops = np.zeros(n)
+    idx = lib_rng.integers(0, n - 400, 1600)
+    for i in idx:
+        f = lib_rng.uniform(1500, 5000)
+        m = np.arange(300)
+        drops[i:i + 300] += lib_rng.uniform(0.05, 0.25) * np.sin(2 * np.pi * f * m / SR) * np.exp(-m / 40)
+    x = hiss + drops
+    x = x + 0.2 * signal.fftconvolve(x, diffuse_tail(int(0.6 * SR), _t60_curve([(60, 0.5), (4000, 0.3)])))[:n]
+    return x / np.max(np.abs(x)) * 0.5
+
+
+LIBRARY = {
+    "stairwell": stairwell, "tiled_bathroom": tiled_bathroom, "concrete_garage": concrete_garage,
+    "cathedral": cathedral, "wooden_closet": wooden_closet, "car_interior": car_interior,
+    "tunnel": tunnel, "empty_gym": empty_gym, "live_room": live_room, "vocal_booth": vocal_booth,
+    "init_room": init_room, "singing_bowl": singing_bowl, "cardboard_box": cardboard_box,
+    "piano_body": piano_body, "spring_tank": spring_tank, "wine_glass": wine_glass,
+    "vinyl_room": vinyl_room, "rain_window": rain_window,
+}
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     files = {
@@ -174,6 +453,8 @@ def main():
         "drum_oneshot.wav": drum_oneshot(),
         "melody.wav": melody(),
     }
+    for name, fn in LIBRARY.items():   # after the originals, so they stay bit-identical
+        files[name + ".wav"] = fn()
     for name, x in files.items():
         path = os.path.join(OUT, name)
         save_audio(path, x, SR)

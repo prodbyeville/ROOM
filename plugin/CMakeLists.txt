@@ -31,6 +31,7 @@ set(ROOM_DSP_SOURCES
     Source/dsp/RoomAnalysis.cpp
     Source/dsp/RoomSynth.cpp
     Source/dsp/RoomEngine.cpp
+    Source/dsp/PartitionedConvolver.cpp
     Source/dsp/ToneShaper.cpp
     Source/dsp/ResonanceSuppressor.cpp
     Source/presets/PresetFile.cpp

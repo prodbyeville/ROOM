@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RoomSynth.h"
+#include "PartitionedConvolver.h"
 #include <juce_dsp/juce_dsp.h>
 
 // REAL-TIME PROCESSING CHAIN (C++ port of room_engine/process.py)
@@ -58,7 +59,8 @@ private:
 
     static constexpr int maxChannels = 2;
 
-    juce::dsp::Convolution convolution { juce::dsp::Convolution::NonUniform { 512 } };
+    PartitionedConvolver convolution;   // zero latency, steady CPU (see PartitionedConvolver.h)
+    static constexpr double maxIrSeconds = 14.0;
 
     // Tonal path state, per channel
     ToneSettings tone;
@@ -93,8 +95,7 @@ private:
     // Handover from the background thread
     juce::SpinLock pendingLock;
     bool hasPending = false;
-    juce::AudioBuffer<float> pendingIR;
-    double pendingIRRate = 44100.0;
+    std::shared_ptr<const PartitionedConvolver::Kernel> pendingKernel;
     ToneSettings pendingTone;
     std::atomic<bool> pendingClear { false };
 
