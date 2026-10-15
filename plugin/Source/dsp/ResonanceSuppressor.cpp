@@ -102,6 +102,7 @@ void ResonanceSuppressor::reset()
     for (auto& d : display) d.store (0.0f);
     ringPos = 0;
     hopCount = 0;
+    reducing = false;
 }
 
 void ResonanceSuppressor::process (juce::AudioBuffer<float>& buffer, float amount)
@@ -131,6 +132,22 @@ void ResonanceSuppressor::process (juce::AudioBuffer<float>& buffer, float amoun
 void ResonanceSuppressor::processFrame (float amount)
 {
     const auto chans = numChans;
+
+    // Auto EQ at 0 and nothing still releasing: the spectral round trip would
+    // change nothing, so skip the FFTs and overlap-add the windowed input
+    // directly (the same output, the same latency, a fraction of the CPU).
+    if (amount <= 0.0f && ! reducing)
+    {
+        for (int ch = 0; ch < chans; ++ch)
+            for (int i = 0; i < fftSize; ++i)
+            {
+                const auto idx = (size_t) ((ringPos + i) % fftSize);
+                outAcc[ch][idx] += inRing[ch][idx] * window[(size_t) i] * window[(size_t) i] * 0.5f;
+            }
+        for (auto& d : display)
+            d.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
 
     // 1. Windowed frames (oldest sample first) -> spectrum.
     for (int ch = 0; ch < chans; ++ch)
@@ -195,6 +212,7 @@ void ResonanceSuppressor::processFrame (float amount)
     }
 
     // 6. Smooth over time (fast attack, slower release) and apply.
+    reducing = false;
     for (int k = 0; k < numBins; ++k)
     {
         auto& r = reductionDb[(size_t) k];
@@ -205,6 +223,7 @@ void ResonanceSuppressor::processFrame (float amount)
 
         if (r > 0.0f)
         {
+            reducing = true;
             const auto g = juce::Decibels::decibelsToGain (-r);
             for (int ch = 0; ch < chans; ++ch)
             {

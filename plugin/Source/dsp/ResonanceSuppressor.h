@@ -44,6 +44,7 @@ private:
     double sampleRate = 48000.0;
     int numChans = 2;
     int fftOrder = 11, fftSize = 2048, hop = 512, numBins = 1025;
+    bool reducing = false;   // any bin still being cut (or releasing)
 
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> window;                       // sqrt-Hann (analysis and synthesis)

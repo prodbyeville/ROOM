@@ -39,6 +39,8 @@ namespace
     }
 }
 
+std::atomic<int> PartitionedConvolver::audioThreadWaits { 0 };
+
 //==============================================================================
 
 struct PartitionedConvolver::Kernel
@@ -502,6 +504,8 @@ struct PartitionedConvolver::Impl : private juce::Thread
                 if (lastT < st.start)
                     continue;
                 const auto needed = (lastT - st.start) / st.p;
+                if (st.done.load (std::memory_order_acquire) < needed)
+                    audioThreadWaits.fetch_add (1, std::memory_order_relaxed);
                 while (st.done.load (std::memory_order_acquire) < needed && isThreadRunning())
                     blockDone.wait (5);   // only when rendering faster than real time
                 for (int c = 0; c < ch; ++c)

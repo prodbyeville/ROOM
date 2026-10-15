@@ -43,6 +43,10 @@ public:
     /** Audio thread: convolve in place. */
     void process (float* const* channels, int numChannels, int numSamples);
 
+    /** Diagnostics: how many times the audio thread had to wait for the
+        background stages (should stay 0 in real-time playback). */
+    static std::atomic<int> audioThreadWaits;
+
     static constexpr int numStages = 3;
     static constexpr int partitionSize[numStages] = { 128, 1024, 8192 };
     static constexpr int stageStart[numStages]    = { 0, 2048, 16384 };

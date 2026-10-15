@@ -8,6 +8,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "dsp/PartitionedConvolver.h"
+#include "dsp/ResonanceSuppressor.h"
 #include "presets/PresetLibrary.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -1092,6 +1093,38 @@ namespace
         return nullptr;
     }
 
+    void testSuppressorIdle()
+    {
+        std::cout << "Auto EQ idle path\n";
+        // At 0 (nothing to release) the auto eq skips its FFTs. It must still
+        // be an exact delay of its reported latency, before and after use.
+        room::ResonanceSuppressor sup;
+        sup.prepare (48000.0, 2);
+        const auto lat = sup.getLatency();
+        juce::Random rng (5);
+        const int n = 48000;
+        juce::AudioBuffer<float> in (2, n);
+        for (int c = 0; c < 2; ++c) for (int i = 0; i < n; ++i) in.setSample (c, i, rng.nextFloat() * 2.0f - 1.0f);
+        auto run = [&] (float amount, int from, int to, juce::AudioBuffer<float>& out)
+        {
+            for (int pos = from; pos < to; pos += 256)
+            {
+                const auto m = std::min (256, to - pos);
+                juce::AudioBuffer<float> part (2, m);
+                for (int c = 0; c < 2; ++c) part.copyFrom (c, 0, in, c, pos, m);
+                sup.process (part, amount);
+                for (int c = 0; c < 2; ++c) out.copyFrom (c, pos, part, c, 0, m);
+            }
+        };
+        juce::AudioBuffer<float> out (2, n);
+        run (0.0f, 0, n, out);
+        float worst = 0.0f;
+        for (int c = 0; c < 2; ++c)
+            for (int i = lat + 2048; i < n; ++i)
+                worst = std::max (worst, std::abs (out.getSample (c, i) - in.getSample (c, i - lat)));
+        check (worst < 1.0e-4f, "auto eq at 0 is an exact delay (no ffts)");
+    }
+
     void testConvolver()
     {
         std::cout << "Convolver\n";
@@ -1529,7 +1562,9 @@ namespace
         const bool realtime = args[0] == "--bench-rt";
         const double seconds = realtime ? 10.0 : 30.0;
         std::cout << (realtime ? "(real-time paced)\n" : "(as fast as possible)\n");
-        std::cout << "preset                     rate    block   % of one core   worst block (% of its time)\n";
+        std::cout << "preset                     rate    block   % of one core   worst block (% of its time)   waits\n";
+        if (realtime)
+            keys.insert (0, "bypass");   // baseline: how noisy this machine's scheduling is
         const std::vector<double> rates = realtime ? std::vector<double> { 48000.0, 96000.0 } : std::vector<double> { 44100.0, 48000.0, 96000.0 };
         const std::vector<int> blocks = realtime ? std::vector<int> { 64, 256 } : std::vector<int> { 64, 256, 512 };
         for (auto& key : keys)
@@ -1541,9 +1576,12 @@ namespace
                     p.setPlayConfigDetails (2, 2, sr, block);
                     p.prepareToPlay (sr, block);
                     auto& lib = p.getLibrary();
-                    if (auto* e = lib.find (key))
+                    if (key == "bypass")
+                        setParam (p, ParamIDs::bypass, 1.0f);
+                    else if (auto* e = lib.find (key))
                         p.applyPreset (lib.loadPreset (*e), e->key);
                     else { std::cout << "  (no preset " << key << ")\n"; break; }
+                    room::PartitionedConvolver::audioThreadWaits = 0;
                     waitForAnalysis (p);
                     juce::Thread::sleep (400);   // let the room build
 
@@ -1572,8 +1610,9 @@ namespace
                     }
                     const auto load = 100.0 * busy / seconds;
                     const auto worstPct = 100.0 * worst / (block / sr);
-                    std::printf ("%-26s %6.0f  %5d   %10.2f %%     %10.1f %%\n", key.fromFirstOccurrenceOf ("/", false, false).toRawUTF8(),
-                                 sr, block, load, worstPct);
+                    std::printf ("%-26s %6.0f  %5d   %10.2f %%     %10.1f %%   %8d\n",
+                                 (key.contains ("/") ? key.fromFirstOccurrenceOf ("/", false, false) : key).toRawUTF8(),
+                                 sr, block, load, worstPct, room::PartitionedConvolver::audioThreadWaits.load());
                 }
         return 0;
     }
@@ -1619,6 +1658,7 @@ int main (int argc, char* argv[])
     testLfo (root);
     testRoomsAndStudios (root, roomSource);
     testConvolver();
+    testSuppressorIdle();
     testModulationUi (root);
 
     root.getParentDirectory().deleteRecursively();
