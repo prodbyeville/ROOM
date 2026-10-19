@@ -1,7 +1,7 @@
-ROOM (working name) - Windows VST3, prototype build
-===================================================
+ROOM (working name) - prototype build
+=====================================
 
-INSTALL
+INSTALL (Windows, VST3)
 1. Close your DAW.
 2. Copy the "ROOM.vst3" folder into:
        C:\Program Files\Common Files\VST3
@@ -10,6 +10,19 @@ INSTALL
    - FL Studio: Options > Manage plugins > Find more plugins
    - Ableton: Preferences > Plug-ins > Rescan
 4. Look for "ROOM" by "Eville" under effects.
+
+INSTALL (Mac, AU + VST3, Apple Silicon and Intel, macOS 10.13 or later)
+1. Close your DAW.
+2. Open "ROOM <version>.pkg". This build isn't signed by Apple yet, so the
+   first time macOS says it can't be checked: right-click the .pkg, choose
+   Open, then Open again (or System Settings > Privacy & Security >
+   Open Anyway).
+3. The installer puts ROOM.component in /Library/Audio/Plug-Ins/Components
+   (Logic, GarageBand) and ROOM.vst3 in /Library/Audio/Plug-Ins/VST3
+   (Ableton, FL Studio, Studio One...). The "plugins" folder has both too,
+   if you'd rather copy them by hand.
+4. Open your DAW. Logic checks new plugins when it starts; others may need
+   a rescan. Look for "ROOM" by "Eville" under effects.
 
 USE
 1. Put ROOM on a track (a one-shot, a melody, anything).

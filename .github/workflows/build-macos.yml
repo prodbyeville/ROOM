@@ -1,0 +1,89 @@
+# Builds ROOM for macOS (AU + VST3, universal: Apple Silicon + Intel) on every
+# push, tests it, and uploads an installer as a downloadable artifact
+# (Actions tab -> latest run -> Artifacts).
+#
+# The build is NOT signed or notarized yet. That needs an Apple Developer
+# Program account; until then macOS will warn when the installer is opened
+# (right-click the .pkg -> Open to get past it).
+
+name: Build macOS AU + VST3
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S plugin -B build -G Xcode -DROOM_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel -- -quiet
+
+      - name: Check the binaries are universal
+        run: |
+          lipo -info build/ROOM_artefacts/Release/VST3/ROOM.vst3/Contents/MacOS/ROOM
+          lipo -info build/ROOM_artefacts/Release/AU/ROOM.component/Contents/MacOS/ROOM
+
+      # --- Tests ---------------------------------------------------------------
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Make test audio
+        run: |
+          pip install -r requirements.txt
+          python examples/make_test_audio.py
+
+      - name: Host test (load room, process, stress parameters, save/reload)
+        run: |
+          for room in hall_clap bottle_tap room_tone; do
+            build/room_hosttest_artefacts/Release/room_hosttest build/ROOM_artefacts/Release/VST3/ROOM.vst3 \
+              examples/audio/$room.wav examples/audio/melody.wav host_$room.wav
+          done
+
+      - name: ROOMS presets + Space tests
+        run: build/room_tests_artefacts/Release/room_tests
+
+      - name: pluginval (strictness 10, VST3 + AU)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          unzip -q pluginval.zip -d pluginval
+          PV=pluginval/pluginval.app/Contents/MacOS/pluginval
+          $PV --strictness-level 10 --skip-gui-tests --validate build/ROOM_artefacts/Release/VST3/ROOM.vst3
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/ROOM_artefacts/Release/AU/ROOM.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          $PV --strictness-level 10 --skip-gui-tests --validate ~/Library/Audio/Plug-Ins/Components/ROOM.component
+
+      - name: auval (Apple's own Audio Unit check, what Logic runs)
+        run: auval -v aufx Room Evll
+
+      # --- Package ---------------------------------------------------------------
+      - name: Package (unsigned .pkg installer + the raw plugins)
+        run: |
+          VERSION=$(sed -nE 's/^project\(ROOM VERSION ([0-9.]+).*/\1/p' plugin/CMakeLists.txt)
+          mkdir -p pkgroot/vst3 pkgroot/au package
+          cp -R build/ROOM_artefacts/Release/VST3/ROOM.vst3 pkgroot/vst3/
+          cp -R build/ROOM_artefacts/Release/AU/ROOM.component pkgroot/au/
+          pkgbuild --root pkgroot/vst3 --install-location /Library/Audio/Plug-Ins/VST3 \
+            --identifier com.prodbyeville.room.vst3 --version "$VERSION" room-vst3.pkg
+          pkgbuild --root pkgroot/au --install-location /Library/Audio/Plug-Ins/Components \
+            --identifier com.prodbyeville.room.au --version "$VERSION" room-au.pkg
+          productbuild --package room-vst3.pkg --package room-au.pkg "package/ROOM $VERSION.pkg"
+          mkdir -p package/plugins
+          cp -R pkgroot/vst3/ROOM.vst3 pkgroot/au/ROOM.component package/plugins/
+          cp plugin/INSTALL.txt package/
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ROOM-macOS
+          path: package/
+          if-no-files-found: error

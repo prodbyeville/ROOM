@@ -8,6 +8,12 @@
 # -DFETCHCONTENT_SOURCE_DIR_JUCE=/path/to/JUCE
 
 cmake_minimum_required(VERSION 3.22)
+
+# macOS: one universal binary (Apple Silicon + Intel), macOS 10.13 and up.
+# These must be set before project(); they are ignored on other platforms.
+set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
+
 project(ROOM VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -44,14 +50,20 @@ set(ROOM_DEFINITIONS
     JUCE_USE_MP3AUDIOFORMAT=1)
 
 # ---------------------------------------------------------------------------
-# The plugin
+# The plugin (VST3 everywhere, plus Audio Unit on macOS for Logic/GarageBand)
 # ---------------------------------------------------------------------------
+set(ROOM_FORMATS VST3)
+if (APPLE)
+    list(APPEND ROOM_FORMATS AU)
+endif()
+
 juce_add_plugin(ROOM
     COMPANY_NAME "Eville"
     BUNDLE_ID "com.prodbyeville.room"
     PLUGIN_MANUFACTURER_CODE Evll
     PLUGIN_CODE Room
-    FORMATS VST3
+    FORMATS ${ROOM_FORMATS}
+    AU_MAIN_TYPE kAudioUnitType_Effect
     PRODUCT_NAME "ROOM"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
