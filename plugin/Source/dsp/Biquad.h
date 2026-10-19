@@ -56,31 +56,39 @@ namespace design
         return { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
     }
 
+    /** 2 pi f / sr, with f kept safely below Nyquist. A filter asked for a
+        frequency at or above sr / 2 (e.g. a 16 kHz band at 22.05 kHz) would
+        otherwise come out unstable and fill the output with NaN. */
+    inline double angle (double f, double sr)
+    {
+        return 2.0 * kPi * std::fmin (std::fmax (f, 1.0), 0.49 * sr) / sr;
+    }
+
     // RBJ "Audio EQ Cookbook" designs ------------------------------------------
 
     inline BiquadCoeffs lowpass (double f, double q, double sr)
     {
-        const auto w = 2.0 * kPi * f / sr, cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+        const auto w = angle (f, sr), cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
         return normalise ((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
     }
 
     inline BiquadCoeffs highpass (double f, double q, double sr)
     {
-        const auto w = 2.0 * kPi * f / sr, cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+        const auto w = angle (f, sr), cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
         return normalise ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
     }
 
     inline BiquadCoeffs peaking (double f, double q, double gainDb, double sr)
     {
         const auto A = std::pow (10.0, gainDb / 40.0);
-        const auto w = 2.0 * kPi * f / sr, cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+        const auto w = angle (f, sr), cw = std::cos (w), alpha = std::sin (w) / (2.0 * q);
         return normalise (1 + alpha * A, -2 * cw, 1 - alpha * A, 1 + alpha / A, -2 * cw, 1 - alpha / A);
     }
 
     inline BiquadCoeffs lowShelf (double f, double gainDb, double sr)
     {
         const auto A = std::pow (10.0, gainDb / 40.0);
-        const auto w = 2.0 * kPi * f / sr, cw = std::cos (w);
+        const auto w = angle (f, sr), cw = std::cos (w);
         const auto alpha = std::sin (w) / 2.0 * std::sqrt (2.0); // shelf slope S = 1
         const auto sq = 2.0 * std::sqrt (A) * alpha;
         return normalise (A * ((A + 1) - (A - 1) * cw + sq),
@@ -94,7 +102,7 @@ namespace design
     inline BiquadCoeffs highShelf (double f, double gainDb, double sr)
     {
         const auto A = std::pow (10.0, gainDb / 40.0);
-        const auto w = 2.0 * kPi * f / sr, cw = std::cos (w);
+        const auto w = angle (f, sr), cw = std::cos (w);
         const auto alpha = std::sin (w) / 2.0 * std::sqrt (2.0);
         const auto sq = 2.0 * std::sqrt (A) * alpha;
         return normalise (A * ((A + 1) + (A - 1) * cw + sq),
@@ -109,7 +117,7 @@ namespace design
         scipy.signal.iirpeak, which the Python prototype used. */
     inline BiquadCoeffs resonator (double f, double q, double sr)
     {
-        const auto w0 = 2.0 * kPi * f / sr;
+        const auto w0 = angle (f, sr);
         const auto beta = std::tan ((w0 / q) / 2.0);
         const auto g = 1.0 / (1.0 + beta);
         return { 1.0 - g, 0.0, -(1.0 - g), -2.0 * g * std::cos (w0), 2.0 * g - 1.0 };

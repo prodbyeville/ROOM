@@ -1297,6 +1297,133 @@ namespace
         }
     }
 
+    /** Like Apple's auval stress test: a fresh ROOM (Init Room loaded), 44.1 kHz,
+        every parameter jumped to a random value before each block, noise in.
+        Nothing may come out that isn't a finite number. */
+    void testStress()
+    {
+        std::cout << "Stress (auval-style)\n";
+        RoomAudioProcessor::startWithDefaultStudio = true;
+        int bad = 0, badFirstBlock = -1, badFirstSample = -1;
+        for (const auto [ins, outs] : { std::pair { 2, 2 }, std::pair { 1, 2 }, std::pair { 1, 1 } })
+        for (const int maxBlock : { 512, 1156, 4096 })
+            for (const int firstParamsJump : { 0, 1 })
+            {
+                RoomAudioProcessor p;
+                juce::AudioProcessor::BusesLayout layout;
+                layout.inputBuses.add (ins == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+                layout.outputBuses.add (outs == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+                if (! p.setBusesLayout (layout))
+                    continue;
+                p.setRateAndBufferSizeDetails (44100.0, maxBlock);
+                p.prepareToPlay (44100.0, maxBlock);
+                const auto nch = std::max (ins, outs);
+                juce::AudioBuffer<float> io (nch, 512);
+                juce::MidiBuffer midi;
+                juce::Random r (maxBlock * 7 + firstParamsJump);
+                const auto blocks = (int) (20.0 * 44100.0 / 512.0);
+                for (int b = 0; b < blocks; ++b)
+                {
+                    if (firstParamsJump == 1 || b > 0)
+                        for (auto* prm : p.getParameters())
+                            prm->setValueNotifyingHost (r.nextFloat());
+                    for (int ch = 0; ch < nch; ++ch)
+                        for (int i = 0; i < 512; ++i)
+                            io.setSample (ch, i, ch < ins ? (r.nextFloat() * 2.0f - 1.0f) * 0.5f : 0.0f);
+                    p.processBlock (io, midi);
+                    for (int ch = 0; ch < outs; ++ch)
+                        for (int i = 0; i < 512; ++i)
+                            if (! std::isfinite (io.getSample (ch, i)))
+                            {
+                                if (bad++ == 0)
+                                {
+                                    badFirstBlock = b; badFirstSample = i;
+                                    std::cout << "    first bad: " << ins << " in / " << outs << " out, max block " << maxBlock << "\n";
+                                }
+                            }
+                }
+            }
+        // Every sample rate a host might use, with its room fully built for it.
+        for (const double rate : { 11025.0, 22050.0, 32000.0, 44100.0, 88200.0, 192000.0 })
+        {
+            RoomAudioProcessor p;
+            p.setPlayConfigDetails (2, 2, rate, 512);
+            p.prepareToPlay (rate, 512);
+            juce::AudioBuffer<float> io (2, 512);
+            juce::MidiBuffer midi;
+            juce::Random r (7);
+            int badHere = 0;
+            // Let the room rebuild for this rate and swap in before measuring.
+            for (int b = 0; b < 150; ++b)
+            {
+                io.clear();
+                p.processBlock (io, midi);
+                juce::Thread::sleep (5);
+            }
+            for (int b = 0; b < (int) (2.0 * rate / 512.0); ++b)
+            {
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 512; ++i)
+                        io.setSample (ch, i, (r.nextFloat() * 2.0f - 1.0f) * 0.5f);
+                p.processBlock (io, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 512; ++i)
+                        if (! std::isfinite (io.getSample (ch, i)))
+                            ++badHere;
+            }
+            if (badHere > 0)
+                std::cout << "    " << rate << " Hz: " << badHere << " bad samples\n";
+            check (badHere == 0, ("no NaN or inf at " + juce::String (rate, 0) + " Hz").toRawUTF8());
+        }
+
+        // Like auval: the same instance re-initialised over and over with new
+        // layouts and rates, rendering right away each time (no settling).
+        {
+            RoomAudioProcessor p;
+            juce::Random r (99);
+            juce::MidiBuffer midi;
+            const std::tuple<int, int, double, int> steps[] = {
+                { 2, 2, 48000.0, 512 }, { 1, 1, 44100.0, 1156 }, { 1, 2, 96000.0, 256 }, { 2, 2, 22050.0, 4096 },
+                { 1, 1, 48000.0, 512 }, { 2, 2, 44100.0, 1156 }, { 1, 2, 44100.0, 512 }, { 2, 2, 44100.0, 512 } };
+            for (int round = 0; round < 4; ++round)
+                for (const auto& [ins, outs, rate, maxBlock] : steps)
+                {
+                    p.releaseResources();
+                    juce::AudioProcessor::BusesLayout layout;
+                    layout.inputBuses.add (ins == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+                    layout.outputBuses.add (outs == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+                    p.setBusesLayout (layout);
+                    p.setRateAndBufferSizeDetails (rate, maxBlock);
+                    p.prepareToPlay (rate, maxBlock);
+                    const auto nch = std::max (ins, outs);
+                    juce::AudioBuffer<float> io (nch, std::min (512, maxBlock));
+                    for (int b = 0; b < 40; ++b)
+                    {
+                        for (auto* prm : p.getParameters())
+                            prm->setValueNotifyingHost (r.nextFloat());
+                        for (int ch = 0; ch < nch; ++ch)
+                            for (int i = 0; i < io.getNumSamples(); ++i)
+                                io.setSample (ch, i, ch < ins ? (r.nextFloat() * 2.0f - 1.0f) * 0.5f : 0.0f);
+                        p.processBlock (io, midi);
+                        for (int ch = 0; ch < outs; ++ch)
+                            for (int i = 0; i < io.getNumSamples(); ++i)
+                                if (! std::isfinite (io.getSample (ch, i)) && bad++ == 0)
+                                {
+                                    badFirstBlock = b; badFirstSample = i;
+                                    std::cout << "    first bad (re-init): " << ins << " in / " << outs << " out, "
+                                              << rate << " Hz, max block " << maxBlock << ", round " << round << "\n";
+                                }
+                        if (b % 8 == 0)
+                            juce::Thread::sleep (1);
+                    }
+                }
+        }
+        RoomAudioProcessor::startWithDefaultStudio = false;
+        if (bad > 0)
+            std::cout << "    " << bad << " bad samples, first at block " << badFirstBlock << " sample " << badFirstSample << "\n";
+        check (bad == 0, "random parameters every block never produce NaN or inf");
+    }
+
     void testSuppressorIdle()
     {
         std::cout << "Auto EQ idle path\n";
@@ -1875,6 +2002,7 @@ int main (int argc, char* argv[])
     testConvolver();
     testFirstRun();
     testSuppressorIdle();
+    testStress();
     testFactoryPresets (root);
     testModulationUi (root);
 

@@ -105,6 +105,10 @@ juce::AudioBuffer<float> synthesizeIR (const RoomAnalysis& a, double sr,
         std::fill (chan.begin(), chan.end(), 0.0);
         for (int b = 0; b < a.numBands(); ++b)
         {
+            // At low sample rates the top bands lie above what the rate can
+            // carry (e.g. above 11 kHz at 22.05 kHz): leave them out.
+            if (a.bandEdgesHz[(size_t) b] >= 0.45 * sr)
+                continue;
             BandFilter f;
             f.design (a.bandEdgesHz[(size_t) b], a.bandEdgesHz[(size_t) b + 1], sr);
 
