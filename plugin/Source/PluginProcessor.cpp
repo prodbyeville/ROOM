@@ -736,6 +736,9 @@ void RoomAudioProcessor::finishRecording()
     if (recordArmed.load() && recordStopRequest.load()
         && juce::Time::getMillisecondCounter() - recordStopTime > 300)
     {
+        // Status first, so nothing ever sees "not recording" while it still
+        // says "recording".
+        status = Status::analyzing;
         recordArmed = false;
         recordStopRequest = false;
         recordFinished = true;

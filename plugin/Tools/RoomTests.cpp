@@ -756,7 +756,9 @@ namespace
         // If the host isn't running audio, stopping still finishes cleanly.
         p.startRecording();
         p.stopRecording();
-        waitUntil ([&] { return ! p.isRecording() && p.getStatus() != RoomAudioProcessor::Status::analyzing; }, 3000);
+        waitUntil ([&] { return ! p.isRecording()
+                                && (p.getStatus() == RoomAudioProcessor::Status::failed
+                                    || p.getStatus() == RoomAudioProcessor::Status::ready); }, 3000);
         check (! p.isRecording(), "stop works even with no audio running");
         check (p.getStatus() == RoomAudioProcessor::Status::failed, "an empty recording is reported, not loaded");
     }
