@@ -52,6 +52,17 @@ jobs:
       - name: ROOMS presets + Space tests
         run: build/room_tests_artefacts/Release/room_tests
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: License server tests + plugin end to end
+        run: |
+          (cd server && node --test test/server.test.mjs)
+          (cd server && AUTO_APPROVE=e2e@example.com node test/serve.mjs 8787 > serve.log 2>&1 &)
+          sleep 2
+          build/room_tests_artefacts/Release/room_tests --license-e2e http://127.0.0.1:8787 || { cat server/serve.log; exit 1; }
+
       - name: pluginval (strictness 10, VST3 + AU)
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip

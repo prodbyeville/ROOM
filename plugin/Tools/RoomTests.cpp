@@ -2126,6 +2126,68 @@ namespace
         return 0;
     }
 
+// End to end against the real server code: run `node server/test/serve.mjs 8787`
+// with AUTO_APPROVE=e2e@example.com, then `room_tests --license-e2e http://127.0.0.1:8787`.
+int licenseE2E (const juce::String& server)
+{
+    namespace lic = room::licensing;
+   #ifdef _WIN32
+    _putenv_s ("ROOM_LICENSE_SERVER", server.toRawUTF8());
+   #else
+    setenv ("ROOM_LICENSE_SERVER", server.toRawUTF8(), 1);
+   #endif
+    lic::Manager::setPublicKeyForTests (room::ed25519::publicKeyFromSeed (testSeed()));
+    lic::Manager::setMachineIdForTests ("e2e-machine");
+    lic::Manager::setClockForTests (0);
+
+    auto serverPost = [&] (const juce::String& path, const juce::String& body)
+    {
+        auto stream = juce::URL (server + path).withPOSTData (body)
+                          .createInputStream (juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inPostData)
+                                                  .withExtraHeaders ("Content-Type: application/json"));
+        return stream != nullptr ? juce::JSON::parse (stream->readEntireStreamAsString()) : juce::var();
+    };
+    auto waitFor = [] (std::function<bool()> done)
+    {
+        for (int i = 0; i < 200 && ! done(); ++i)
+            juce::Thread::sleep (50);
+        return done();
+    };
+
+    lic::Manager m;
+    check (m.getStatus().state == lic::State::welcome, "e2e: starts at the welcome screen");
+
+    m.startBrowserActivation();
+    check (waitFor ([&] { return m.getStatus().isActive(); }), "e2e: browser sign-in activates");
+    check (m.getStatus().type == lic::Type::launch, "e2e: launch license in the launch window");
+    check (lic::statusLine (m.getStatus(), m.now()).startsWith ("open until"), "e2e: open until line");
+
+    // The lock date passes (server time); a check brings back the expired token.
+    serverPost ("/__clock", "{\"t\": " + juce::String (juce::Time::currentTimeMillis() / 1000 + 60 * 86400) + "}");
+    m.refreshNow();
+    check (waitFor ([&] { return m.getStatus().state == lic::State::expired; }), "e2e: locked after the lock date, by server time");
+    check (m.getStatus().checkoutUrl.contains ("launch"), "e2e: unlock goes to the launch checkout");
+
+    // Buying: the next check unlocks, no key typed.
+    const auto key = serverPost ("/__buy", "{\"email\": \"e2e@example.com\"}").getProperty ("key", {}).toString();
+    check (key.startsWith ("ROOM-"), "e2e: purchase made a key");
+    m.refreshNow();
+    check (waitFor ([&] { return m.getStatus().isActive() && m.getStatus().type == lic::Type::full; }), "e2e: purchase unlocks on the next check");
+
+    m.deactivateThisComputer();
+    check (waitFor ([&] { return m.getStatus().state == lic::State::welcome; }), "e2e: deactivate forgets the license here");
+
+    m.activateWithKey (key.toLowerCase());
+    check (waitFor ([&] { return m.getStatus().isActive() && m.getStatus().type == lic::Type::full; }), "e2e: key activation");
+
+    m.activateWithKey ("ROOM-NOPE-NOPE-NOPE-NOPE");
+    check (waitFor ([&] { return m.getLastMessage().isNotEmpty(); }), "e2e: a bad key says why");
+    check (m.getStatus().isActive(), "e2e: a bad key doesn't undo a good license");
+
+    std::cout << (failures == 0 ? "LICENSE E2E PASSED" : "LICENSE E2E FAILED") << " (" << checks - failures << "/" << checks << ")\n";
+    return failures == 0 ? 0 : 1;
+}
+
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -2153,6 +2215,8 @@ int main (int argc, char* argv[])
         return screenshot (args);
     if (args[0] == "--bench" || args[0] == "--bench-rt")
         return bench (args);
+    if (args[0] == "--license-e2e" && args.size() > 1)
+        return licenseE2E (args[1]);
     if (args[0] == "--levels")
         return levels();
     if (args[0] == "--render-presets" && args.size() > 1)

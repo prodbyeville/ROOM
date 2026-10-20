@@ -1,0 +1,36 @@
+# ROOM license server. Setup steps: README.md
+name = "room-license"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+routes = [{ pattern = "license.prodbyeville.com", custom_domain = true }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "room-licenses"
+database_id = "REPLACE-with-the-id-from-wrangler-d1-create"
+
+[vars]
+PUBLIC_URL = "https://license.prodbyeville.com"
+SITE_ORIGIN = "https://prodbyeville.com"
+FROM_EMAIL = "room <room@prodbyeville.com>"
+SUPPORT_EMAIL = ""
+# Unix seconds (https://www.epochconverter.com). Signups before LAUNCH_ENDS_AT
+# get a launch license; every launch license stops at LOCK_AT.
+LAUNCH_ENDS_AT = "0"
+LOCK_AT = "0"
+TRIAL_DAYS = "14"
+MAX_MACHINES = "3"
+GRACE_DAYS = "14"
+SHORT_CHECK_DAYS = "3"
+CHECKOUT_LAUNCH_URL = ""
+CHECKOUT_FULL_URL = ""
+DOWNLOAD_MAC_URL = ""
+DOWNLOAD_WIN_URL = ""
+# Comma-separated Shopify product ids for room. Empty = any line item titled "room".
+SHOPIFY_PRODUCT_IDS = ""
+
+# Secrets (wrangler secret put NAME), never in this file:
+#   SIGNING_KEY             from: node scripts/make-keys.mjs
+#   RESEND_API_KEY          from resend.com
+#   SHOPIFY_WEBHOOK_SECRET  from Shopify > Settings > Notifications > Webhooks

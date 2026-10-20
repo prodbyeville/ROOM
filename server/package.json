@@ -1,0 +1,11 @@
+{
+  "name": "room-license",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/server.test.mjs",
+    "serve": "node test/serve.mjs",
+    "keys": "node scripts/make-keys.mjs",
+    "deploy": "wrangler deploy"
+  }
+}
