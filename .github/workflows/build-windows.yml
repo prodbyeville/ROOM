@@ -64,6 +64,14 @@ jobs:
           Copy-Item -Recurse build/ROOM_artefacts/Release/VST3/ROOM.vst3 package/
           Copy-Item plugin/INSTALL.txt package/
 
+      - name: Installer (Inno Setup, unsigned)
+        run: |
+          choco install innosetup --no-progress -y
+          $version = (Select-String -Path plugin/CMakeLists.txt -Pattern 'project\(ROOM VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DAppVersion=$version" "/DSourceDir=$PWD\package" "/O$PWD\package" plugin/Installer/room.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem package
+
       - uses: actions/upload-artifact@v5
         with:
           name: ROOM-VST3-Windows

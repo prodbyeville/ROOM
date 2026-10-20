@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- macOS installer layout for ROOM. @VERSION@ is filled in by CI. -->
+<installer-gui-script minSpecVersion="2">
+    <title>ROOM @VERSION@</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="au"/>
+        <line choice="vst3"/>
+    </choices-outline>
+    <choice id="au" title="Audio Unit (Logic, GarageBand)" description="Installs ROOM.component in /Library/Audio/Plug-Ins/Components.">
+        <pkg-ref id="com.prodbyeville.room.au"/>
+    </choice>
+    <choice id="vst3" title="VST3 (Ableton, FL Studio, Studio One and more)" description="Installs ROOM.vst3 in /Library/Audio/Plug-Ins/VST3.">
+        <pkg-ref id="com.prodbyeville.room.vst3"/>
+    </choice>
+    <pkg-ref id="com.prodbyeville.room.au" version="@VERSION@">room-au.pkg</pkg-ref>
+    <pkg-ref id="com.prodbyeville.room.vst3" version="@VERSION@">room-vst3.pkg</pkg-ref>
+</installer-gui-script>

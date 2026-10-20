@@ -20,7 +20,7 @@ juce::String UpdateChecker::currentVersion()
    #ifdef JucePlugin_VersionString
     return JucePlugin_VersionString;
    #else
-    return "0.1.0";
+    return "1.0.0";
    #endif
 }
 

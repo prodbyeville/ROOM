@@ -1,11 +1,14 @@
-ROOM (working name) - prototype build
-=====================================
+room 1.0
+========
 
 INSTALL (Windows, VST3)
 1. Close your DAW.
-2. Copy the "ROOM.vst3" folder into:
+2. Run "ROOM 1.0.0 Setup.exe". It puts ROOM.vst3 in
        C:\Program Files\Common Files\VST3
-   (Windows will ask for admin permission. Click Continue.)
+   This build isn't signed yet, so Windows may say "Windows protected your
+   PC": click "More info", then "Run anyway".
+   (Prefer to copy it by hand? The ROOM.vst3 folder is in the download too:
+   copy it into the folder above.)
 3. Open your DAW and rescan plugins if it doesn't find ROOM by itself.
    - FL Studio: Options > Manage plugins > Find more plugins
    - Ableton: Preferences > Plug-ins > Rescan
