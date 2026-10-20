@@ -10,6 +10,7 @@
 #include "presets/PresetLibrary.h"
 #include "dsp/Lfo.h"
 #include "Modulation.h"
+#include "licensing/License.h"
 
 namespace ParamIDs
 {
@@ -186,12 +187,32 @@ public:
     /** Load "Init Room" into every new instance (tests switch it off). */
     static inline bool startWithDefaultStudio = true;
 
+    //==========================================================================
+    // Licensing. Decided when this instance is created: locked means the
+    // audio passes through dry (latency-matched) and the editor shows the
+    // welcome / unlock screen. A check during the session can unlock ROOM but
+    // never locks it; that waits for the next load.
+    static inline bool enforceLicense = ROOM_LICENSING != 0;
+    bool isLicenseLocked() const { return licenseLocked.load(); }
+    room::licensing::Manager& getLicensing() { return *licensing; }
+    /** Unlock now if the license has become active (called on license changes). */
+    void licenseChanged();
+
     /** UI state saved with the project. */
     float editorScale = 1.0f;
     bool advancedOpen = false;
     bool tipsEnabled = true;   // hover tips on knobs and keys
 
 private:
+    juce::SharedResourcePointer<room::licensing::Manager> licensing;
+    std::atomic<bool> licenseLocked { false };
+    struct LicenseWatch : juce::ChangeListener
+    {
+        explicit LicenseWatch (RoomAudioProcessor& p) : owner (p) {}
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { owner.licenseChanged(); }
+        RoomAudioProcessor& owner;
+    } licenseWatch { *this };
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void parameterChanged (const juce::String& id, float) override;
 

@@ -82,7 +82,16 @@ target_sources(ROOM PRIVATE
     Source/EvilleLookAndFeel.cpp
     Source/Screens.cpp
     Source/UpdateChecker.cpp
+    Source/licensing/Ed25519.cpp
+    Source/licensing/License.cpp
+    ThirdParty/monocypher/monocypher.c
     Source/presets/PresetBrowser.cpp)
+
+# Licensing: when ON, ROOM needs an active license (launch, trial or full) and
+# stays locked (dry, controls frozen) without one. OFF until the license
+# server is live: the licensing code is still built and tested, it just never locks.
+option(ROOM_LICENSING "Require a license to use ROOM" OFF)
+target_compile_definitions(ROOM PUBLIC ROOM_LICENSING=$<BOOL:${ROOM_LICENSING}>)
 target_include_directories(ROOM PRIVATE Source)
 target_compile_definitions(ROOM PUBLIC ${ROOM_DEFINITIONS})
 # Built-in "Factory" ROOMS (.room) and STUDIOS (.studio), made by Tools/make_factory_presets.sh

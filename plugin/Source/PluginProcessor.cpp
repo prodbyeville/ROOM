@@ -142,6 +142,9 @@ RoomAudioProcessor::RoomAudioProcessor()
     worker = std::make_unique<Worker> (*this);
     snapshotPreset();
 
+    licenseLocked = enforceLicense && ! licensing->getStatus().isActive();
+    licensing->addChangeListener (&licenseWatch);
+
     // A brand-new ROOM starts with a room in it ("Init Room"), so sound passes
     // through the moment it's inserted. Loading a project replaces it (an
     // empty saved state stays empty: setStateInformation clears the room).
@@ -157,8 +160,16 @@ RoomAudioProcessor::RoomAudioProcessor()
             }
 }
 
+void RoomAudioProcessor::licenseChanged()
+{
+    // Only ever unlocks: locking waits for the next time ROOM loads.
+    if (licenseLocked.load() && licensing->getStatus().isActive())
+        licenseLocked = false;
+}
+
 RoomAudioProcessor::~RoomAudioProcessor()
 {
+    licensing->removeChangeListener (&licenseWatch);
     for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
         apvts.removeParameterListener (id, this);
     worker.reset();
@@ -339,7 +350,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     if (! recordArmed.load())
         recordBuf.setSize (2, (int) (maxRecordSeconds * sampleRate));
     bypassMix.reset (sampleRate, 0.03);
-    bypassMix.setCurrentAndTargetValue (bypassParam->load() > 0.5f ? 1.0f : 0.0f);
+    bypassMix.setCurrentAndTargetValue (bypassParam->load() > 0.5f || licenseLocked.load() ? 1.0f : 0.0f);
     currentSampleRate = sampleRate;
     worker->requestRebuild();   // the IR has to be rebuilt at this sample rate
 }
@@ -478,8 +489,9 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
     }
 
-    // Bypass: crossfade to the untouched (latency-matched) input.
-    bypassMix.setTargetValue (bypassParam->load() > 0.5f ? 1.0f : 0.0f);
+    // Bypass (or locked, without a license): crossfade to the untouched,
+    // latency-matched input.
+    bypassMix.setTargetValue (bypassParam->load() > 0.5f || licenseLocked.load() ? 1.0f : 0.0f);
     if ((bypassMix.isSmoothing() || bypassMix.getTargetValue() > 0.5f) && n <= dryBlock.getNumSamples())
     {
         for (int i = 0; i < n; ++i)

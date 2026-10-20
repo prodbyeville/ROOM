@@ -150,6 +150,30 @@ private:
     juce::TextButton back { "back" }, next { "next" }, skip { "skip" };
 };
 
+/** Licensing screens, over the whole unit: "start your session" the first
+    time, "unlock room" once a launch period or trial is over. While it shows,
+    the controls underneath can't be touched (the audio passes through dry). */
+class LicenseOverlay : public juce::Component,
+                       private juce::ChangeListener
+{
+public:
+    explicit LicenseOverlay (RoomAudioProcessor&);
+    ~LicenseOverlay() override;
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    /** Show / hide to match the processor; call after any license change. */
+    void update();
+    std::function<void()> onChange;   // the editor repaints its status line
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    juce::Rectangle<int> cardArea() const;
+    void askForKey();
+    RoomAudioProcessor& proc;
+    juce::TextButton primary, secondary, keyLink { "have a key?" };
+    juce::String title, text, note;
+};
+
 class RoomAudioProcessorEditor : public juce::AudioProcessorEditor,
                                  public juce::DragAndDropContainer,
                                  private juce::Timer
@@ -220,6 +244,7 @@ private:
     void showAbout();
     UpdateChecker updates;
     TourOverlay tour;
+    LicenseOverlay licenseOverlay { proc };
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled
 
