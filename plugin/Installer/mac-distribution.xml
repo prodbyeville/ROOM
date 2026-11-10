@@ -3,6 +3,8 @@
 <installer-gui-script minSpecVersion="2">
     <title>ROOM @VERSION@</title>
     <welcome file="welcome.html" mime-type="text/html"/>
+    <background file="background.png" alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background.png" alignment="bottomleft" scaling="none"/>
     <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
     <domains enable_localSystem="true"/>
     <choices-outline>

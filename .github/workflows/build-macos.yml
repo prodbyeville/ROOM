@@ -90,6 +90,7 @@ jobs:
             --identifier com.prodbyeville.room.au --version "$VERSION" pkgs/room-au.pkg
           mkdir -p pkgres
           sed "s/@VERSION@/$VERSION/g" plugin/Installer/mac-welcome.html > pkgres/welcome.html
+          cp plugin/Installer/mac-resources/background.png pkgres/
           sed "s/@VERSION@/$VERSION/g" plugin/Installer/mac-distribution.xml > distribution.xml
           productbuild --distribution distribution.xml --resources pkgres --package-path pkgs "package/ROOM-$VERSION-macOS.pkg"
           pkgutil --check-signature "package/ROOM-$VERSION-macOS.pkg" || true
