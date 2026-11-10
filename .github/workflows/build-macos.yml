@@ -42,7 +42,7 @@ jobs:
           pip install -r requirements.txt
           python examples/make_test_audio.py
 
-      - name: Host test (no license on CI: dry passthrough, parameters, save/reload)
+      - name: "Host test (no license on CI: dry passthrough, parameters, save/reload)"
         run: |
           for room in hall_clap bottle_tap room_tone; do
             build/room_hosttest_artefacts/Release/room_hosttest build/ROOM_artefacts/Release/VST3/ROOM.vst3 \

@@ -1525,21 +1525,21 @@ namespace
 
             check (! m->installForTests (makeLicense ("warp")), "the manager refuses a WARP license");
             check (m->installForTests (makeLicense()), "the manager takes a good license");
-            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            m->dispatchPendingMessages();
             check (! blank.isLicenseLocked(), "signing in unlocks an open ROOM right away");
             check (m->licensedEmail() == "Ann@Example.com", "the menu knows who it's licensed to");
             check (folder.getChildFile ("license.json").existsAsFile(), "the license is saved in ROOM's own folder");
 
             // A revoked license (the 14-day check) doesn't lock a session that's open.
             m->revokeForTests();
-            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            m->dispatchPendingMessages();
             check (! blank.isLicenseLocked(), "a revoked license never locks a session that's already open");
             RoomAudioProcessor next;
             check (next.isLicenseLocked(), "the next load after revoking is locked");
 
             // "deactivate this computer" locks right away.
             m->installForTests (makeLicense());
-            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            m->dispatchPendingMessages();
             check (! next.isLicenseLocked(), "signing in again unlocks it");
             next.lockLicense();
             check (next.isLicenseLocked(), "deactivating locks ROOM right away");
