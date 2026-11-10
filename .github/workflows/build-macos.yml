@@ -42,26 +42,15 @@ jobs:
           pip install -r requirements.txt
           python examples/make_test_audio.py
 
-      - name: Host test (load room, process, stress parameters, save/reload)
+      - name: Host test (no license on CI: dry passthrough, parameters, save/reload)
         run: |
           for room in hall_clap bottle_tap room_tone; do
             build/room_hosttest_artefacts/Release/room_hosttest build/ROOM_artefacts/Release/VST3/ROOM.vst3 \
-              examples/audio/$room.wav examples/audio/melody.wav host_$room.wav
+              examples/audio/$room.wav examples/audio/melody.wav host_$room.wav --locked
           done
 
       - name: ROOMS presets + Space tests
         run: build/room_tests_artefacts/Release/room_tests
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: License server tests + plugin end to end
-        run: |
-          (cd server && node --test test/server.test.mjs)
-          (cd server && AUTO_APPROVE=e2e@example.com node test/serve.mjs 8787 > serve.log 2>&1 &)
-          sleep 2
-          build/room_tests_artefacts/Release/room_tests --license-e2e http://127.0.0.1:8787 || { cat server/serve.log; exit 1; }
 
       - name: pluginval (strictness 10, VST3 + AU)
         run: |
@@ -78,26 +67,36 @@ jobs:
         run: auval -v aufx Room Evll
 
       # --- Package ---------------------------------------------------------------
-      - name: Package (unsigned .pkg installer + the raw plugins)
+      - name: Package (unsigned installer, ad-hoc signed plugins)
         run: |
           VERSION=$(sed -nE 's/^project\(ROOM VERSION ([0-9.]+).*/\1/p' plugin/CMakeLists.txt)
-          mkdir -p pkgroot/vst3 pkgroot/au package
+          mkdir -p pkgroot/vst3 pkgroot/au pkgs package
           cp -R build/ROOM_artefacts/Release/VST3/ROOM.vst3 pkgroot/vst3/
           cp -R build/ROOM_artefacts/Release/AU/ROOM.component pkgroot/au/
-          pkgbuild --root pkgroot/vst3 --install-location /Library/Audio/Plug-Ins/VST3 \
-            --identifier com.prodbyeville.room.vst3 --version "$VERSION" room-vst3.pkg
-          pkgbuild --root pkgroot/au --install-location /Library/Audio/Plug-Ins/Components \
-            --identifier com.prodbyeville.room.au --version "$VERSION" room-au.pkg
+          # No Apple Developer account yet: ad-hoc signatures (users click Open Anyway once).
+          for bundle in pkgroot/vst3/ROOM.vst3 pkgroot/au/ROOM.component; do
+            codesign --force --sign - "$bundle"
+            codesign --verify --verbose=1 "$bundle"
+          done
+          # Not relocatable: an older copy elsewhere can't capture the install.
+          for kind in au vst3; do
+            pkgbuild --analyze --root pkgroot/$kind $kind.plist >/dev/null
+            plutil -replace BundleIsRelocatable -bool NO $kind.plist
+          done
+          pkgbuild --root pkgroot/vst3 --component-plist vst3.plist --install-location /Library/Audio/Plug-Ins/VST3 \
+            --identifier com.prodbyeville.room.vst3 --version "$VERSION" pkgs/room-vst3.pkg
+          pkgbuild --root pkgroot/au --component-plist au.plist --install-location /Library/Audio/Plug-Ins/Components \
+            --scripts plugin/Installer/mac-scripts/au \
+            --identifier com.prodbyeville.room.au --version "$VERSION" pkgs/room-au.pkg
           mkdir -p pkgres
           sed "s/@VERSION@/$VERSION/g" plugin/Installer/mac-welcome.html > pkgres/welcome.html
           sed "s/@VERSION@/$VERSION/g" plugin/Installer/mac-distribution.xml > distribution.xml
-          productbuild --distribution distribution.xml --resources pkgres --package-path . "package/ROOM $VERSION.pkg"
-          mkdir -p package/plugins
-          cp -R pkgroot/vst3/ROOM.vst3 pkgroot/au/ROOM.component package/plugins/
-          cp plugin/INSTALL.txt package/
+          productbuild --distribution distribution.xml --resources pkgres --package-path pkgs "package/ROOM-$VERSION-macOS.pkg"
+          pkgutil --check-signature "package/ROOM-$VERSION-macOS.pkg" || true
+          ls -la package
 
       - uses: actions/upload-artifact@v5
         with:
           name: ROOM-macOS
-          path: package/
+          path: package/ROOM-*-macOS.pkg
           if-no-files-found: error

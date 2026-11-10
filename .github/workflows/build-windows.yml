@@ -32,10 +32,10 @@ jobs:
           pip install -r requirements.txt
           python examples/make_test_audio.py
 
-      - name: Host test (load room, process, stress parameters, save/reload)
+      - name: Host test (no license on CI: dry passthrough, parameters, save/reload)
         run: |
           foreach ($room in @("hall_clap", "bottle_tap", "room_tone")) {
-            build/room_hosttest_artefacts/Release/room_hosttest.exe build/ROOM_artefacts/Release/VST3/ROOM.vst3 examples/audio/$room.wav examples/audio/melody.wav host_$room.wav
+            build/room_hosttest_artefacts/Release/room_hosttest.exe build/ROOM_artefacts/Release/VST3/ROOM.vst3 examples/audio/$room.wav examples/audio/melody.wav host_$room.wav --locked
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
 
@@ -74,6 +74,6 @@ jobs:
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ROOM-VST3-Windows
-          path: package/
+          name: ROOM-Windows
+          path: package/ROOM-*-Windows-Setup.exe
           if-no-files-found: error

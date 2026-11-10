@@ -787,131 +787,139 @@ void TourOverlay::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-// Licensing screens
+// The sign-in page
 
-LicenseOverlay::LicenseOverlay (RoomAudioProcessor& p) : proc (p)
+LicensePage::LicensePage (RoomAudioProcessor& p) : proc (p)
 {
     setInterceptsMouseClicks (true, true);   // the controls underneath stay frozen
-    for (auto* b : { &primary, &secondary })
+    setWantsKeyboardFocus (true);
+
+    auto styleField = [] (juce::TextEditor& t, const juce::String& hint)
     {
-        b->getProperties().set ("key", "dark");
-        addAndMakeVisible (b);
+        t.setFont (Fonts::sans (15.0f));
+        t.setIndents (12, 0);
+        t.setJustification (juce::Justification::centredLeft);
+        t.setColour (juce::TextEditor::backgroundColourId, Colours::glass);
+        t.setColour (juce::TextEditor::textColourId, Colours::screenText);
+        t.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff050505));
+        t.setColour (juce::TextEditor::focusedOutlineColourId, Colours::crimson);
+        t.setColour (juce::CaretComponent::caretColourId, Colours::crimson);
+        t.setTextToShowWhenEmpty (hint, Colours::screenDim.withAlpha (0.7f));
+    };
+    styleField (email, "the email you got room with");
+    styleField (key, "ROOM-XXXXX-XXXXX-XXXXX-XXXXX");
+    key.setInputRestrictions (40, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-");
+    email.onReturnKey = [this] { key.grabKeyboardFocus(); };
+    key.onReturnKey = [this] { submit(); };
+    key.onTextChange = [this]
+    {
+        // Keys are upper case; keep the caret where it is.
+        const auto upper = key.getText().toUpperCase();
+        if (upper != key.getText())
+        {
+            const auto caret = key.getCaretPosition();
+            key.setText (upper, false);
+            key.setCaretPosition (caret);
+        }
+    };
+
+    activateButton.getProperties().set ("key", "dark");
+    activateButton.onClick = [this] { submit(); };
+    for (auto* b : { &getButton, &helpButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        b->setColour (juce::TextButton::textColourOffId, Colours::screenDim);
     }
-    keyLink.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    keyLink.setColour (juce::TextButton::textColourOffId, Colours::screenDim);
-    addAndMakeVisible (keyLink);
-    keyLink.onClick = [this] { askForKey(); };
+    getButton.onClick = [] { juce::URL (LicenseManager::getUrl).launchInDefaultBrowser(); };
+    helpButton.onClick = [] { LicenseManager::emailSupport ("Lost my ROOM license key"); };
+
+    for (auto* c : std::initializer_list<juce::Component*> { &email, &key, &activateButton, &getButton, &helpButton })
+        addAndMakeVisible (c);
+
     proc.getLicensing().addChangeListener (this);
     update();
 }
 
-LicenseOverlay::~LicenseOverlay()
+LicensePage::~LicensePage()
 {
     proc.getLicensing().removeChangeListener (this);
 }
 
-void LicenseOverlay::changeListenerCallback (juce::ChangeBroadcaster*)
+void LicensePage::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     proc.licenseChanged();
     update();
     if (onChange) onChange();
 }
 
-void LicenseOverlay::askForKey()
+void LicensePage::update()
 {
-    EvilleLookAndFeel::showDialog (*getParentComponent(), "have a key?",
-                                   "paste the key from your purchase email. it looks like ROOM-XXXX-XXXX-XXXX.",
-                                   { "activate", "cancel" }, "ROOM-",
-                                   [this] (int result, const juce::String& typed)
-                                   {
-                                       if (result == 1 && typed.trim().isNotEmpty())
-                                       {
-                                           note = "checking your key...";
-                                           repaint();
-                                           proc.getLicensing().activateWithKey (typed);
-                                       }
-                                   });
-}
-
-void LicenseOverlay::update()
-{
-    using namespace room::licensing;
-    auto& lm = proc.getLicensing();
-    const auto st = lm.getStatus();
+    const auto wasVisible = isVisible();
     setVisible (proc.isLicenseLocked());
     if (! isVisible())
         return;
     toFront (false);
-
-    note = lm.getLastMessage();
-    primary.onClick = nullptr;
-    secondary.onClick = nullptr;
-    secondary.setVisible (true);
-    keyLink.setVisible (true);
-
-    if (lm.isWaitingForBrowser())
-    {
-        title = "finish in your browser";
-        text = "sign in with your email there, then come back. room opens up by itself.";
-        primary.setButtonText ("open it again");
-        primary.onClick = [&lm] { lm.cancelBrowserActivation(); lm.startBrowserActivation(); };
-        secondary.setButtonText ("cancel");
-        secondary.onClick = [this, &lm] { lm.cancelBrowserActivation(); update(); };
-    }
-    else if (st.state == State::welcome)
-    {
-        title = "start your session";
-        text = "sign in with the email you used on the room page and room opens up on this computer. "
-               "your browser opens for a moment, then you're back here.";
-        primary.setButtonText ("start your session");
-        primary.onClick = [this, &lm] { lm.startBrowserActivation(); update(); };
-        secondary.setVisible (false);
-    }
-    else if (st.state == State::checkIn)
-    {
-        title = "check in to keep going";
-        text = "room hasn't reached the license server in a while. connect to the internet and check in. "
-               "your sessions are safe, and audio passes through dry until then.";
-        primary.setButtonText ("check in");
-        primary.onClick = [this, &lm] { note = "checking in..."; repaint(); lm.refreshNow(); };
-        secondary.setVisible (false);
-    }
-    else   // expired
-    {
-        title = "unlock room";
-        text = st.type == Type::trial
-                 ? "your trial is over. your sessions still open, and room passes audio through dry until you unlock it."
-                 : "the launch period is over. your sessions still open, and room passes audio through dry until you unlock it.";
-        primary.setButtonText ("unlock room");
-        const auto url = st.checkoutUrl;
-        primary.onClick = [url] { if (url.isNotEmpty()) juce::URL (url).launchInDefaultBrowser(); };
-        secondary.setButtonText ("i already bought it");
-        secondary.onClick = [this, &lm] { note = "checking..."; repaint(); lm.refreshNow(); };
-    }
-    resized();
-    repaint();
+    if (! wasVisible)
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<LicensePage> (this)]
+                                         { if (safe != nullptr && safe->isShowing()) safe->focus(); });
 }
 
-juce::Rectangle<int> LicenseOverlay::cardArea() const
+bool LicensePage::keyPressed (const juce::KeyPress& k)
 {
-    const int w = 440, h = 196;
-    return getLocalBounds().withSizeKeepingCentre (w, h).translated (0, -20);
+    if (k == juce::KeyPress::returnKey)
+        submit();
+    return true;   // nothing behind the page reacts while it's up
 }
 
-void LicenseOverlay::resized()
+void LicensePage::submit()
 {
-    auto c = cardArea().reduced (24, 20);
-    auto row = c.removeFromBottom (34);
-    primary.setBounds (row.removeFromLeft (secondary.isVisible() ? 180 : 200));
-    row.removeFromLeft (10);
-    if (secondary.isVisible())
-        secondary.setBounds (row.removeFromLeft (160));
-    keyLink.setBounds (cardArea().getRight() - 24 - 100, cardArea().getY() + 14, 100, 24);
+    if (busy)
+        return;
+    const auto e = email.getText().trim(), k = key.getText().trim();
+    if (! e.containsChar ('@') || ! e.fromLastOccurrenceOf ("@", false, false).containsChar ('.'))
+        return show ("enter the email address you got room with.", false);
+    if (k.length() < 10)
+        return show ("enter the license key from your room email.", false);
+
+    busy = true;
+    activateButton.setEnabled (false);
+    show ("activating...", true);
+    auto safe = juce::Component::SafePointer<LicensePage> (this);
+    proc.getLicensing().activate (e, k, [safe] (juce::String error)
+    {
+        if (safe == nullptr)
+            return;
+        safe->busy = false;
+        safe->activateButton.setEnabled (true);
+        if (error.isNotEmpty())
+            return safe->show (error, false);
+        safe->show ("activated. enjoy room.", true);
+    });
 }
 
-void LicenseOverlay::paint (juce::Graphics& g)
+juce::Rectangle<int> LicensePage::cardArea() const
 {
-    g.fillAll (juce::Colours::black.withAlpha (0.62f));
+    return getLocalBounds().withSizeKeepingCentre (460, 404).translated (0, -10);
+}
+
+void LicensePage::resized()
+{
+    auto c = cardArea().reduced (32, 0);
+    c.removeFromTop (28 + 30 + 10 + 40 + 16);   // mark, title, text
+    c.removeFromTop (17);
+    email.setBounds (c.removeFromTop (38));
+    c.removeFromTop (14 + 17);
+    key.setBounds (c.removeFromTop (38));
+    c.removeFromTop (42);   // the message
+    activateButton.setBounds (c.removeFromTop (38).withSizeKeepingCentre (180, 38));
+    auto links = cardArea().withTop (cardArea().getBottom() - 44).reduced (24, 8);
+    getButton.setBounds (links.removeFromLeft (links.getWidth() / 2).withSizeKeepingCentre (150, 26));
+    helpButton.setBounds (links.withSizeKeepingCentre (150, 26));
+}
+
+void LicensePage::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (0.66f));
 
     const auto card = cardArea().toFloat();
     for (int i = 0; i < 6; ++i)
@@ -927,21 +935,42 @@ void LicenseOverlay::paint (juce::Graphics& g)
     g.setColour (juce::Colours::white.withAlpha (0.1f));
     g.drawLine (card.getX() + 12.0f, card.getY() + 1.5f, card.getRight() - 12.0f, card.getY() + 1.5f, 1.0f);
 
-    auto r = card.reduced (24.0f, 20.0f);
+    auto r = card.reduced (32.0f, 0.0f);
+    r.removeFromTop (24.0f);
+    {
+        // The mark: a red dot and the wordmark, as on the faceplate.
+        auto mark = r.removeFromTop (16.0f);
+        g.setColour (Colours::crimson);
+        g.fillEllipse (mark.getX(), mark.getCentreY() - 4.0f, 8.0f, 8.0f);
+        g.setFont (Fonts::mono (11.0f));
+        g.setColour (Colours::screenDim);
+        g.drawText ("R O O M", mark.withTrimmedLeft (18.0f), juce::Justification::centredLeft);
+    }
+    r.removeFromTop (12.0f);
     g.setFont (Fonts::sans (21.0f, Fonts::bold));
     g.setColour (Colours::dustWhite);
-    g.drawText (title, r.removeFromTop (28.0f), juce::Justification::centredLeft);
-    r.removeFromTop (8.0f);
-    r.removeFromBottom (44.0f);
-    if (note.isNotEmpty())
+    g.drawText ("activate room", r.removeFromTop (30.0f), juce::Justification::centredLeft);
+    r.removeFromTop (10.0f);
+    g.setFont (Fonts::sans (14.0f));
+    g.setColour (Colours::dustWhite.withAlpha (0.8f));
+    g.drawFittedText ("sign in with your email and the license key from your room email. "
+                      "one key works on up to three computers. audio passes through dry until then.",
+                      r.removeFromTop (40.0f).toNearestInt(), juce::Justification::topLeft, 3, 1.0f);
+
+    g.setFont (Fonts::mono (10.5f));
+    g.setColour (Colours::screenDim);
+    g.drawText ("email", labelFor (email), juce::Justification::centredLeft);
+    g.drawText ("license key", labelFor (key), juce::Justification::centredLeft);
+
+    if (message.isNotEmpty())
     {
-        g.setFont (Fonts::mono (11.5f));
-        g.setColour (Colours::crimson.brighter (0.4f));
-        g.drawFittedText (note, r.removeFromBottom (20.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.9f);
+        g.setFont (Fonts::sans (13.0f));
+        g.setColour (messageIsGood ? Colours::dustWhite.withAlpha (0.85f) : Colours::crimson.brighter (0.45f));
+        g.drawFittedText (message, key.getBounds().withY (key.getBottom() + 4).withHeight (36), juce::Justification::centred, 2, 1.0f);
     }
-    g.setFont (Fonts::sans (14.5f));
-    g.setColour (Colours::dustWhite.withAlpha (0.86f));
-    g.drawFittedText (text, r.toNearestInt(), juce::Justification::topLeft, 5, 1.0f);
+
+    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.drawHorizontalLine (cardArea().getBottom() - 44, card.getX() + 16.0f, card.getRight() - 16.0f);
 }
 
 //==============================================================================
@@ -1069,8 +1098,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     setTipsEnabled (proc.tipsEnabled);
 
-    content.addChildComponent (licenseOverlay);
-    licenseOverlay.onChange = [this] { repaint(); };
+    content.addChildComponent (licensePage);
+    licensePage.onChange = [this] { repaint(); };
 
     content.addChildComponent (tour);
     tour.onFinished = []
@@ -1169,14 +1198,20 @@ void RoomAudioProcessorEditor::showMainMenu()
         m.addItem (std::move (item));
     }
     else
-        m.addItem ("check for updates", [this] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
+        m.addItem ("check for updates", [this] { juce::URL (UpdateChecker::downloadPageUrl).launchInDefaultBrowser(); });
     m.addItem ("visit website", [] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
     m.addItem ("get support", [version]
     {
-        juce::URL ("mailto:" + juce::String (UpdateChecker::supportEmail) + "?subject=room%20v" + version).launchInDefaultBrowser();
+        LicenseManager::emailSupport ("room v" + version);
     });
     m.addItem (juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), [this] { showAbout(); });
     m.addSeparator();
+    auto& license = proc.getLicensing();
+    if (license.isActivated())
+    {
+        m.addItem ("licensed to " + license.licensedEmail(), false, false, nullptr);
+        m.addItem (juce::String (juce::CharPointer_UTF8 ("deactivate this computer\xe2\x80\xa6")), [this] { confirmDeactivate(); });
+    }
     m.addItem ("room v" + version, false, false, nullptr);
     EvilleLookAndFeel::showMenu (m, menuButton);
 }
@@ -1199,6 +1234,26 @@ void RoomAudioProcessorEditor::showAbout()
                                    {
                                        if (result == 2)
                                            juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser();
+                                   });
+}
+
+void RoomAudioProcessorEditor::confirmDeactivate()
+{
+    EvilleLookAndFeel::showDialog (content, "deactivate this computer?",
+                                   "room stops here and frees this computer, so your key can go on another one. "
+                                   "sign in again any time with your email and key.",
+                                   { "deactivate", "cancel" }, {},
+                                   [safe = juce::Component::SafePointer<RoomAudioProcessorEditor> (this)] (int result, const juce::String&)
+                                   {
+                                       if (safe == nullptr || result != 1)
+                                           return;
+                                       safe->proc.lockLicense();
+                                       safe->licensePage.update();
+                                       safe->proc.getLicensing().deactivate ([safe] (juce::String error)
+                                       {
+                                           if (safe != nullptr && error.isNotEmpty())
+                                               safe->licensePage.fill ({}, {}, error, false);
+                                       });
                                    });
 }
 
@@ -1282,20 +1337,6 @@ void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
 
     // The power LED on finish follows bypass.
     Hw::drawLed (g, finishLed, ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f), 4.5f);
-
-    // Licensing: a quiet "open until 12 jan" / "trial · 9 days left" under the studios window.
-    if (RoomAudioProcessor::enforceLicense)
-    {
-        auto& lm = proc.getLicensing();
-        const auto line = room::licensing::statusLine (lm.getStatus(), lm.now());
-        if (line.isNotEmpty())
-        {
-            g.setFont (Fonts::mono (10.5f));
-            g.setColour (Colours::inkDim);
-            g.drawText (line, presetBar.getBounds().translated (0, presetBar.getHeight() + 3).withHeight (14),
-                        juce::Justification::centred);
-        }
-    }
 }
 
 void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
@@ -1553,8 +1594,8 @@ void RoomAudioProcessorEditor::layoutContent()
     const auto full = juce::Rectangle<int> (0, 0, contentWidth(), baseHeight);
     browser.setBounds (full);
     tour.setBounds (full);
-    licenseOverlay.setBounds (full);
-    licenseOverlay.update();
+    licensePage.setBounds (full);
+    licensePage.update();
     roomBrowser.setBounds (full);
     saveDialog.setBounds (full);
     roomSaveDialog.setBounds (full);

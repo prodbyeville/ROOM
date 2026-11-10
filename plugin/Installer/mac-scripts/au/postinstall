@@ -1,0 +1,5 @@
+#!/bin/sh
+# After the AU is installed: restart macOS's Audio Unit registry so Logic and GarageBand see the
+# new ROOM without a restart (it relaunches itself on demand).
+killall -9 AudioComponentRegistrar 2>/dev/null || true
+exit 0

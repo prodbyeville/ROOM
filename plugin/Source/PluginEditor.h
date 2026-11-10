@@ -150,28 +150,45 @@ private:
     juce::TextButton back { "back" }, next { "next" }, skip { "skip" };
 };
 
-/** Licensing screens, over the whole unit: "start your session" the first
-    time, "unlock room" once a launch period or trial is over. While it shows,
-    the controls underneath can't be touched (the audio passes through dry). */
-class LicenseOverlay : public juce::Component,
-                       private juce::ChangeListener
+/** The sign-in page (WARP's, in ROOM's dress), over the whole unit until this
+    computer is activated: the email and key from the "get room free" email,
+    activate, and links to get a key and to support. While it shows, the
+    controls underneath can't be touched and the audio passes through dry. */
+class LicensePage : public juce::Component,
+                    private juce::ChangeListener
 {
 public:
-    explicit LicenseOverlay (RoomAudioProcessor&);
-    ~LicenseOverlay() override;
+    explicit LicensePage (RoomAudioProcessor&);
+    ~LicensePage() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
     /** Show / hide to match the processor; call after any license change. */
     void update();
-    std::function<void()> onChange;   // the editor repaints its status line
+    void focus() { email.grabKeyboardFocus(); }
+    std::function<void()> onChange;   // the editor repaints
+
+    /** Fill in the fields and the message under them (deactivate errors, tests, screenshots). */
+    void fill (const juce::String& e, const juce::String& k, const juce::String& text, bool good)
+    {
+        email.setText (e, false);
+        key.setText (k, false);
+        message = text;
+        messageIsGood = good;
+        repaint();
+    }
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     juce::Rectangle<int> cardArea() const;
-    void askForKey();
+    juce::Rectangle<int> labelFor (const juce::Component& c) const { return c.getBounds().translated (0, -17).withHeight (14); }
+    void submit();
+    void show (const juce::String& text, bool good) { message = text; messageIsGood = good; repaint(); }
     RoomAudioProcessor& proc;
-    juce::TextButton primary, secondary, keyLink { "have a key?" };
-    juce::String title, text, note;
+    juce::TextEditor email, key;
+    juce::TextButton activateButton { "activate" }, getButton { "get room free" }, helpButton { "lost your key?" };
+    juce::String message;
+    bool busy = false, messageIsGood = false;
 };
 
 class RoomAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -242,9 +259,10 @@ private:
     IconButton menuButton { IconButton::Icon::menu, "menu" };
     void showMainMenu();
     void showAbout();
+    void confirmDeactivate();
     UpdateChecker updates;
     TourOverlay tour;
-    LicenseOverlay licenseOverlay { proc };
+    LicensePage licensePage { proc };
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled
 

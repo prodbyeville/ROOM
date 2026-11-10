@@ -1,0 +1,8 @@
+#pragma once
+
+// The license server's public key (made by Tools/LicenseTool keygen). The private half is the
+// server's LICENSE_PRIVATE_KEY secret and is never in the repository.
+namespace LicensePublicKey
+{
+    inline constexpr const char* key = "3,633cfb9e1101b32016de5c3a37d9645b618bb3038fbcf2b43ca2fbb8a81d7cb6be32627a1d33ac3360dc1aa9d54ca4a840a7243dc023a223bbe3e21c604f35e5f1e7885bdb1910e27f28fb051a1eb6c06a9d3b432b1c1506254a627eba2485f02dc21bc03b9718e85d3890f0e9a1dcee26fd3f32396d117ef41a9dd63563216fd628c5b610854621fe64007a00b8d734b507fae4659ae831637e9517fce0bb96727d9dca1ab13e4e4ee153c87c472aae1f768bde64ecab84beeaba6bd433f78b43da4111b793ee8bdea4c9aec8ece76077e4a4144e1f7f03d702247a0ee7a13261faaa2d925e4784fe38c9f9a34cd5652bfa453c08ac6614e2ef641ce4e28545";
+}

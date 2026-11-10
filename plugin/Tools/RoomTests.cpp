@@ -11,7 +11,6 @@
 #include "dsp/ResonanceSuppressor.h"
 #include "presets/PresetLibrary.h"
 #include "licensing/License.h"
-#include "licensing/Ed25519.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cstdlib>
@@ -1428,113 +1427,72 @@ namespace
     }
 
     //==========================================================================
-    // Licensing: tokens signed with a throwaway test key.
-    namespace lic = room::licensing;
+    // Licensing: WARP's RSA licenses, signed here with a throwaway key pair.
 
-    room::ed25519::Seed testSeed()
+    struct TestKeys { juce::String pub, priv; };
+    const TestKeys& testKeys()
     {
-        room::ed25519::Seed s {};
-        for (size_t i = 0; i < s.size(); ++i) s[i] = (uint8_t) (i * 7 + 3);
-        return s;
+        static const TestKeys keys = []
+        {
+            juce::RSAKey pub, priv;
+            juce::RSAKey::createKeyPair (pub, priv, 512);
+            return TestKeys { pub.toString(), priv.toString() };
+        }();
+        return keys;
     }
 
-    juce::String base64Url (const void* data, size_t size)
+    LicenseCrypto::License makeLicense (const juce::String& product = "room",
+                                        const juce::String& machine = LicenseManager::machineId(),
+                                        const juce::String& signer = testKeys().priv)
     {
-        return juce::Base64::toBase64 (data, size).replaceCharacter ('+', '-').replaceCharacter ('/', '_').trimCharactersAtEnd ("=");
-    }
-
-    juce::String makeToken (const room::ed25519::Seed& seed, const juce::String& type, const juce::String& machine,
-                            juce::int64 expires, juce::int64 checkBy, juce::int64 serverTime)
-    {
-        auto* o = new juce::DynamicObject();
-        o->setProperty ("v", 1);
-        o->setProperty ("email", "test@example.com");
-        o->setProperty ("license", "lic_test");
-        o->setProperty ("type", type);
-        o->setProperty ("machine", machine);
-        o->setProperty ("expires", expires);
-        o->setProperty ("checkBy", checkBy);
-        o->setProperty ("serverTime", serverTime);
-        o->setProperty ("checkout", "https://example.com/checkout");
-        const auto payload = juce::JSON::toString (juce::var (o), true).toStdString();
-        const auto sig = room::ed25519::sign (seed, payload.data(), payload.size());
-        return base64Url (payload.data(), payload.size()) + "." + base64Url (sig.data(), sig.size());
+        LicenseCrypto::License l { product, "Ann@Example.com", "ROOM-ABCDE-FGHJK-LMNPQ-RSTUV", machine, "2026-11-22T17:00:00Z", {} };
+        l.signature = LicenseCrypto::sign (LicenseCrypto::payload (l), signer);
+        return l;
     }
 
     void testLicensing (const juce::File& root)
     {
         std::cout << "Licensing\n";
-        const auto seed = testSeed();
-        const auto pub = room::ed25519::publicKeyFromSeed (seed);
-        lic::Manager::setPublicKeyForTests (pub);
-        const juce::String me = "machine-under-test";
-        lic::Manager::setMachineIdForTests (me);
-        const auto store = root.getSiblingFile ("room.license");
-        store.deleteFile();
-        lic::Manager::setStorageFileForTests (store);
-        const juce::int64 T = 1'900'000'000;   // some time in 2030
-        const juce::int64 day = 24 * 3600;
+        const auto& keys = testKeys();
+        LicenseManager::setPublicKeyForTests (keys.pub);
+        const auto folder = root.getSiblingFile ("license_folder");
+        folder.deleteRecursively();
+        LicenseManager::setFolderForTests (folder);
 
-        // --- tokens ---
-        lic::Token t;
-        const auto good = makeToken (seed, "launch", me, T + 30 * day, T + 3 * day, T);
-        check (lic::parseToken (good, pub, me, t) && t.type == lic::Type::launch && t.expires == T + 30 * day,
-               "a signed token is accepted");
-        auto tampered = good;
-        const auto dot = tampered.indexOfChar ('.');
-        tampered = tampered.substring (0, dot - 2) + (tampered[dot - 2] == 'A' ? "B" : "A") + tampered.substring (dot - 1);
-        check (! lic::parseToken (tampered, pub, me, t), "a tampered token is rejected");
-        check (! lic::parseToken (good, pub, "another-computer", t), "a token for another computer is rejected");
-        auto otherSeed = seed; otherSeed[0] ^= 1;
-        check (! lic::parseToken (makeToken (otherSeed, "full", me, 0, T + day, T), pub, me, t), "a token signed by someone else is rejected");
-        check (! lic::parseToken ("garbage", pub, me, t) && ! lic::parseToken ("", pub, me, t), "garbage is rejected");
+        // --- the signed text: byte for byte what WARP's server signs (Server/src/index.js: payload) ---
+        check (LicenseCrypto::payload (makeLicense()) == "warp-license-v1\nroom\nann@example.com\nROOM-ABCDE-FGHJK-LMNPQ-RSTUV\n"
+                                                          + LicenseManager::machineId() + "\n2026-11-22T17:00:00Z",
+               "the signed text matches the server's");
+        check (LicenseManager::machineId().length() == 32 && LicenseManager::machineId().containsOnly ("0123456789abcdef"),
+               "the computer id is the hex the server accepts");
+        check (juce::String (LicenseManager::product) == "room", "every request says product: room");
 
-        // --- rules ---
-        check (lic::evaluate (nullptr, T).state == lic::State::welcome, "no license: welcome");
-        lic::parseToken (good, pub, me, t);
-        check (lic::evaluate (&t, T + day).state == lic::State::active, "launch license works before the lock date");
-        check (lic::evaluate (&t, T + 30 * day).state == lic::State::expired, "launch license locks on the lock date");
-        check (lic::evaluate (&t, T + 4 * day).state == lic::State::checkIn, "launch license has to check in after a few days");
-        lic::Token full;
-        lic::parseToken (makeToken (seed, "full", me, 0, T + 14 * day, T), pub, me, full);
-        check (lic::evaluate (&full, T + 13 * day).isActive(), "a paid license works 13 days offline");
-        check (lic::evaluate (&full, T + 15 * day).state == lic::State::checkIn, "after 14 days offline it asks to check in");
-        check (lic::statusLine (lic::evaluate (&t, T + day), T + day).startsWith ("open until "), "launch shows 'open until ...'");
-        lic::Token trial;
-        lic::parseToken (makeToken (seed, "trial", me, T + 9 * day, T + 9 * day, T), pub, me, trial);
-        check (lic::statusLine (lic::evaluate (&trial, T), T) == juce::String::fromUTF8 ("trial \xc2\xb7 9 days left"), "trial shows days left");
-        check (lic::statusLine (lic::evaluate (&full, T), T).isEmpty(), "a paid license shows nothing");
+        // --- which licenses count ---
+        check (LicenseManager::isValid (makeLicense()), "a ROOM license signed by the server is accepted");
+        check (! LicenseManager::isValid (makeLicense ("warp")), "a WARP license doesn't open ROOM");
+        check (! LicenseManager::isValid (makeLicense ("room", "another-computer")), "a license for another computer is rejected");
+        auto edited = makeLicense();
+        edited.email = "someone@else.com";
+        check (! LicenseManager::isValid (edited), "an edited license is rejected");
+        juce::RSAKey otherPub, otherPriv;
+        juce::RSAKey::createKeyPair (otherPub, otherPriv, 512);
+        check (! LicenseManager::isValid (makeLicense ("room", LicenseManager::machineId(), otherPriv.toString())),
+               "a license signed by anyone else is rejected");
+        check (! LicenseManager::isValid ({}), "an empty license is rejected");
+        check (! LicenseManager::isValid (makeLicense(), LicensePublicKey::key), "the real public key doesn't take test signatures");
 
-        // --- the manager, the clock, and sessions ---
+        // --- the manager and open sessions ---
         RoomAudioProcessor::enforceLicense = true;
         {
-            lic::Manager::setClockForTests (T + day);
-            juce::SharedResourcePointer<lic::Manager> m;
-            check (! m->getStatus().isActive() && m->getStatus().state == lic::State::welcome, "fresh computer: welcome");
+            juce::SharedResourcePointer<LicenseManager> m;
+            check (! m->isActivated(), "fresh computer: not activated");
             RoomAudioProcessor blank;
             check (blank.isLicenseLocked(), "without a license ROOM loads locked");
 
-            check (m->installToken (good), "the manager takes a good token");
-            blank.licenseChanged();
-            check (! blank.isLicenseLocked(), "activating unlocks an open ROOM right away");
-
-            // Turning the clock back doesn't help: the server's time wins.
-            lic::Manager::setClockForTests (T - 100 * day);
-            check (m->now() >= T, "the clock can't go back past the server's time");
-            lic::Manager::setClockForTests (T + day);
-
-            RoomAudioProcessor open;   // a session opened before the lock date
-            check (! open.isLicenseLocked(), "a launch license opens ROOM");
-            lic::Manager::setClockForTests (T + 31 * day);   // the lock date passes mid-session
-            open.licenseChanged();
-            check (! open.isLicenseLocked(), "the lock date never locks a session that's already open");
-            RoomAudioProcessor next;   // the next time ROOM loads
-            check (next.isLicenseLocked(), "the next load after the lock date is locked");
-
             // Locked: audio passes through dry, aligned to the reported latency.
-            next.setPlayConfigDetails (2, 2, 48000.0, 512);
-            next.prepareToPlay (48000.0, 512);
-            const auto lat = next.getLatencySamples();
+            blank.setPlayConfigDetails (2, 2, 48000.0, 512);
+            blank.prepareToPlay (48000.0, 512);
+            const auto lat = blank.getLatencySamples();
             juce::AudioBuffer<float> in (2, 48000), io (2, 512);
             juce::Random r (5);
             for (int ch = 0; ch < 2; ++ch)
@@ -1546,7 +1504,7 @@ namespace
             {
                 for (int ch = 0; ch < 2; ++ch)
                     io.copyFrom (ch, 0, in, ch, pos, 512);
-                next.processBlock (io, midi);
+                blank.processBlock (io, midi);
                 for (int ch = 0; ch < 2; ++ch)
                     for (int i = 0; i < 512; ++i)
                     {
@@ -1558,26 +1516,49 @@ namespace
             check (worst < 1.0e-5f, "locked ROOM passes the audio through dry, latency-matched");
 
             // Saved sessions still open while locked.
-            open.getParameters()[0]->setValueNotifyingHost (0.37f);
+            RoomAudioProcessor other;
+            other.getParameters()[0]->setValueNotifyingHost (0.37f);
             juce::MemoryBlock state;
-            open.getStateInformation (state);
-            next.setStateInformation (state.getData(), (int) state.getSize());
-            check (std::abs (next.getParameters()[0]->getValue() - 0.37f) < 0.01f, "a session still opens while locked");
+            other.getStateInformation (state);
+            blank.setStateInformation (state.getData(), (int) state.getSize());
+            check (std::abs (blank.getParameters()[0]->getValue() - 0.37f) < 0.01f, "a session still opens while locked");
 
-            // Buying: a full license unlocks the locked one in place.
-            check (m->installToken (makeToken (seed, "full", me, 0, T + 45 * day, T + 31 * day)), "a full license arrives");
-            next.licenseChanged();
-            check (! next.isLicenseLocked(), "buying unlocks ROOM on its next check, no restart");
+            check (! m->installForTests (makeLicense ("warp")), "the manager refuses a WARP license");
+            check (m->installForTests (makeLicense()), "the manager takes a good license");
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            check (! blank.isLicenseLocked(), "signing in unlocks an open ROOM right away");
+            check (m->licensedEmail() == "Ann@Example.com", "the menu knows who it's licensed to");
+            check (folder.getChildFile ("license.json").existsAsFile(), "the license is saved in ROOM's own folder");
 
-            // The license survives a restart (stored on disk).
+            // A revoked license (the 14-day check) doesn't lock a session that's open.
+            m->revokeForTests();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            check (! blank.isLicenseLocked(), "a revoked license never locks a session that's already open");
+            RoomAudioProcessor next;
+            check (next.isLicenseLocked(), "the next load after revoking is locked");
+
+            // "deactivate this computer" locks right away.
+            m->installForTests (makeLicense());
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            check (! next.isLicenseLocked(), "signing in again unlocks it");
+            next.lockLicense();
+            check (next.isLicenseLocked(), "deactivating locks ROOM right away");
+            m->installForTests (makeLicense());
         }
         {
-            juce::SharedResourcePointer<lic::Manager> m2;
-            check (m2->getStatus().isActive() && m2->getStatus().type == lic::Type::full, "the license is remembered");
+            juce::SharedResourcePointer<LicenseManager> m2;
+            check (m2->isActivated(), "the license is remembered");
+            RoomAudioProcessor again;
+            check (! again.isLicenseLocked(), "an activated computer opens ROOM unlocked");
         }
-        lic::Manager::setClockForTests (0);
+        {
+            folder.getChildFile ("license.json").replaceWithText (folder.getChildFile ("license.json").loadFileAsString()
+                                                                       .replace ("ann@example.com", "bob@example.com", true));
+            juce::SharedResourcePointer<LicenseManager> m3;
+            check (! m3->isActivated(), "an edited license file doesn't count");
+        }
         RoomAudioProcessor::enforceLicense = false;
-        store.deleteFile();
+        folder.deleteRecursively();
     }
 
     void testSuppressorIdle()
@@ -1869,26 +1850,9 @@ namespace
     int screenshot (const juce::StringArray& args)
     {
         // OUT.png MODE ROOM_SOURCE TARGET
-        // lic-welcome / lic-locked / lic-trial / lic-launch: the licensing screens.
-        std::unique_ptr<juce::SharedResourcePointer<room::licensing::Manager>> licensing;
+        // lic-signin / lic-error: the sign-in page (no license on this computer).
         if (args[2].startsWith ("lic-"))
-        {
-            namespace lic = room::licensing;
-            const auto seed = testSeed();
-            lic::Manager::setPublicKeyForTests (room::ed25519::publicKeyFromSeed (seed));
-            const auto now = juce::Time::currentTimeMillis() / 1000;
-            const juce::int64 day = 24 * 3600;
-            licensing = std::make_unique<juce::SharedResourcePointer<lic::Manager>>();
-            auto& m = **licensing;
-            const auto me = m.getMachineId();
-            if (args[2] == "lic-locked")
-                m.installToken (makeToken (seed, "launch", me, now - day, now + 3 * day, now));
-            if (args[2] == "lic-trial")
-                m.installToken (makeToken (seed, "trial", me, now + 9 * day + 3600, now + 3 * day, now));
-            if (args[2] == "lic-launch")
-                m.installToken (makeToken (seed, "launch", me, now + 40 * day, now + 3 * day, now));
             RoomAudioProcessor::enforceLicense = true;
-        }
         RoomAudioProcessor p;
         p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_shot_presets"));
         p.setPlayConfigDetails (2, 2, 48000, 512);
@@ -1909,6 +1873,18 @@ namespace
         ed.setVisible (true);
         if (args[2] == "record")
             p.startRecording();
+        if (args[2] == "lic-error")
+        {
+            std::function<void (juce::Component&)> fillPage = [&] (juce::Component& c)
+            {
+                if (auto* page = dynamic_cast<LicensePage*> (&c))
+                    page->fill ("ann@example.com", "ROOM-7KQ2M-9XD4T-PWHC3-F8JRN",
+                                "That email and license key don't match. Use the email you got ROOM with, and copy the key from your ROOM email.", false);
+                for (auto* child : c.getChildren())
+                    fillPage (*child);
+            };
+            fillPage (ed);
+        }
         if (args[2] == "lfo")
         {
             using M = room::Modulation;
@@ -2126,65 +2102,27 @@ namespace
         return 0;
     }
 
-// End to end against the real server code: run `node server/test/serve.mjs 8787`
-// with AUTO_APPROVE=e2e@example.com, then `room_tests --license-e2e http://127.0.0.1:8787`.
-int licenseE2E (const juce::String& server)
+// Checks ROOM against the license server's own signing code (WARP's Server/src/index.js):
+//   room_tests --license-interop DIR keys    writes a throwaway key pair + this computer's id
+//   (node signs a ROOM license with the server's signLicense into DIR/license.json)
+//   room_tests --license-interop DIR check   ROOM must accept it, and refuse it as WARP's
+int licenseInterop (const juce::File& dir, const juce::String& step)
 {
-    namespace lic = room::licensing;
-   #ifdef _WIN32
-    _putenv_s ("ROOM_LICENSE_SERVER", server.toRawUTF8());
-   #else
-    setenv ("ROOM_LICENSE_SERVER", server.toRawUTF8(), 1);
-   #endif
-    lic::Manager::setPublicKeyForTests (room::ed25519::publicKeyFromSeed (testSeed()));
-    lic::Manager::setMachineIdForTests ("e2e-machine");
-    lic::Manager::setClockForTests (0);
-
-    auto serverPost = [&] (const juce::String& path, const juce::String& body)
+    if (step == "keys")
     {
-        auto stream = juce::URL (server + path).withPOSTData (body)
-                          .createInputStream (juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inPostData)
-                                                  .withExtraHeaders ("Content-Type: application/json"));
-        return stream != nullptr ? juce::JSON::parse (stream->readEntireStreamAsString()) : juce::var();
-    };
-    auto waitFor = [] (std::function<bool()> done)
-    {
-        for (int i = 0; i < 200 && ! done(); ++i)
-            juce::Thread::sleep (50);
-        return done();
-    };
-
-    lic::Manager m;
-    check (m.getStatus().state == lic::State::welcome, "e2e: starts at the welcome screen");
-
-    m.startBrowserActivation();
-    check (waitFor ([&] { return m.getStatus().isActive(); }), "e2e: browser sign-in activates");
-    check (m.getStatus().type == lic::Type::launch, "e2e: launch license in the launch window");
-    check (lic::statusLine (m.getStatus(), m.now()).startsWith ("open until"), "e2e: open until line");
-
-    // The lock date passes (server time); a check brings back the expired token.
-    serverPost ("/__clock", "{\"t\": " + juce::String (juce::Time::currentTimeMillis() / 1000 + 60 * 86400) + "}");
-    m.refreshNow();
-    check (waitFor ([&] { return m.getStatus().state == lic::State::expired; }), "e2e: locked after the lock date, by server time");
-    check (m.getStatus().checkoutUrl.contains ("launch"), "e2e: unlock goes to the launch checkout");
-
-    // Buying: the next check unlocks, no key typed.
-    const auto key = serverPost ("/__buy", "{\"email\": \"e2e@example.com\"}").getProperty ("key", {}).toString();
-    check (key.startsWith ("ROOM-"), "e2e: purchase made a key");
-    m.refreshNow();
-    check (waitFor ([&] { return m.getStatus().isActive() && m.getStatus().type == lic::Type::full; }), "e2e: purchase unlocks on the next check");
-
-    m.deactivateThisComputer();
-    check (waitFor ([&] { return m.getStatus().state == lic::State::welcome; }), "e2e: deactivate forgets the license here");
-
-    m.activateWithKey (key.toLowerCase());
-    check (waitFor ([&] { return m.getStatus().isActive() && m.getStatus().type == lic::Type::full; }), "e2e: key activation");
-
-    m.activateWithKey ("ROOM-NOPE-NOPE-NOPE-NOPE");
-    check (waitFor ([&] { return m.getLastMessage().isNotEmpty(); }), "e2e: a bad key says why");
-    check (m.getStatus().isActive(), "e2e: a bad key doesn't undo a good license");
-
-    std::cout << (failures == 0 ? "LICENSE E2E PASSED" : "LICENSE E2E FAILED") << " (" << checks - failures << "/" << checks << ")\n";
+        dir.createDirectory();
+        dir.getChildFile ("private.txt").replaceWithText (testKeys().priv);
+        dir.getChildFile ("public.txt").replaceWithText (testKeys().pub);
+        dir.getChildFile ("machine.txt").replaceWithText (LicenseManager::machineId());
+        return 0;
+    }
+    const auto pub = dir.getChildFile ("public.txt").loadFileAsString();
+    auto license = LicenseCrypto::fromVar (juce::JSON::parse (dir.getChildFile ("license.json").loadFileAsString()));
+    check (license.product == "room" && license.key.startsWith ("ROOM-"), "interop: the server made a ROOM license");
+    check (LicenseManager::isValid (license, pub), "interop: ROOM accepts the server's signature");
+    license.product = "warp";
+    check (! LicenseManager::isValid (license, pub), "interop: the same license can't pass as WARP's");
+    std::cout << (failures == 0 ? "LICENSE INTEROP PASSED" : "LICENSE INTEROP FAILED") << "\n";
     return failures == 0 ? 0 : 1;
 }
 
@@ -2196,15 +2134,9 @@ int main (int argc, char* argv[])
     for (int i = 1; i < argc; ++i)
         args.add (argv[i]);
 
-    // Licensing: never touch the real license file or server from tests.
-   #ifdef _WIN32
-    _putenv_s ("ROOM_LICENSE_SERVER", "http://127.0.0.1:9");
-   #else
-    setenv ("ROOM_LICENSE_SERVER", "http://127.0.0.1:9", 1);
-   #endif
-    room::licensing::Manager::setStorageFileForTests (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                                          .getChildFile ("room_tests_license_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30))));
-    room::licensing::Manager::setMachineIdForTests ("machine-under-test");
+    // Licensing: never touch this computer's real license (tests sign their own).
+    LicenseManager::setFolderForTests (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                           .getChildFile ("room_tests_license_" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30))));
     RoomAudioProcessor::enforceLicense = false;   // the DSP tests run unlocked; testLicensing switches it on
 
     RoomAudioProcessor::startWithDefaultStudio = ! startEmpty;   // tests start from an empty ROOM
@@ -2215,8 +2147,8 @@ int main (int argc, char* argv[])
         return screenshot (args);
     if (args[0] == "--bench" || args[0] == "--bench-rt")
         return bench (args);
-    if (args[0] == "--license-e2e" && args.size() > 1)
-        return licenseE2E (args[1]);
+    if (args[0] == "--license-interop" && args.size() > 2)
+        return licenseInterop (juce::File (args[1]), args[2]);
     if (args[0] == "--levels")
         return levels();
     if (args[0] == "--render-presets" && args.size() > 1)

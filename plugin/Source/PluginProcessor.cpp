@@ -142,7 +142,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     worker = std::make_unique<Worker> (*this);
     snapshotPreset();
 
-    licenseLocked = enforceLicense && ! licensing->getStatus().isActive();
+    licenseLocked = enforceLicense && ! licensing->isActivated();
     licensing->addChangeListener (&licenseWatch);
 
     // A brand-new ROOM starts with a room in it ("Init Room"), so sound passes
@@ -162,8 +162,8 @@ RoomAudioProcessor::RoomAudioProcessor()
 
 void RoomAudioProcessor::licenseChanged()
 {
-    // Only ever unlocks: locking waits for the next time ROOM loads.
-    if (licenseLocked.load() && licensing->getStatus().isActive())
+    // Only ever unlocks: a revoked license locks the next time ROOM loads.
+    if (licenseLocked.load() && licensing->isActivated())
         licenseLocked = false;
 }
 

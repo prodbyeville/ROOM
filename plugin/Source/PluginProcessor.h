@@ -188,15 +188,17 @@ public:
     static inline bool startWithDefaultStudio = true;
 
     //==========================================================================
-    // Licensing. Decided when this instance is created: locked means the
-    // audio passes through dry (latency-matched) and the editor shows the
-    // welcome / unlock screen. A check during the session can unlock ROOM but
-    // never locks it; that waits for the next load.
-    static inline bool enforceLicense = ROOM_LICENSING != 0;
+    // Licensing (licensing/License.h). Decided when this instance is created:
+    // without a license the audio passes through dry (latency-matched) and the
+    // editor shows the sign-in page. Signing in unlocks every open ROOM; a
+    // license the server revokes only locks the next time ROOM loads.
+    static inline bool enforceLicense = true;   // the DSP tests switch it off
     bool isLicenseLocked() const { return licenseLocked.load(); }
-    room::licensing::Manager& getLicensing() { return *licensing; }
+    LicenseManager& getLicensing() { return *licensing; }
     /** Unlock now if the license has become active (called on license changes). */
     void licenseChanged();
+    /** Lock this instance now ("deactivate this computer"). */
+    void lockLicense() { if (enforceLicense) licenseLocked = true; }
 
     /** UI state saved with the project. */
     float editorScale = 1.0f;
@@ -204,7 +206,7 @@ public:
     bool tipsEnabled = true;   // hover tips on knobs and keys
 
 private:
-    juce::SharedResourcePointer<room::licensing::Manager> licensing;
+    juce::SharedResourcePointer<LicenseManager> licensing;
     std::atomic<bool> licenseLocked { false };
     struct LicenseWatch : juce::ChangeListener
     {

@@ -115,7 +115,11 @@ static void waitForRoom (juce::AudioPluginInstance& p)
 int main (int argc, char* argv[])
 {
     if (argc < 5)
-        return fail ("usage: room_hosttest PLUGIN.vst3 ROOM_SOURCE TARGET OUT.wav");
+        return fail ("usage: room_hosttest PLUGIN.vst3 ROOM_SOURCE TARGET OUT.wav [--locked]");
+    // --locked: this computer has no ROOM license (CI), so the plugin must pass
+    // the audio through dry and still keep sessions; the room itself is tested
+    // by room_tests.
+    const bool locked = argc > 5 && juce::String (argv[5]) == "--locked";
 
     juce::ScopedJuceInitialiser_GUI juceInit;
     const auto cwd = juce::File::getCurrentWorkingDirectory();
@@ -182,8 +186,18 @@ int main (int argc, char* argv[])
         }
     std::cout << "Mean |wet - dry| " << diff / (2.0 * total) << ", tail energy " << tailEnergy
               << ", peak " << out.getMagnitude (0, total) << "\n";
-    if (diff / (2.0 * total) < 1e-4)
-        return fail ("plugin output is identical to the input (room not active?)");
+    if (locked)
+    {
+        const auto lat = plugin->getLatencySamples();
+        float worstLocked = 0.0f;
+        for (int i = 0; i + lat < total && i < target.getNumSamples(); ++i)
+            worstLocked = std::max (worstLocked, std::abs (out.getSample (0, i + lat) - target.getSample (0, i)));
+        if (worstLocked > 1e-3f)
+            return fail ("unlicensed plugin doesn't pass the audio through dry (max diff " + juce::String (worstLocked) + ")");
+        std::cout << "Unlicensed: dry passthrough ok\n";
+    }
+    else if (diff / (2.0 * total) < 1e-4)
+        return fail ("plugin output is identical to the input (room not active, or no license on this computer: use --locked)");
     if (out.getMagnitude (0, total) > 8.0f)
         return fail ("output level is unreasonably high");
 
@@ -272,7 +286,7 @@ int main (int argc, char* argv[])
     double diff2 = 0.0;
     for (int i = 0; i < target.getNumSamples(); ++i)
         diff2 += std::abs (out2.getSample (0, i) - target.getSample (0, i));
-    if (diff2 / target.getNumSamples() < 1e-4)
+    if (! locked && diff2 / target.getNumSamples() < 1e-4)
         return fail ("room was lost after save + reload");
     std::cout << "Save + reload: ok\n";
 

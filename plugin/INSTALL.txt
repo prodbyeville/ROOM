@@ -3,12 +3,10 @@ room 1.0
 
 INSTALL (Windows, VST3)
 1. Close your DAW.
-2. Run "ROOM 1.0.0 Setup.exe". It puts ROOM.vst3 in
+2. Run "ROOM-<version>-Windows-Setup.exe". It puts ROOM.vst3 in
        C:\Program Files\Common Files\VST3
    This build isn't signed yet, so Windows may say "Windows protected your
    PC": click "More info", then "Run anyway".
-   (Prefer to copy it by hand? The ROOM.vst3 folder is in the download too:
-   copy it into the folder above.)
 3. Open your DAW and rescan plugins if it doesn't find ROOM by itself.
    - FL Studio: Options > Manage plugins > Find more plugins
    - Ableton: Preferences > Plug-ins > Rescan
@@ -16,16 +14,23 @@ INSTALL (Windows, VST3)
 
 INSTALL (Mac, AU + VST3, Apple Silicon and Intel, macOS 10.13 or later)
 1. Close your DAW.
-2. Open "ROOM <version>.pkg". This build isn't signed by Apple yet, so the
-   first time macOS says it can't be checked: right-click the .pkg, choose
-   Open, then Open again (or System Settings > Privacy & Security >
-   Open Anyway).
+2. Open "ROOM-<version>-macOS.pkg". This build isn't signed by Apple yet,
+   so the first time macOS says it can't be checked: go to System Settings >
+   Privacy & Security and click "Open Anyway".
 3. The installer puts ROOM.component in /Library/Audio/Plug-Ins/Components
    (Logic, GarageBand) and ROOM.vst3 in /Library/Audio/Plug-Ins/VST3
-   (Ableton, FL Studio, Studio One...). The "plugins" folder has both too,
-   if you'd rather copy them by hand.
+   (Ableton, FL Studio, Studio One...).
 4. Open your DAW. Logic checks new plugins when it starts; others may need
    a rescan. Look for "ROOM" by "Eville" under effects.
+
+SIGN IN (once per computer)
+  ROOM is free. Get it at https://update.prodbyeville.com/room and you get
+  an email with your license key (ROOM-XXXXX-XXXXX-XXXXX-XXXXX).
+  The first time ROOM opens, sign in with that email and key. Until then
+  the audio passes through untouched. After that ROOM never needs the
+  internet (it quietly checks in every two weeks when it can).
+  One key works on up to three computers. To move it, use the menu >
+  deactivate this computer. Lost your key? support@prodbyeville.com
 
 USE
 1. Put ROOM on a track (a one-shot, a melody, anything).
@@ -39,7 +44,8 @@ ROOM is one unit with three panels:
   the console (dust white, top left)
     top        the menu (three lines): new preset (back to init, the room
                stays), tips on / off, check for updates, visit website,
-               get support, about, the version.
+               get support, about, who it's licensed to, deactivate this
+               computer, the version.
                the studios window ([heart] name < >), save,
                randomize (right-click to choose what moves), advanced (opens
                the advanced section on the right; the window grows to fit),
@@ -110,19 +116,13 @@ automatically (plugin delay compensation).
 The analysed room is saved with your project, so you don't need to keep the
 original sound file around.
 
-If the plugin doesn't show up after a rescan, Windows may have blocked the
-downloaded zip: right-click the zip > Properties > tick "Unblock" > OK, then
-extract and copy again.
-
 UPDATES
   ROOM checks once a day (quietly, in the background) for
-  https://prodbyeville.com/room/latest.json, a tiny file like:
-
-      { "version": "0.2.0", "url": "https://prodbyeville.com/room" }
-
-  If "version" is newer than the installed ROOM, a red dot appears on the
-  menu key and the menu shows "update available" (it opens "url").
-  No file, no internet: nothing happens.
+  https://update.prodbyeville.com/room/latest.json, which WARP's
+  Server/release.ps1 publishes with each release.
+  If its "version" is newer than the installed ROOM, a red dot appears on
+  the menu key and the menu shows "update available" (it opens the
+  download page). No internet: nothing happens.
 
 TIPS AND THE TOUR
   Rest the mouse on any knob or key for a moment to see what it does.

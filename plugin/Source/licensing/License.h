@@ -2,136 +2,221 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
-#include "Ed25519.h"
 
-// ROOM licensing, plugin side.
+#include "LicenseCrypto.h"
+#include "LicensePublicKey.h"
+
+#include <atomic>
+#include <functional>
+
+// The license (ROOM 1.0, free): WARP's licensing, on WARP's server (update.prodbyeville.com).
+// ROOM is a $0 Shopify product; the order emails a key (ROOM-XXXXX-XXXXX-XXXXX-XXXXX). Signing
+// in with that email + key asks the server, which returns a license signed for this computer;
+// it's saved in the user's app data (ROOM/license.json) and checked offline with the public key
+// every time ROOM loads, so ROOM never needs the internet after activating. Every two weeks it
+// quietly asks the server whether the license is still good; only a clear "revoked" turns it
+// off, and no answer keeps it working. Up to three computers per key.
 //
-// The license server (server/ in the repo) hands out signed tokens:
+// Every request says "product": "room" (without it the server treats it as WARP's), and only a
+// license signed for "room" is accepted. LicenseCrypto.h and LicensePublicKey.h are WARP's,
+// unchanged: both plugins share the key pair.
 //
-//     base64url(JSON payload) "." base64url(Ed25519 signature of the payload)
-//
-//     { "v": 1, "email": "...", "license": "...", "type": "launch" | "trial" | "full",
-//       "machine": "<this computer>", "expires": <unix s, 0 = never>,
-//       "checkBy": <unix s>, "serverTime": <unix s>, "checkout": "<url>", "key": "ROOM-...." }
-//
-// Rules (see the plan in the repo history):
-//  - A ROOM instance decides at load: active or locked. That decision never
-//    turns into "locked" during a session; a check can only unlock it.
-//  - Time is judged by the newest server time ROOM has seen, so turning the
-//    computer's clock back doesn't extend anything.
-//  - Paid ("full") tokens keep working offline until checkBy (14 days after
-//    the last check). Launch and trial tokens are short-lived on purpose.
-//  - Nothing here ever runs on the audio thread.
-
-namespace room::licensing
-{
-enum class Type { none, launch, trial, full };
-
-struct Token
-{
-    juce::String raw;                 // exactly as received, for storage / refresh
-    juce::String email, licenseId, machine, checkoutUrl, key;
-    Type type = Type::none;
-    juce::int64 expires = 0;          // unix seconds; 0 = never
-    juce::int64 checkBy = 0;          // unix seconds
-    juce::int64 serverTime = 0;       // unix seconds, when the server signed it
-};
-
-/** Parse and verify a token. Returns false for anything malformed, unsigned
-    by `publicKey`, or issued for a different machine. */
-bool parseToken (const juce::String& raw, const ed25519::PublicKey& publicKey,
-                 const juce::String& machineId, Token& out);
-
-enum class State
-{
-    welcome,     // never activated on this computer
-    active,
-    expired,     // launch period over / trial ended: buy to unlock
-    checkIn      // a paid license that hasn't been able to check in for too long
-};
-
-struct Status
-{
-    State state = State::welcome;
-    Type type = Type::none;
-    juce::int64 expires = 0;          // for "open until ..." / "trial: n days left"
-    juce::String email, checkoutUrl;
-    bool isActive() const { return state == State::active; }
-};
-
-/** The rules, as a pure function (easy to test). `now` is the best known
-    current time: max(local clock, newest server time seen). */
-Status evaluate (const Token* token, juce::int64 now);
-
-/** "open until 12 jan" / "trial · 9 days left" / "" (full). */
-juce::String statusLine (const Status& s, juce::int64 now);
-
-//==============================================================================
-/** One per process (SharedResourcePointer). Keeps the token on disk, checks
-    in with the server in the background and runs browser / key activation. */
-class Manager : public juce::ChangeBroadcaster,
-                private juce::Thread
+// Shared by every instance (juce::SharedResourcePointer). The audio thread never touches it:
+// each processor decides at load whether it's locked (RoomAudioProcessor). Network calls run on
+// their own thread and report back on the message thread. A change (activated, forgotten)
+// is broadcast so open instances can unlock.
+class LicenseManager final : public juce::ChangeBroadcaster
 {
 public:
-    Manager();
-    ~Manager() override;
+    static constexpr const char* apiBase = "https://update.prodbyeville.com/api/v1";
+    static constexpr const char* product = "room";
+    // "get room free": the download page, which links to the $0 product for a key.
+    static constexpr const char* getUrl = "https://update.prodbyeville.com/room";
+    static constexpr const char* supportEmail = "support@prodbyeville.com";
 
-    /** Current status (cheap; any thread). */
-    Status getStatus() const;
-    juce::int64 now() const;
+    // Opens an email to support in the user's mail app, with the subject filled in.
+    static void emailSupport (const juce::String& subject)
+    {
+        juce::URL ("mailto:" + juce::String (supportEmail) + "?subject=" + juce::URL::addEscapeChars (subject, true)).launchInDefaultBrowser();
+    }
 
-    /** Browser sign-in: opens the browser, then waits for the person to finish. */
-    void startBrowserActivation();
-    bool isWaitingForBrowser() const { return waitingForBrowser.load(); }
-    void cancelBrowserActivation() { waitingForBrowser = false; }
+    LicenseManager()
+    {
+        load();
+        revalidateIfDue();
+    }
 
-    /** Backup path: activate with the key from the purchase email. */
-    void activateWithKey (const juce::String& key);
-    /** Check in now ("i already bought it"). */
-    void refreshNow();
-    /** Free this computer's seat and forget the license here. */
-    void deactivateThisComputer();
+    ~LicenseManager() override
+    {
+        aliveFlag->store (false);   // replies still on their way find the manager gone
+        pool.removeAllJobs (true, 6000);
+    }
 
-    /** Last message for the UI ("couldn't reach the server", "key not found", ...). */
-    juce::String getLastMessage() const;
+    bool isActivated() const noexcept { return activated.load (std::memory_order_relaxed); }
+    juce::String licensedEmail() const { return current.email; }
 
-    juce::String getMachineId() const { return machineId; }
-    juce::String getAccountUrl() const { return serverBase() + "/account"; }
+    // This computer's id as the server sees it: a hash of the OS's device id (not the id itself).
+    static juce::String machineId()
+    {
+        const auto raw = juce::SystemStats::getUniqueDeviceID() + "|" + juce::SystemStats::getComputerName();
+        return juce::SHA256 (("warp-machine|" + raw).toUTF8()).toHexString().substring (0, 32);
+    }
+
+    // Signs in: on success the license is saved and isActivated() turns true. `done` is called on
+    // the message thread with an empty string, or the error to show.
+    void activate (const juce::String& email, const juce::String& key, std::function<void (juce::String)> done)
+    {
+        auto body = new juce::DynamicObject();
+        body->setProperty ("email", email.trim().toLowerCase());
+        body->setProperty ("key", key.trim().toUpperCase());
+        body->setProperty ("machineId", machineId());
+        body->setProperty ("machineName", juce::SystemStats::getComputerName());
+        body->setProperty ("product", product);
+        post ("/activate", juce::var (body), [this, done] (const juce::var& reply, const juce::String& networkError)
+        {
+            if (networkError.isNotEmpty())
+                return done (networkError);
+            if (! (bool) reply["ok"])
+                return done (reply["error"].toString().isNotEmpty() ? reply["error"].toString() : juce::String ("The license server didn't accept that."));
+            if (! store (LicenseCrypto::fromVar (reply["license"])))
+                return done ("The license came back damaged. Please try again, or contact support.");
+            done ({});
+        });
+    }
+
+    // Frees this computer's activation (so the license can move to another computer), then
+    // forgets the license here even if the server can't be reached.
+    void deactivate (std::function<void (juce::String)> done)
+    {
+        auto body = new juce::DynamicObject();
+        body->setProperty ("email", current.email);
+        body->setProperty ("key", current.key);
+        body->setProperty ("machineId", machineId());
+        body->setProperty ("product", product);
+        post ("/deactivate", juce::var (body), [this, done] (const juce::var& reply, const juce::String& networkError)
+        {
+            forget();
+            done (networkError.isNotEmpty() ? "Deactivated here, but the server couldn't be reached: this computer may still count "
+                                              "towards your three until it's freed (contact support if you run out)."
+                                            : (bool) reply["ok"] ? juce::String() : reply["error"].toString());
+        });
+    }
+
+    // Checks a license against the compiled-in public key and this computer (for tests too).
+    static bool isValid (const LicenseCrypto::License& l, const juce::String& publicKey = currentPublicKey())
+    {
+        return l.product == product && l.machineId == machineId()
+            && LicenseCrypto::verify (LicenseCrypto::payload (l), l.signature, publicKey);
+    }
 
     //==========================================================================
-    // Configuration (tests and development can override these)
-    static juce::String serverBase();                 // https://license.prodbyeville.com (or ROOM_LICENSE_SERVER)
-    static ed25519::PublicKey productionKey();
-    static void setPublicKeyForTests (const ed25519::PublicKey&);
-    static void setStorageFileForTests (const juce::File&);
-    static void setMachineIdForTests (const juce::String&);
-    /** For tests: pretend the local clock says this (0 = real clock). */
-    static void setClockForTests (juce::int64 unixSeconds);
-    /** For tests: install a token directly, as if the server had sent it. */
-    bool installToken (const juce::String& raw);
-
-    static constexpr juce::int64 checkEverySeconds = 3 * 24 * 3600;   // check in every 3 days
+    // Tests only: a throwaway key pair and a scratch folder.
+    static void setPublicKeyForTests (const juce::String& k) { testKey() = k; }
+    static void setFolderForTests (const juce::File& f)       { testFolder() = f; }
+    // As if the server had sent this license (or a clear "revoked").
+    bool installForTests (const LicenseCrypto::License& l)    { return store (l); }
+    void revokeForTests()                                     { forget(); }
 
 private:
-    void run() override;
-    void load();
-    void save();
-    bool post (const juce::String& path, const juce::var& body, juce::var& reply, juce::String& error);
-    bool acceptReply (const juce::var& reply);
-    void setMessage (const juce::String&);
+    static juce::String& testKey()     { static juce::String k; return k; }
+    static juce::File& testFolder()    { static juce::File f; return f; }
+    static juce::String currentPublicKey() { return testKey().isNotEmpty() ? testKey() : juce::String (LicensePublicKey::key); }
 
-    juce::String machineId, machineName;
-    juce::File storage;
-    mutable juce::CriticalSection lock;
-    std::unique_ptr<Token> token;
-    juce::int64 newestServerTime = 0;
-    juce::int64 lastCheck = 0;
-    juce::String lastMessage;
+    static juce::File folder()
+    {
+        if (testFolder() != juce::File())
+            return testFolder();
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("ROOM");
+    }
+    static juce::File licenseFile() { return folder().getChildFile ("license.json"); }
+    static juce::File checkedFile() { return folder().getChildFile ("license.checked"); }
 
-    enum class Job { none, refresh, browser, key, deactivate };
-    std::atomic<Job> job { Job::none };
-    juce::String pendingKey;
-    std::atomic<bool> waitingForBrowser { false };
-    juce::WaitableEvent wake;
+    void load()
+    {
+        const auto license = LicenseCrypto::fromVar (juce::JSON::parse (licenseFile().loadFileAsString()));
+        if (isValid (license))
+        {
+            current = license;
+            activated = true;
+        }
+    }
+
+    bool store (const LicenseCrypto::License& license)
+    {
+        if (! isValid (license))
+            return false;
+        folder().createDirectory();
+        licenseFile().replaceWithText (juce::JSON::toString (LicenseCrypto::toVar (license)));
+        checkedFile().replaceWithText (juce::String (juce::Time::currentTimeMillis()));
+        current = license;
+        activated = true;
+        sendChangeMessage();
+        return true;
+    }
+
+    void forget()
+    {
+        licenseFile().deleteFile();
+        checkedFile().deleteFile();
+        current = {};
+        activated = false;
+        sendChangeMessage();
+    }
+
+    // Every 14 days: is the license still good? Only a clear "revoked" from the server turns it off.
+    void revalidateIfDue()
+    {
+        if (! activated)
+            return;
+        const auto last = checkedFile().loadFileAsString().getLargeIntValue();
+        if (juce::Time::currentTimeMillis() - last < (juce::int64) 14 * 24 * 60 * 60 * 1000)
+            return;
+        auto body = new juce::DynamicObject();
+        body->setProperty ("email", current.email);
+        body->setProperty ("key", current.key);
+        body->setProperty ("machineId", machineId());
+        body->setProperty ("product", product);
+        post ("/validate", juce::var (body), [this] (const juce::var& reply, const juce::String& networkError)
+        {
+            if (networkError.isNotEmpty())
+                return;   // offline: keep working, ask again next time
+            if (reply["revoked"].isBool() && (bool) reply["revoked"])
+                forget();
+            else
+                checkedFile().replaceWithText (juce::String (juce::Time::currentTimeMillis()));
+        });
+    }
+
+    // POSTs JSON to the server on the pool's thread; `then` runs on the message thread with the
+    // reply, or an empty reply and a network error.
+    void post (const juce::String& path, const juce::var& body, std::function<void (const juce::var&, const juce::String&)> then)
+    {
+        auto url = juce::URL (juce::String (apiBase) + path).withPOSTData (juce::JSON::toString (body, true));
+        auto alive = aliveFlag;
+        pool.addJob ([url, then, alive]
+        {
+            int status = 0;
+            juce::String text;
+            const auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inPostData)
+                                     .withExtraHeaders ("Content-Type: application/json")
+                                     .withConnectionTimeoutMs (10000)
+                                     .withStatusCode (&status);
+            if (auto stream = url.createInputStream (options))
+                text = stream->readEntireStreamAsString();
+            const auto reply = juce::JSON::parse (text);
+            const auto error = (status == 0 || ! reply.isObject())
+                                 ? juce::String ("Couldn't reach the license server. Check your internet connection and try again.")
+                                 : juce::String();
+            juce::MessageManager::callAsync ([then, reply, error, alive]
+            {
+                if (alive->load())
+                    then (reply, error);
+            });
+        });
+    }
+
+    std::atomic<bool> activated { false };
+    LicenseCrypto::License current;
+    juce::ThreadPool pool { 1 };
+    std::shared_ptr<std::atomic<bool>> aliveFlag = std::make_shared<std::atomic<bool>> (true);
 };
-} // namespace room::licensing
