@@ -142,8 +142,9 @@ int main (int argc, char* argv[])
         std::map<juce::String, float> params {
             { "intensity", intensity }, { "mix", mix }, { "tail", tail }, { "tape", tape },
             { "autoEq", autoEq }, { "space", space },
-            { "balanceAuto", balanceArg == "auto" ? 1.0f : 0.0f },
-            { "balance", balanceArg == "auto" ? 0.5f : balanceArg.getFloatValue() } };
+            // Auto stays off (ROOM 1.0): the knob starts at the balance the room detected.
+            { "balanceAuto", 0.0f },
+            { "balance", balance } };
         for (int b = 0; b < tone::numEqBands; ++b)
         {
             const auto n = juce::String (b + 1);

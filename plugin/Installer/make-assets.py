@@ -8,15 +8,15 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 HERE = Path(__file__).resolve().parent
-LOGO = HERE.parent / "Resources" / "Ui" / "logo.png"
+LOGO = HERE / "logo_from_svg.png"   # Resources/Ui/room_logo.svg rendered (letters in the alpha)
 RED, DEEP, BLACK, WHITE = (186, 39, 39), (120, 18, 18), (10, 10, 10), (245, 243, 239)
 
 
 def wordmark(width, colour):
     """The faceplate's 'room' wordmark, recoloured, `width` pixels wide."""
     logo = Image.open(LOGO).convert("RGBA")
-    # The letters are the alpha channel; the 3 px frame around the file isn't part of them.
-    alpha = logo.getchannel("A").crop((3, 3, logo.width - 3, logo.height - 3))
+    # The letters are the alpha channel.
+    alpha = logo.getchannel("A")
     alpha = alpha.crop(alpha.point(lambda v: 255 if v > 40 else 0).getbbox())
     mark = Image.new("RGBA", alpha.size, colour + (255,))
     mark.putalpha(alpha)

@@ -8,7 +8,7 @@ namespace room::presets
 
 namespace
 {
-    enum Column { colName = 1, colType, colStyle, colPack, colFav, colDecay, colTone, colSource, colMadeFor, colRoom };
+    enum Column { colName = 1, colType, colStyle, colPack, colFav, colDecay, colTone, colSource, colMadeFor, colRoom, colTag };
 
     juce::StringArray allAutoTags()
     {
@@ -426,7 +426,7 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
         const auto& pr = packRows[(size_t) juce::jlimit (0, (int) packRows.size() - 1, selectedPackRow)];
         (pr.pack.isNotEmpty() ? lib().getRoot().getChildFile (pr.pack) : lib().getRoot()).startAsProcess();
     };
-    filtersButton.setTooltip ("filter by tags");
+    filtersButton.setTooltip ("sort, and filter by tags");
     filtersButton.onClick = [this] { showFiltersMenu(); };
     closeButton.setButtonText ({});
     closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
@@ -442,25 +442,14 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     table.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
     table.setColour (juce::ListBox::outlineColourId, juce::Colours::transparentBlack);
     table.setRowHeight (38);
+    // WARP's list: a heart, the name, one dim tag on the right. No header;
+    // sorting is in the filters menu.
     auto& h = table.getHeader();
-    const auto colFlags = juce::TableHeaderComponent::defaultFlags;
-    if (kind == Kind::room)
-    {
-        h.addColumn ("Name", colName, 120, 80, 400, colFlags);
-        h.addColumn ("Type", colType, 92, 50, 160, colFlags);
-        h.addColumn ("Character", colStyle, 120, 60, 260, colFlags);
-        h.addColumn ("Decay", colDecay, 58, 44, 100, colFlags);
-        h.addColumn ("Tone", colTone, 62, 44, 100, colFlags);
-    }
-    else
-    {
-        h.addColumn ("Name", colName, 140, 80, 400, colFlags);
-        h.addColumn ("Made for", colMadeFor, 90, 60, 200, colFlags);
-        h.addColumn ("Style", colStyle, 100, 60, 260, colFlags);
-        h.addColumn ("Room", colRoom, 90, 60, 200, colFlags);
-        h.addColumn ("Pack", colPack, 60, 44, 160, colFlags);
-    }
-    h.addColumn ({}, colFav, 30, 30, 30, juce::TableHeaderComponent::notResizableOrSortable | juce::TableHeaderComponent::sortable);
+    const auto fixed = juce::TableHeaderComponent::notResizableOrSortable;
+    h.addColumn ({}, colFav, 36, 36, 36, fixed);
+    h.addColumn ("Name", colName, 260, 80, 800, juce::TableHeaderComponent::visible);
+    h.addColumn ({}, colTag, 200, 80, 300, fixed);
+    table.setHeaderHeight (0);
     h.setStretchToFitActive (true);
     h.setSortColumnId (colName, true);
     h.setColour (juce::TableHeaderComponent::backgroundColourId, juce::Colour (0xff0e0c0c));
@@ -617,22 +606,25 @@ void PresetBrowser::showDetailsFor (const PresetLibrary::Entry* e)
 void PresetBrowser::paintRowBackground (juce::Graphics& g, int row, int w, int h, bool selected)
 {
     // WARP's rows: a soft pill per preset, the selected one lighter, the loaded one edged red.
-    const auto r = juce::Rectangle<float> ((float) w, (float) h).reduced (0.0f, 2.0f);
-    g.setColour (selected ? selectedRow : rowAlt);
-    g.fillRect (r);
-    if (row >= 0 && row < (int) rows.size()
-        && lib().getEntries()[(size_t) rows[(size_t) row]].key == currentKey())
-    {
-        g.setColour (Colours::crimson.brighter (0.15f));
-        g.fillRect (r.withHeight (1.2f));
-        g.fillRect (r.withTop (r.getBottom() - 1.2f));
-    }
+    // Drawn as one pill across the whole row (the cells sit on top of it).
+    juce::ignoreUnused (row, w, h, selected);
 }
 
 void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h, bool selected)
 {
     if (row < 0 || row >= (int) rows.size())
         return;
+    {
+        // Each cell paints its slice of the row's pill: rounded at the row's ends only.
+        const auto& hdr = table.getHeader();
+        const auto x0 = (float) hdr.getColumnPosition (hdr.getIndexOfColumnId (col, true)).getX();
+        const auto total = (float) hdr.getTotalWidth();
+        juce::Graphics::ScopedSaveState save (g);
+        g.addTransform (juce::AffineTransform::translation (-x0, 0.0f));
+        const auto pill = juce::Rectangle<float> (0.0f, 0.0f, total - 6.0f, (float) h).reduced (0.0f, 3.0f);
+        g.setColour (selected ? selectedRow : rowAlt);
+        g.fillRoundedRectangle (pill, 8.0f);
+    }
     const auto& e = lib().getEntries()[(size_t) rows[(size_t) row]];
     const auto current = e.key == currentKey();
     juce::String text;
@@ -647,6 +639,23 @@ void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h
         case colSource: text = e.tags.source; break;
         case colMadeFor: text = e.meta.madeFor.joinIntoString (" \xc2\xb7 "); colour = Colours::textDim; break;
         case colRoom:  text = e.meta.roomName; break;
+        case colTag:
+        {
+            // ROOMS: type and decay; STUDIOS: what it's made for.
+            juce::StringArray parts;
+            if (kind == Kind::room)
+            {
+                parts.add (e.meta.type);
+                parts.add (e.tags.decay.isEmpty() ? juce::String() : e.tags.medianT60 <= 0.0f ? juce::String ("steady") : juce::String (e.tags.medianT60, 1) + " s");
+            }
+            else
+                parts.add (e.meta.madeFor.joinIntoString (", "));
+            parts.removeEmptyStrings();
+            g.setColour (Colours::textDim);
+            g.setFont (Fonts::sans (12.0f));
+            g.drawText (parts.joinIntoString (juce::String::fromUTF8 ("  \xc2\xb7  ")), 0, 0, w - 14, h, juce::Justification::centredRight, true);
+            return;
+        }
         case colPack:  text = e.pack; break;
         case colFav:
             drawHeart (g, juce::Rectangle<float> ((float) w, (float) h).reduced (8.0f, 12.0f), e.favorite,
@@ -842,6 +851,22 @@ int PresetBrowser::activeFilterCount() const
 void PresetBrowser::showFiltersMenu()
 {
     juce::PopupMenu m;
+    // Sorting (the list has no column header, WARP-style)
+    m.addSectionHeader ("sort by");
+    using S = PresetLibrary::SortColumn;
+    std::vector<std::tuple<const char*, int, S>> sorts { { "name", colName, S::name } };
+    if (kind == Kind::room)
+        sorts.insert (sorts.end(), { { "type", colType, S::type }, { "decay", colDecay, S::decay }, { "tone", colTone, S::tone } });
+    else
+        sorts.insert (sorts.end(), { { "made for", colMadeFor, S::madeFor }, { "style", colStyle, S::style }, { "room", colRoom, S::room },
+                                     { "pack", colPack, S::pack } });
+    sorts.push_back ({ "favourites first", colFav, S::favorite });
+    for (auto& [label, col, by] : sorts)
+        m.addItem (label, true, query.sortBy == by, [this, col = col, by = by]
+        {
+            sortOrderChanged (col, query.sortBy == by ? ! query.ascending : by != S::favorite);
+        });
+    m.addSeparator();
     auto group = [&] (const juce::String& title, ChipGroup& chips, const juce::StringArray& options)
     {
         m.addSectionHeader (title);
@@ -1074,6 +1099,7 @@ void PresetBrowser::resized()
     top.removeFromRight (8);
     search.setBounds (top);
     search.setIndents (34, 12);
+    search.setColour (juce::TextEditor::outlineColourId, Colours::crimson.withAlpha (0.8f));   // WARP: the accent edge
     right.removeFromTop (8);
     table.setBounds (right);
 

@@ -5,8 +5,8 @@
              madeFor="Keys,Vocals" roomName="Rain Window" created="2026-10-15T19:28:53.854Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
+    <PARAM id="balance" value="0.2842955887317657"/>
+    <PARAM id="balanceAuto" value="0.0"/>
     <PARAM id="eq1Freq" value="100.0"/>
     <PARAM id="eq1Gain" value="0.0"/>
     <PARAM id="eq1Q" value="0.7099999785423279"/>

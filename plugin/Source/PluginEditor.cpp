@@ -238,6 +238,23 @@ void LoadScreen::paintCard (juce::Graphics& g, const Card& c, float scale, float
                                  juce::Justification::centred);
 }
 
+void LoadScreen::paintOverChildren (juce::Graphics& g)
+{
+    if (! hovering)
+        return;
+    // A file over the stage: a dark veil, a red dashed outline, what happens on drop.
+    const auto area = getLocalBounds().toFloat().reduced (2.0f);
+    g.setColour (Colours::window.withAlpha (0.82f));
+    g.fillRoundedRectangle (area, 10.0f);
+    juce::Path outline, dashed;
+    outline.addRoundedRectangle (area.reduced (8.0f), 9.0f);
+    const float dashes[] = { 8.0f, 6.0f };
+    juce::PathStrokeType (1.6f).createDashedStroke (dashed, outline, dashes, 2);
+    g.setColour (Colours::crimson.brighter (0.15f));
+    g.fillPath (dashed);
+    EvilleLookAndFeel::drawCaps (g, "drop to build a room", area, 16.0f, Colours::dustWhite, juce::Justification::centred);
+}
+
 void LoadScreen::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
@@ -261,8 +278,8 @@ void LoadScreen::paint (juce::Graphics& g)
             g.setOpacity (1.0f);
         }
     }
-    g.setColour (hovering ? Colours::crimson.brighter (0.1f) : Colours::moduleEdge);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 10.0f, hovering ? 2.0f : 1.0f);
+    g.setColour (Colours::moduleEdge);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 10.0f, 1.0f);
 
     // The cards: a tilted ring around the box, the far side small and faint.
     const auto box = boxArea().toFloat();
@@ -293,6 +310,11 @@ void LoadScreen::paint (juce::Graphics& g)
         paintCard (g, c, scale, angle, alpha, c.key == current, c.key == hoverKey);
     }
 
+    // A standing hint: the whole stage takes audio.
+    if (status != RoomAudioProcessor::Status::empty)
+        EvilleLookAndFeel::drawCaps (g, "drop any audio here to make a room", bounds.reduced (20.0f, 12.0f).removeFromBottom (20.0f).removeFromLeft (300.0f),
+                                     9.5f, Colours::textDim.withMultipliedAlpha (0.8f), juce::Justification::centredLeft, Fonts::medium);
+
     // Along the bottom: the room's name, or what's happening
     auto line = bounds.reduced (20.0f, 10.0f).removeFromBottom (22.0f);
     const auto dot = juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
@@ -314,7 +336,8 @@ void LoadScreen::paint (juce::Graphics& g)
             EvilleLookAndFeel::drawCaps (g, "listening...", line, 12.0f, Colours::dustWhite, juce::Justification::centred);
             break;
         case RoomAudioProcessor::Status::empty:
-            EvilleLookAndFeel::drawCaps (g, "drop any sound here, or record one", line, 12.0f, Colours::textDim, juce::Justification::centred);
+            EvilleLookAndFeel::drawCaps (g, "drop any audio here, or record one, to make a room", line, 12.0f, Colours::dustWhite.withAlpha (0.8f),
+                                         juce::Justification::centred);
             break;
         case RoomAudioProcessor::Status::failed:
             EvilleLookAndFeel::drawCaps (g, proc.getStatusMessage(), line, 12.0f, Colours::redLight, juce::Justification::centred);
@@ -1166,23 +1189,26 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     // --- Load / room / tone ---
     content.addAndMakeVisible (loadScreen);
     loadScreen.onOpenLibrary = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
-    content.addAndMakeVisible (recordButton);
+    loadScreen.addAndMakeVisible (recordButton);   // on the stage, so drops over it still reach the stage
     recordButton.setClickingTogglesState (false);
     recordButton.onClick = [this]
     {
         if (proc.isRecording()) proc.stopRecording();
         else                    proc.startRecording();
     };
-    content.addAndMakeVisible (roomSaveButton);
+    loadScreen.addAndMakeVisible (roomSaveButton);   // on the stage, so drops over it still reach the stage
     roomSaveButton.onClick = [this] { openRoomSaveDialog(); };
     recordButton.setChipText ("record");
     roomSaveButton.setChipText ("save room");
     allRoomsButton.setChipText ("all rooms");
+    clearRoomButton.setChipText ("clear");
+    loadScreen.addAndMakeVisible (clearRoomButton);
+    clearRoomButton.onClick = [this] { proc.clearRoom(); };
     advancedButton.setChipText ("advanced");
-    content.addAndMakeVisible (allRoomsButton);
+    loadScreen.addAndMakeVisible (allRoomsButton);   // on the stage, so drops over it still reach the stage
     allRoomsButton.onClick = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
     loadScreen.onLoadRoom = [this] (const juce::String& key) { loadRoom (key); };
-    content.addAndMakeVisible (roomScreen);
+    loadScreen.addAndMakeVisible (roomScreen);   // on the stage, so drops over it still reach the stage
     content.addAndMakeVisible (toneScreen);
 
     // --- Shape the room ---
@@ -1473,8 +1499,11 @@ void RoomAudioProcessorEditor::timerCallback()
     if (rec)
         recordButton.repaint();
     const auto valid = proc.getAnalysis().valid;
-    roomSaveButton.setEnabled (valid);
-    roomSaveButton.setAlpha (valid ? 1.0f : 0.45f);
+    for (auto* b : { &roomSaveButton, &clearRoomButton })
+    {
+        b->setEnabled (valid);
+        b->setAlpha (valid ? 1.0f : 0.45f);
+    }
 
     const auto isAuto = autoBalance.getToggleState();
     if (balance.slider.isEnabled() == isAuto)
@@ -1542,14 +1571,16 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
 
 void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
 {
-    // The wordmark (Ethan's artwork) in off-white, the top bar's height
-    if (auto file = Hw::asset ("logo.png"); file.isValid())
+    // The wordmark (Ethan's artwork, room_logo.svg) in off-white, the top bar's height
     {
-        const auto logo = file.getClippedImage (file.getBounds().reduced (3));   // without the file's frame
-        const auto h = 34.0f, w = h * (float) logo.getWidth() / (float) logo.getHeight();
-        const auto r = juce::Rectangle<float> (w, h).withPosition (60.0f, 19.0f);
-        g.setColour (Colours::dustWhite);
-        g.drawImage (logo, r, juce::RectanglePlacement::stretchToFit, true);   // the letters, filled off-white
+        int size = 0;
+        if (auto* data = UiAssetFiles::get ("room_logo.svg", size))
+            if (auto logo = juce::Drawable::createFromImageData (data, (size_t) size))
+            {
+                logo->replaceColour (juce::Colours::black, Colours::dustWhite);
+                const auto h = 32.0f, w = h * 317.35f / 87.64f;
+                logo->drawWithin (g, juce::Rectangle<float> (w, h).withPosition (60.0f, 20.0f), juce::RectanglePlacement::centred, 1.0f);
+            }
     }
 
     // Top bar dividers either side of out, like WARP's
@@ -1648,10 +1679,11 @@ void RoomAudioProcessorEditor::layoutContent()
     // --- The stage, its chips, and the room box in the middle ---
     const auto st = stageArea.toNearestInt();
     loadScreen.setBounds (st);
-    roomScreen.setBounds (loadScreen.boxArea() + st.getPosition());
-    recordButton.setBounds (st.getX() + 16, st.getY() + 14, 116, 32);
-    roomSaveButton.setBounds (st.getX() + 140, st.getY() + 14, 124, 32);
-    allRoomsButton.setBounds (st.getRight() - 16 - 120, st.getY() + 14, 120, 32);
+    roomScreen.setBounds (loadScreen.boxArea());   // stage coordinates from here on
+    recordButton.setBounds (16, 14, 116, 32);
+    roomSaveButton.setBounds (140, 14, 124, 32);
+    clearRoomButton.setBounds (272, 14, 84, 32);
+    allRoomsButton.setBounds (st.getWidth() - 16 - 120, 14, 120, 32);
     toneScreen.setVisible (false);   // the tone now shows in the room's info (click the box)
 
     // --- Controls: one module, four sections ---

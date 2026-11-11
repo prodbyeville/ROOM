@@ -5,8 +5,8 @@
              roomName="Car Interior" created="2026-10-15T19:28:32.752Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
+    <PARAM id="balance" value="0.05124377831816673"/>
+    <PARAM id="balanceAuto" value="0.0"/>
     <PARAM id="eq1Freq" value="90.0"/>
     <PARAM id="eq1Gain" value="3.0"/>
     <PARAM id="eq1Q" value="0.7099999785423279"/>

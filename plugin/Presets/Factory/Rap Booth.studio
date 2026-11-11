@@ -5,8 +5,8 @@
              roomName="Vocal Booth" created="2026-10-15T19:28:41.393Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
+    <PARAM id="balance" value="0.0284743458032608"/>
+    <PARAM id="balanceAuto" value="0.0"/>
     <PARAM id="duck" value="0.5"/>
     <PARAM id="duckRelease" value="150.0"/>
     <PARAM id="eq1Freq" value="100.0"/>

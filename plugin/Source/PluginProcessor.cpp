@@ -192,7 +192,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, pct));
 
     layout.add (std::make_unique<AudioParameterBool> (
-        ParameterID { ParamIDs::balanceAuto, 1 }, "Balance Auto", true));
+        ParameterID { ParamIDs::balanceAuto, 1 }, "Balance Auto", false));   // off: the knob is where you set it
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::balance, 1 }, "Balance",

@@ -418,7 +418,7 @@ void EvilleLookAndFeel::drawPopupMenuSectionHeaderWithOptions (juce::Graphics& g
 {
     g.setFont (Fonts::sans (11.0f, Fonts::bold).withExtraKerningFactor (0.12f));
     g.setColour (Colours::screenDim);
-    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (12.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);
+    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (16.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);   // in line with the items
 }
 
 void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area, bool highlighted,
@@ -438,7 +438,7 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
     if (highlighted && enabled)
     {
         g.setColour (juce::Colour (0xff262222));
-        g.fillRoundedRectangle (r.reduced (4.0f, 1.0f), 4.0f);
+        g.fillRoundedRectangle (r.reduced (6.0f, 1.0f), 4.0f);
     }
 
     // Ticked: a small red dot at the right (WARP's menus keep the text flush left).
@@ -448,7 +448,7 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
         g.setColour (Colours::crimson.brighter (0.2f));
         g.fillEllipse (dot);
     }
-    auto text = r.withTrimmedLeft (12.0f).withTrimmedRight (item.isTicked ? 26.0f : 14.0f);
+    auto text = r.withTrimmedLeft (16.0f).withTrimmedRight (item.isTicked ? 26.0f : 14.0f);
     if (item.subMenu != nullptr)
     {
         const auto c = juce::Point<float> (text.getRight() - 4.0f, r.getCentreY());

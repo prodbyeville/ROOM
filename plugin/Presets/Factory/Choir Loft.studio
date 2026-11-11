@@ -5,8 +5,8 @@
              created="2026-10-15T19:28:28.398Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
+    <PARAM id="balance" value="0.4960379302501678"/>
+    <PARAM id="balanceAuto" value="0.0"/>
     <PARAM id="damping" value="-0.300000011920929"/>
     <PARAM id="duck" value="0.4000000059604645"/>
     <PARAM id="eq1Freq" value="100.0"/>

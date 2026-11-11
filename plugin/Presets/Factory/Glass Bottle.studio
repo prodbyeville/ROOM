@@ -5,8 +5,8 @@
              madeFor="FX,Keys" roomName="Glass Bottle" created="2026-10-15T19:28:13.415Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.5"/>
-    <PARAM id="balanceAuto" value="1.0"/>
+    <PARAM id="balance" value="0.1496871411800385"/>
+    <PARAM id="balanceAuto" value="0.0"/>
     <PARAM id="eq1Freq" value="100.0"/>
     <PARAM id="eq1Gain" value="0.0"/>
     <PARAM id="eq1Q" value="0.7099999785423279"/>

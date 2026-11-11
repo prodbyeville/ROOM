@@ -1668,6 +1668,46 @@ namespace
         check (finite, "convolution output stays finite through a switch");
     }
 
+    void testStage (const juce::File& root, const juce::File& roomSource)
+    {
+        std::cout << "Stage\n";
+        RoomAudioProcessor p;
+        p.setPresetRoot (root);
+        check (p.apvts.getRawParameterValue (ParamIDs::balanceAuto)->load() < 0.5f, "balance auto is off by default");
+        p.loadRoomFile (roomSource);
+        waitForAnalysis (p);
+        RoomAudioProcessorEditor ed (p);
+        auto* stage = findChild<LoadScreen> (ed);
+        check (stage != nullptr, "the stage is there");
+        if (stage == nullptr)
+            return;
+        // A drop anywhere on the stage, the room box included, reaches the stage.
+        juce::Component* hit = stage->getComponentAt (stage->boxArea().getCentre());
+        bool reaches = false;
+        for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+            if (dynamic_cast<juce::FileDragAndDropTarget*> (c) != nullptr) { reaches = c == stage; break; }
+        check (hit != stage && reaches, "a file dropped on the room box goes to the stage");
+        check (stage->isInterestedInFileDrag ({ roomSource.getFullPathName() }), "the stage takes audio files");
+
+        // Clear empties the room.
+        IconButton* clear = nullptr;
+        std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+        {
+            if (auto* b = dynamic_cast<IconButton*> (&c); b != nullptr && b->getTooltip().startsWith ("clear the room"))
+                clear = b;
+            for (auto* child : c.getChildren())
+                find (*child);
+        };
+        find (ed);
+        check (clear != nullptr && clear->getParentComponent() == stage, "clear sits on the stage");
+        check (p.getAnalysis().valid, "a room is loaded before clear");
+        if (clear != nullptr && clear->onClick)
+            clear->onClick();
+        for (int i = 0; i < 100 && p.getAnalysis().valid; ++i)
+            juce::Thread::sleep (20);
+        check (! p.getAnalysis().valid, "clear empties the room");
+    }
+
     void testModulationUi (const juce::File& root)
     {
         std::cout << "Modulation UI + Randomize\n";
@@ -2189,6 +2229,7 @@ int main (int argc, char* argv[])
     testStress();
     testFactoryPresets (root);
     testModulationUi (root);
+    testStage (root, roomSource);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

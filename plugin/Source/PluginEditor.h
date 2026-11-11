@@ -40,6 +40,7 @@ public:
     explicit LoadScreen (RoomAudioProcessor&);
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override { hoverKey.clear(); repaint(); }
@@ -317,6 +318,7 @@ private:
     IconButton recordButton { IconButton::Icon::record, "record a room: play, clap or sing into this track, press again to stop (max 30 s)" };
     IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
     IconButton allRoomsButton { IconButton::Icon::save, "every ROOM: search, favourites, packs" };
+    IconButton clearRoomButton { IconButton::Icon::save, "clear the room (the knobs stay)" };
     RoomScreen roomScreen { proc };
     ToneScreen toneScreen { proc };
 
