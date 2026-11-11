@@ -242,7 +242,12 @@ void EqPanel::resized() {}
 
 void EqPanel::paint (juce::Graphics& g)
 {
-    const auto glass = Hw::drawScreen (g, getLocalBounds().toFloat());
+    // A recessed plot on the bottom module (no glass): hairline frame, dark fill.
+    const auto glass = getLocalBounds().toFloat();
+    g.setColour (juce::Colour (0xff0e0c0c));
+    g.fillRoundedRectangle (glass, 8.0f);
+    g.setColour (Colours::moduleEdge);
+    g.drawRoundedRectangle (glass.reduced (0.5f), 8.0f, 1.0f);
 
     const auto r = plotArea();
     g.saveState();
@@ -320,7 +325,8 @@ void EqPanel::paint (juce::Graphics& g)
         fill.closeSubPath();
         g.setColour (Colours::screenText.withAlpha (0.05f));
         g.fillPath (fill);
-        Hw::strokeGlow (g, curve, Colours::screenText.withAlpha (0.9f), 1.4f);
+        g.setColour (Colours::dustWhite.withAlpha (0.92f));
+        g.strokePath (curve, juce::PathStrokeType (1.4f));
     }
 
     g.restoreState();
@@ -333,14 +339,9 @@ void EqPanel::paint (juce::Graphics& g)
         const auto highlighted = b == hoverBand || b == dragBand;
         const auto rad = kNodeRadius + (highlighted ? 1.5f : 0.0f);
         const auto col = highlighted ? Colours::crimson.brighter (0.2f) : Colours::screenText;
-        if (highlighted)
-        {
-            g.setColour (Colours::crimson.withAlpha (0.3f));
-            g.fillEllipse (juce::Rectangle<float> (rad * 4, rad * 4).withCentre (pos));
-        }
         g.setColour (col.withAlpha (active || highlighted ? 1.0f : 0.55f));
         g.fillEllipse (juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos));
-        g.setColour (Colours::glass);
+        g.setColour (juce::Colour (0xff0e0c0c));
         g.drawEllipse (juce::Rectangle<float> (rad * 2, rad * 2).withCentre (pos), 1.2f);
     }
 
@@ -354,9 +355,7 @@ void EqPanel::paint (juce::Graphics& g)
         g.drawText ((db > 0 ? "+" : "") + juce::String ((int) db),
                     juce::Rectangle<float> (glass.getX() + 6.0f, yForEqDb (db) - 7.0f, 28.0f, 14.0f),
                     juce::Justification::centredLeft);
-    g.setColour (Colours::screenText);
-    g.setFont (Fonts::mono (12.0f));
-    g.drawText ("eq", juce::Rectangle<float> (glass.getX() + 9.0f, glass.getY() + 4.0f, 40.0f, 16.0f), juce::Justification::centredLeft);
+    EvilleLookAndFeel::drawCaps (g, "eq", juce::Rectangle<float> (glass.getX() + 10.0f, glass.getY() + 5.0f, 40.0f, 16.0f), 11.5f, Colours::dustWhite);
 
     // --- readout for the band under the mouse ---
     const auto shown = dragBand >= 0 ? dragBand : hoverBand;
@@ -380,5 +379,4 @@ void EqPanel::paint (juce::Graphics& g)
         g.drawText ("drag bands  (scroll = width, double-click = reset)",
                     juce::Rectangle<float> (r.getX() + 30.0f, glass.getY() + 4.0f, r.getWidth() - 30.0f, 16.0f), juce::Justification::centredRight);
     }
-    Hw::drawScreenOverlay (g, glass);
 }

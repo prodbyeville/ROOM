@@ -19,8 +19,8 @@ namespace
         return a;
     }
 
-    const juce::Colour rowAlt { 0xff19191d };
-    const juce::Colour selectedRow { 0xff2a2a33 };
+    const juce::Colour rowAlt { 0xff1a1717 };
+    const juce::Colour selectedRow { 0xff2a2424 };
 
     void drawHeart (juce::Graphics& g, juce::Rectangle<float> r, bool filled, juce::Colour c)
     {
@@ -44,9 +44,9 @@ namespace
 
     void styleTextEditor (juce::TextEditor& t, const juce::String& hint)
     {
-        t.setColour (juce::TextEditor::backgroundColourId, Colours::background);
-        t.setColour (juce::TextEditor::outlineColourId, Colours::outline);
-        t.setColour (juce::TextEditor::focusedOutlineColourId, Colours::accent);
+        t.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1a1717));
+        t.setColour (juce::TextEditor::outlineColourId, Colours::chipEdge);
+        t.setColour (juce::TextEditor::focusedOutlineColourId, Colours::crimson.brighter (0.15f));
         t.setColour (juce::TextEditor::textColourId, Colours::text);
         t.setColour (juce::CaretComponent::caretColourId, Colours::text);
         t.setTextToShowWhenEmpty (hint, Colours::dim);
@@ -56,9 +56,9 @@ namespace
 
     void styleButton (juce::TextButton& b, bool primary = false)
     {
-        b.setColour (juce::TextButton::buttonColourId, primary ? Colours::accent : Colours::panel);
+        b.setColour (juce::TextButton::buttonColourId, primary ? Colours::accent : Colours::chip);
         b.setColour (juce::TextButton::textColourOffId, Colours::text);
-        b.setColour (juce::ComboBox::outlineColourId, Colours::outline);
+        b.setColour (juce::ComboBox::outlineColourId, Colours::chipEdge);
     }
 
     void styleLabel (juce::Label& l, const juce::String& text, float size = 11.0f, bool bold = true)
@@ -409,10 +409,39 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
         addAndMakeVisible (autoChips);
     }
 
+    // WARP's layout: filters live behind a chip next to search, the details in a
+    // right-click menu; the old sidebar chips and detail buttons only keep state.
+    for (auto* c : std::initializer_list<juce::Component*> { &packsLabel, &typesLabel, &stylesLabel, &autoTagsLabel,
+                                                             &typeChips, &styleChips, &autoChips, &clearFilters, &countLabel })
+        c->setVisible (false);
+    for (auto* b : { &filtersButton, &folderButton, &importButton, &exportButton, &soundButton })
+        b->getProperties().set ("key", "dark");
+    pathButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    pathButton.setColour (juce::TextButton::textColourOffId, Colours::textDim);
+    pathButton.setTooltip ("open this folder");
+    pathButton.onClick = [this] { lib().getRoot().startAsProcess(); };
+    folderButton.setTooltip ("open this pack's folder");
+    folderButton.onClick = [this]
+    {
+        const auto& pr = packRows[(size_t) juce::jlimit (0, (int) packRows.size() - 1, selectedPackRow)];
+        (pr.pack.isNotEmpty() ? lib().getRoot().getChildFile (pr.pack) : lib().getRoot()).startAsProcess();
+    };
+    filtersButton.setTooltip ("filter by tags");
+    filtersButton.onClick = [this] { showFiltersMenu(); };
+    closeButton.setButtonText ({});
+    closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    closeButton.setTooltip ("close");
+    newPackButton.setButtonText ("+ new pack");
+    newPackButton.setColour (juce::TextButton::textColourOffId, Colours::redLight);
+    importButton.setButtonText ("import...");
+    exportButton.setButtonText ("export...");
+    for (auto* b : { &filtersButton, &folderButton, &pathButton })
+        addAndMakeVisible (b);
+
     // Table
-    table.setColour (juce::ListBox::backgroundColourId, Colours::background);
+    table.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
     table.setColour (juce::ListBox::outlineColourId, juce::Colours::transparentBlack);
-    table.setRowHeight (30);
+    table.setRowHeight (38);
     auto& h = table.getHeader();
     const auto colFlags = juce::TableHeaderComponent::defaultFlags;
     if (kind == Kind::room)
@@ -434,10 +463,10 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     h.addColumn ({}, colFav, 30, 30, 30, juce::TableHeaderComponent::notResizableOrSortable | juce::TableHeaderComponent::sortable);
     h.setStretchToFitActive (true);
     h.setSortColumnId (colName, true);
-    h.setColour (juce::TableHeaderComponent::backgroundColourId, Colours::background);
-    h.setColour (juce::TableHeaderComponent::textColourId, Colours::dim);
-    h.setColour (juce::TableHeaderComponent::outlineColourId, Colours::outline);
-    h.setColour (juce::TableHeaderComponent::highlightColourId, Colours::panel);
+    h.setColour (juce::TableHeaderComponent::backgroundColourId, juce::Colour (0xff0e0c0c));
+    h.setColour (juce::TableHeaderComponent::textColourId, Colours::textDim);
+    h.setColour (juce::TableHeaderComponent::outlineColourId, juce::Colours::transparentBlack);
+    h.setColour (juce::TableHeaderComponent::highlightColourId, Colours::chip);
     table.getVerticalScrollBar().setColour (juce::ScrollBar::thumbColourId, Colours::outline);
     addAndMakeVisible (table);
 
@@ -458,7 +487,7 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     editButton.onClick = [this] { if (auto* e = selectedEntry()) if (onEdit) onEdit (e->key, e->meta, e->pack); };
     deleteButton.onClick = [this] { deleteSelected(); };
     for (auto* b : { &loadButton, &favButton, &editButton, &deleteButton })
-        addAndMakeVisible (b);
+        addChildComponent (b);   // their actions are in the row's right-click menu
 
     refresh();
 }
@@ -551,6 +580,8 @@ void PresetBrowser::updateRows()
         for (int i = 0; i < (int) rows.size(); ++i)
             if (lib.getEntries()[(size_t) rows[(size_t) i]].key == currentKey())
                 sel = i;
+    filtersButton.setButtonText (activeFilterCount() > 0 ? "filters  " + juce::String (activeFilterCount()) : juce::String ("filters"));
+    filtersButton.setToggleState (activeFilterCount() > 0, juce::dontSendNotification);
     if (sel >= 0)
         table.selectRow (sel, false, true);
     else
@@ -585,14 +616,17 @@ void PresetBrowser::showDetailsFor (const PresetLibrary::Entry* e)
 
 void PresetBrowser::paintRowBackground (juce::Graphics& g, int row, int w, int h, bool selected)
 {
-    g.fillAll (selected ? selectedRow : (row % 2 ? rowAlt : Colours::background));
+    // WARP's rows: a soft pill per preset, the selected one lighter, the loaded one edged red.
+    const auto r = juce::Rectangle<float> ((float) w, (float) h).reduced (0.0f, 2.0f);
+    g.setColour (selected ? selectedRow : rowAlt);
+    g.fillRect (r);
     if (row >= 0 && row < (int) rows.size()
         && lib().getEntries()[(size_t) rows[(size_t) row]].key == currentKey())
     {
-        g.setColour (Colours::accent);
-        g.fillRect (0, 0, 3, h);
+        g.setColour (Colours::crimson.brighter (0.15f));
+        g.fillRect (r.withHeight (1.2f));
+        g.fillRect (r.withTop (r.getBottom() - 1.2f));
     }
-    juce::ignoreUnused (w);
 }
 
 void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h, bool selected)
@@ -605,28 +639,42 @@ void PresetBrowser::paintCell (juce::Graphics& g, int row, int col, int w, int h
     auto colour = Colours::dim.brighter (0.25f);
     switch (col)
     {
-        case colName:  text = e.meta.name; colour = current ? Colours::accent : Colours::text; break;
-        case colType:  text = e.meta.type; colour = Colours::accent2; break;
+        case colName:  text = e.meta.name; colour = current ? Colours::redLight : Colours::text; break;
+        case colType:  text = e.meta.type; colour = Colours::textDim; break;
         case colStyle: text = e.meta.styles.joinIntoString (" \xc2\xb7 "); break;
         case colDecay: text = e.tags.decay.isEmpty() ? juce::String() : e.tags.medianT60 <= 0.0f ? juce::String ("steady") : juce::String (e.tags.medianT60, 1) + " s"; break;
         case colTone:  text = e.tags.tone; break;
         case colSource: text = e.tags.source; break;
-        case colMadeFor: text = e.meta.madeFor.joinIntoString (" \xc2\xb7 "); colour = Colours::accent2; break;
+        case colMadeFor: text = e.meta.madeFor.joinIntoString (" \xc2\xb7 "); colour = Colours::textDim; break;
         case colRoom:  text = e.meta.roomName; break;
         case colPack:  text = e.pack; break;
         case colFav:
-            drawHeart (g, juce::Rectangle<float> ((float) w, (float) h).reduced (8.0f, 9.0f), e.favorite,
-                       e.favorite ? Colours::reduction : Colours::outline.brighter (0.3f));
+            drawHeart (g, juce::Rectangle<float> ((float) w, (float) h).reduced (8.0f, 12.0f), e.favorite,
+                       e.favorite ? Colours::crimson.brighter (0.2f) : Colours::dustWhite.withAlpha (0.35f));
             return;
         default: break;
     }
     g.setColour (colour);
-    g.setFont (uiFont (13.0f, col == colName && (selected || current)));
+    juce::ignoreUnused (selected);
+    g.setFont (Fonts::sans (col == colName ? 14.0f : 12.5f, col == colName ? Fonts::bold : Fonts::medium));
     g.drawText (text, 8, 0, w - 12, h, juce::Justification::centredLeft, true);
 }
 
-void PresetBrowser::cellClicked (int row, int col, const juce::MouseEvent&)
+void PresetBrowser::cellClicked (int row, int col, const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        table.selectRow (row);
+        showRowMenu (row);
+        return;
+    }
+    // WARP: a click loads it and the browser stays open, so you can keep browsing.
+    if (col != colFav && row >= 0 && row < (int) rows.size() && onLoad)
+    {
+        onLoad (lib().getEntries()[(size_t) rows[(size_t) row]].key);
+        table.repaint();
+        return;
+    }
     if (col == colFav && row >= 0 && row < (int) rows.size())
     {
         const auto& e = lib().getEntries()[(size_t) rows[(size_t) row]];
@@ -638,6 +686,8 @@ void PresetBrowser::cellClicked (int row, int col, const juce::MouseEvent&)
 void PresetBrowser::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 {
     returnKeyPressed (row);
+    if (onClose)
+        onClose();   // double-click: load it and close
 }
 
 void PresetBrowser::returnKeyPressed (int row)
@@ -760,184 +810,285 @@ bool PresetBrowser::keyPressed (const juce::KeyPress& k)
     return false;
 }
 
-void PresetBrowser::paint (juce::Graphics& g)
+// WARP's browser, in ROOM's colours: a card over the window, the packs as
+// textured banners on the left, search and the list on the right, and the
+// section, the count and import / export / folder along the bottom.
+
+juce::Rectangle<int> PresetBrowser::cardArea() const
 {
-    g.fillAll (Colours::background);
+    return getLocalBounds().withSizeKeepingCentre (std::min (840, getWidth() - 40), std::min (700, getHeight() - 40));
+}
+juce::Rectangle<int> PresetBrowser::footerArea() const { return cardArea().reduced (22, 0).removeFromBottom (58); }
+juce::Rectangle<int> PresetBrowser::sectionPanel() const
+{
+    return cardArea().reduced (20, 0).withTrimmedTop (64 + 10).withTrimmedBottom (58).withWidth (250);
+}
+juce::Rectangle<int> PresetBrowser::listPanel() const
+{
+    return cardArea().reduced (20, 0).withTrimmedTop (64 + 10).withTrimmedBottom (58).withTrimmedLeft (250 + 12);
+}
 
-    // Title
-    g.setColour (Colours::text);
-    g.setFont (uiFont (20.0f, true));
-    g.setFont (Fonts::sans (24.0f, Fonts::bold));
-    g.drawText (kind == Kind::room ? "rooms" : "studios", 20, 0, 120, 56, juce::Justification::centredLeft);
+void PresetBrowser::mouseDown (const juce::MouseEvent& e)
+{
+    if (! cardArea().contains (e.getPosition()) && onClose)
+        onClose();
+}
 
-    // Panels
-    g.setColour (Colours::panel);
-    g.fillRoundedRectangle (sidebarArea.toFloat(), 8.0f);
-    g.fillRoundedRectangle (detailArea.toFloat(), 8.0f);
+int PresetBrowser::activeFilterCount() const
+{
+    return query.types.size() + query.madeFor.size() + query.styles.size() + query.autoTags.size();
+}
 
-    // Pack rows (painted; transparent buttons on top catch the clicks)
-    for (int i = 0; i < packButtons.size() && i < (int) packRows.size(); ++i)
+void PresetBrowser::showFiltersMenu()
+{
+    juce::PopupMenu m;
+    auto group = [&] (const juce::String& title, ChipGroup& chips, const juce::StringArray& options)
     {
-        const auto r = packButtons[i]->getBounds();
-        const auto sel = i == selectedPackRow;
-        if (sel)
-        {
-            g.setColour (selectedRow);
-            g.fillRoundedRectangle (r.toFloat(), 5.0f);
-            g.setColour (Colours::accent);
-            g.fillRect (r.getX(), r.getY() + 5, 2, r.getHeight() - 10);
-        }
-        const auto& pr = packRows[(size_t) i];
-        g.setColour (sel ? Colours::text : Colours::dim.brighter (0.2f));
-        g.setFont (uiFont (13.0f, sel));
-        auto tr = r.reduced (10, 0);
-        if (pr.favorites)
-        {
-            drawHeart (g, tr.removeFromLeft (14).toFloat().reduced (0.0f, 8.0f), true, Colours::reduction);
-            tr.removeFromLeft (6);
-        }
-        g.drawText (pr.label, tr, juce::Justification::centredLeft);
-        g.setColour (Colours::dim);
-        g.setFont (uiFont (12.0f));
-        g.drawText (juce::String (pr.count), tr, juce::Justification::centredRight);
-    }
-
-    // Details
-    auto d = detailArea.reduced (16, 14);
-    const auto* e = selectedEntry();
-    if (e == nullptr)
-    {
-        g.setColour (Colours::dim);
-        g.setFont (uiFont (13.0f));
-        g.drawFittedText (juce::String ("Select a ") + lib().noun() + " to see its details.\nDouble-click to load it."
-                              + (kind == Kind::room ? "\n\nLoading a ROOM only swaps the room. Your knobs and LFOs stay." : ""),
-                          d.withHeight (110),
-                          juce::Justification::topLeft, 3);
-        return;
-    }
-
-    g.setColour (Colours::text);
-    g.setFont (uiFont (18.0f, true));
-    g.drawFittedText (e->meta.name, d.removeFromTop (48), juce::Justification::topLeft, 2);
-    g.setColour (Colours::dim);
-    g.setFont (uiFont (12.0f));
-    g.drawText (e->meta.author.isNotEmpty() ? e->meta.author : juce::String ("User"), d.removeFromTop (18), juce::Justification::topLeft);
-    d.removeFromTop (8);
-
-    auto line = [&] (const juce::String& k, const juce::String& v)
-    {
-        auto row = d.removeFromTop (20);
-        g.setColour (Colours::dim);
-        g.setFont (uiFont (12.0f));
-        g.drawText (k, row.removeFromLeft (76), juce::Justification::centredLeft);
-        g.setColour (Colours::text);
-        g.drawText (v.isNotEmpty() ? v : juce::String ("-"), row, juce::Justification::centredLeft, true);
+        m.addSectionHeader (title);
+        const auto selected = chips.getSelected();
+        for (auto& o : options)
+            m.addItem (o.toLowerCase(), true, selected.contains (o), [this, &chips, o]
+            {
+                auto sel = chips.getSelected();
+                if (sel.contains (o)) sel.removeString (o); else sel.add (o);
+                chips.setSelected (sel);
+                if (chips.onChange) chips.onChange();
+                showFiltersMenu();   // stay open so several can be ticked in one go
+            });
     };
+    group (kind == Kind::room ? "type" : "made for", typeChips, kind == Kind::room ? allTypes() : allMadeFor());
+    group (kind == Kind::room ? "character" : "style", styleChips, allStyles());
     if (kind == Kind::room)
     {
-        line ("Type", e->meta.type);
-        line ("Character", e->meta.styles.joinIntoString (", "));
-        line ("Decay", e->tags.decay);
-        line ("Tone", e->tags.tone);
-        line ("Source", e->tags.source);
+        juce::StringArray a;
+        a.addArray (allDecayTags()); a.addArray (allToneTags()); a.addArray (allSources());
+        group (juce::String::fromUTF8 ("decay \xc2\xb7 tone \xc2\xb7 source"), autoChips, a);
     }
-    else
-    {
-        line ("Made for", e->meta.madeFor.joinIntoString (", "));
-        line ("Style", e->meta.styles.joinIntoString (", "));
-        line ("Room", e->meta.roomName);
-    }
-    line ("Pack", e->pack + (e->factory ? "  (built in)" : ""));
-    if (e->meta.created.toMilliseconds() > 0)
-        line ("Saved", e->meta.created.formatted ("%d %b %Y"));
+    m.addSeparator();
+    m.addItem ("clear filters", activeFilterCount() > 0, false, [this] { clearFilters.onClick(); });
+    EvilleLookAndFeel::showMenu (m, filtersButton);
+}
 
-    // Room summary, read from the preset itself
-    const auto tree = lib().loadPreset (*e);
-    const auto a = RoomAnalysis::fromValueTree (tree.getChildWithName ("ROOM_ANALYSIS"));
-    d.removeFromTop (8);
-    g.setColour (Colours::outline);
-    g.drawHorizontalLine (d.getY(), (float) d.getX(), (float) d.getRight());
-    d.removeFromTop (10);
-    if (a.valid)
+void PresetBrowser::showRowMenu (int row)
+{
+    if (row < 0 || row >= (int) rows.size())
+        return;
+    const auto& e = lib().getEntries()[(size_t) rows[(size_t) row]];
+    const auto key = e.key;
+    juce::PopupMenu m;
+    m.addSectionHeader (e.meta.name.toLowerCase());
+    m.addItem ("load", [this, key] { if (onLoad) onLoad (key); table.repaint(); });
+    m.addItem (e.favorite ? "unfavourite" : "favourite", [this, key]
     {
-        line ("Balance", juce::String (a.balance, 2) + (a.balance > 0.6f ? "  spatial" : a.balance < 0.4f ? "  tonal" : "  in between"));
-        line ("Decay time", a.steady ? juce::String ("steady sound") : juce::String (a.medianT60, 2) + " s");
-        line ("Rings", juce::String ((int) a.peaks.size()) + " resonance" + (a.peaks.size() == 1 ? "" : "s"));
+        if (auto* x = lib().find (key)) { lib().setFavorite (key, ! x->favorite); updateRows(); }
+    });
+    if (! e.factory)
+    {
+        m.addItem (juce::String::fromUTF8 ("edit\xe2\x80\xa6"), [this, key]
+        {
+            if (auto* x = lib().find (key)) if (onEdit) onEdit (x->key, x->meta, x->pack);
+        });
+        m.addItem (juce::String::fromUTF8 ("delete\xe2\x80\xa6"), [this, key] { selectedKey = key; deleteSelected(); });
+        if (e.file.existsAsFile())
+            m.addItem ("show in folder", [file = e.file] { file.revealToUser(); });
     }
-    else
-        line ("Room", "none (knobs only)");
+    m.addSeparator();
+    juce::String info = e.meta.type.isNotEmpty() ? e.meta.type : e.meta.madeFor.joinIntoString (", ");
+    if (kind == Kind::room && e.tags.decay.isNotEmpty())
+        info << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.decay << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.tone;
+    if (info.isNotEmpty())
+        m.addItem (info.toLowerCase(), false, false, nullptr);
+    if (e.meta.notes.isNotEmpty())
+        m.addItem (e.meta.notes.toLowerCase(), false, false, nullptr);
+    m.addItem (e.pack.toLowerCase() + (e.factory ? "  (built in)" : ""), false, false, nullptr);
+    EvilleLookAndFeel::showMenu (m, table);
+}
 
-    if (e->meta.notes.isNotEmpty())
+void PresetBrowser::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (0.72f));
+    const auto card = cardArea().toFloat();
+    g.setColour (juce::Colour (0xff121010));
+    g.fillRoundedRectangle (card, 22.0f);
+    g.setColour (Colours::crimson.withAlpha (0.85f));
+    g.drawRoundedRectangle (card.reduced (0.75f), 22.0f, 1.5f);
+
+    // Header: the title, a hairline under it
+    const auto header = cardArea().removeFromTop (64);
+    EvilleLookAndFeel::drawCaps (g, kind == Kind::room ? "rooms" : "studios", header.withTrimmedLeft (28).toFloat(), 17.0f, Colours::dustWhite);
+    g.setColour (juce::Colours::white.withAlpha (0.07f));
+    g.fillRect (card.getX() + 20.0f, (float) header.getBottom(), card.getWidth() - 40.0f, 1.0f);
+
+    // The close X
     {
-        d.removeFromTop (8);
-        g.setColour (Colours::dim);
-        g.setFont (uiFont (12.0f));
-        g.drawFittedText (e->meta.notes, d.removeFromTop (60), juce::Justification::topLeft, 4);
+        const auto c = closeButton.getBounds().toFloat().getCentre();
+        g.setColour (Colours::dustWhite.withAlpha (closeButton.isMouseOver() ? 1.0f : 0.8f));
+        g.drawLine (c.x - 7.0f, c.y - 7.0f, c.x + 7.0f, c.y + 7.0f, 1.8f);
+        g.drawLine (c.x - 7.0f, c.y + 7.0f, c.x + 7.0f, c.y - 7.0f, 1.8f);
     }
+
+    // The panels behind the sections and the list
+    for (auto r : { sectionPanel(), listPanel() })
+    {
+        g.setColour (juce::Colour (0xff0e0c0c));
+        g.fillRoundedRectangle (r.toFloat(), 12.0f);
+    }
+
+    // The sections as banners: a crop of a texture darkened to the left, caps
+    // name, the count and a chevron; the chosen one edged red.
+    static const char* textures[] = { "card_plum.jpg", "card_red.jpg", "card_charcoal.jpg", "card_rose.jpg", "card_plaster.jpg" };
+    for (int i = 0; i < packButtons.size() && i < (int) packRows.size(); ++i)
+    {
+        const auto r = packButtons[i]->getBounds().toFloat().reduced (0.0f, 3.0f);
+        const auto& pr = packRows[(size_t) i];
+        const auto sel = i == selectedPackRow;
+        const auto texName = pr.favorites ? textures[1] : pr.pack.isEmpty() ? textures[2]
+                           : textures[(size_t) (pr.pack.hashCode() & 0x7fffffff) % 5];
+        {
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path shape;
+            shape.addRoundedRectangle (r, 10.0f);
+            g.reduceClipRegion (shape);
+            if (auto tex = Hw::asset (texName); tex.isValid())
+            {
+                const auto seed = (int) (pr.label.hashCode() & 0xffff);
+                g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(),
+                             seed % (tex.getWidth() / 2), (seed / 3) % (tex.getHeight() / 2), tex.getWidth() / 2, tex.getHeight() / 3);
+            }
+            juce::ColourGradient dark (juce::Colours::black.withAlpha (0.78f), r.getX(), 0.0f,
+                                       juce::Colours::black.withAlpha (0.15f), r.getRight(), 0.0f, false);
+            g.setGradientFill (dark);
+            g.fillRect (r);
+        }
+        if (sel)
+        {
+            g.setColour (Colours::crimson.brighter (0.15f));
+            g.drawRoundedRectangle (r.reduced (0.75f), 10.0f, 1.5f);
+        }
+        auto tr = r.reduced (16.0f, 0.0f);
+        if (pr.favorites)
+        {
+            drawHeart (g, tr.removeFromLeft (14.0f).reduced (0.0f, (r.getHeight() - 13.0f) * 0.5f), true, Colours::dustWhite);
+            tr.removeFromLeft (10.0f);
+        }
+        if (! pr.favorites && pr.pack.isNotEmpty() && pr.pack.equalsIgnoreCase ("factory"))
+            EvilleLookAndFeel::drawCaps (g, "built in", tr.withHeight (14.0f).translated (0.0f, r.getHeight() * 0.18f), 8.5f,
+                                         Colours::dustWhite.withAlpha (0.6f));
+        EvilleLookAndFeel::drawCaps (g, pr.favorites ? "favourites" : pr.label, tr, 12.0f,
+                                     sel ? Colours::redLight.brighter (0.2f) : Colours::dustWhite);
+        // count and chevron
+        auto right = tr.removeFromRight (52.0f);
+        const auto chev = right.removeFromRight (10.0f).getCentre();
+        right.removeFromRight (10.0f);
+        juce::Path p;
+        p.startNewSubPath (chev.x - 3.0f, chev.y - 6.0f);
+        p.lineTo (chev.x + 3.0f, chev.y);
+        p.lineTo (chev.x - 3.0f, chev.y + 6.0f);
+        g.setColour (Colours::dustWhite.withAlpha (0.85f));
+        g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setFont (Fonts::sans (11.5f, Fonts::bold));
+        g.drawText (juce::String (pr.count), right, juce::Justification::centredRight);
+    }
+
+
+    // Footer: the section, a hairline, the count
+    auto footer = footerArea().toFloat();
+    footer.removeFromRight ((float) (footerArea().getRight() - importButton.getX()) + 14.0f);
+    g.setColour (Colours::crimson.brighter (0.15f));
+    g.fillRoundedRectangle (footer.removeFromLeft (10.0f).withSizeKeepingCentre (8.0f, 8.0f), 2.0f);
+    footer.removeFromLeft (10.0f);
+    const auto& pr = packRows[(size_t) juce::jlimit (0, (int) packRows.size() - 1, selectedPackRow)];
+    const auto section = (pr.favorites ? juce::String ("favourites") : pr.label).toUpperCase();
+    const auto sectionWidth = std::min (footer.getWidth() * 0.4f,
+                                        juce::GlyphArrangement::getStringWidth (Fonts::sans (11.5f, Fonts::bold).withExtraKerningFactor (0.18f), section) + 10.0f);
+    EvilleLookAndFeel::drawCaps (g, section, footer.removeFromLeft (sectionWidth), 11.5f, Colours::dustWhite);
+    juce::String count = juce::String ((int) rows.size()) + " " + (kind == Kind::room ? "rooms" : "studios");
+    if (lib().getUnreadableCount() > 0)
+        count << "  (" << lib().getUnreadableCount() << " unreadable)";
+    const auto countWidth = juce::GlyphArrangement::getStringWidth (Fonts::sans (11.0f, Fonts::bold).withExtraKerningFactor (0.18f), count.toUpperCase()) + 24.0f;
+    EvilleLookAndFeel::drawCaps (g, count, footer.removeFromRight (countWidth), 11.0f, Colours::textDim, juce::Justification::centredRight);
+    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.fillRect (footer.reduced (12.0f, 0.0f).withSizeKeepingCentre (std::max (0.0f, footer.getWidth() - 24.0f), 1.0f));
+
+    if (rows.empty())
+    {
+        g.setColour (Colours::textDim);
+        g.setFont (Fonts::sans (14.0f));
+        g.drawFittedText (search.isEmpty() && activeFilterCount() == 0
+                              ? (pr.favorites ? juce::String ("heart a ") + juce::String (lib().noun()).toLowerCase() + " to keep it here."
+                                              : juce::String ("nothing here yet."))
+                              : juce::String ("nothing matches."),
+                          table.getBounds().reduced (30), juce::Justification::centred, 3);
+    }
+}
+
+void PresetBrowser::paintOverChildren (juce::Graphics& g)
+{
+    // Search: the magnifier inside the field
+    {
+        const auto mb = search.getBounds().toFloat().removeFromLeft (34.0f).withSizeKeepingCentre (14.0f, 14.0f);
+        g.setColour (Colours::textDim);
+        g.drawEllipse (mb.withTrimmedRight (3.0f).withTrimmedBottom (3.0f), 1.6f);
+        g.drawLine (mb.getRight() - 4.0f, mb.getBottom() - 4.0f, mb.getRight(), mb.getBottom(), 1.8f);
+    }
+
+    // The folder glyph on the folder key
+    const auto b = folderButton.getBounds().toFloat().withSizeKeepingCentre (18.0f, 14.0f);
+    juce::Path p;
+    p.startNewSubPath (b.getX(), b.getBottom());
+    p.lineTo (b.getX(), b.getY());
+    p.lineTo (b.getX() + b.getWidth() * 0.4f, b.getY());
+    p.lineTo (b.getX() + b.getWidth() * 0.5f, b.getY() + 3.0f);
+    p.lineTo (b.getRight(), b.getY() + 3.0f);
+    p.lineTo (b.getRight(), b.getBottom());
+    p.closeSubPath();
+    g.setColour (Colours::dustWhite.withAlpha (folderButton.isMouseOver() ? 1.0f : 0.85f));
+    g.strokePath (p, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 void PresetBrowser::resized()
 {
-    auto r = getLocalBounds();
-    auto top = r.removeFromTop (56).reduced (16, 12);
-    top.removeFromLeft (110);
-    closeButton.setBounds (top.removeFromRight (70));
-    top.removeFromRight (10);
+    auto header = cardArea().removeFromTop (64).reduced (18, 14);
+    closeButton.setBounds (header.removeFromRight (36));
+    header.removeFromRight (10);
     if (kind == Kind::room)
     {
-        soundButton.setBounds (top.removeFromRight (160));
-        top.removeFromRight (10);
+        soundButton.setBounds (header.removeFromRight (180));
+        header.removeFromRight (10);
     }
-    countLabel.setBounds (top.removeFromRight (190));
-    top.removeFromRight (10);
+    auto path = lib().getRoot().getFullPathName();
+    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getFullPathName();
+    if (path.startsWith (home))
+        path = "~" + path.substring (home.length());
+    pathButton.setButtonText (path);
+    pathButton.setBounds (header.removeFromRight (std::min (300, header.getWidth() - 140)));
+
+    auto left = sectionPanel().reduced (8);
+    newPackButton.setBounds (left.removeFromBottom (32));
+    left.removeFromBottom (4);
+    layoutSidebar (left);
+
+    auto right = listPanel().reduced (8);
+    auto top = right.removeFromTop (40);
+    filtersButton.setBounds (top.removeFromRight (110));
+    top.removeFromRight (8);
     search.setBounds (top);
+    search.setIndents (34, 12);
+    right.removeFromTop (8);
+    table.setBounds (right);
 
-    r = r.reduced (16, 0).withTrimmedBottom (16);
-    sidebarArea = r.removeFromLeft (200);
-    r.removeFromLeft (12);
-    detailArea = r.removeFromRight (kind == Kind::room ? 200 : 230);
-    r.removeFromRight (12);
-    table.setBounds (r);
-
-    layoutSidebar (sidebarArea.reduced (10, 12));
-
-    auto d = detailArea.reduced (16, 14);
-    auto buttons = d.removeFromBottom (32);
-    loadButton.setBounds (buttons.removeFromRight (90));
-    buttons.removeFromRight (6);
-    favButton.setBounds (buttons);
-    auto row2 = d.removeFromBottom (40).withTrimmedBottom (8);
-    editButton.setBounds (row2.removeFromLeft (row2.getWidth() / 2 - 3));
-    row2.removeFromLeft (6);
-    deleteButton.setBounds (row2);
+    auto footer = footerArea().reduced (0, 10);
+    folderButton.setBounds (footer.removeFromRight (38));
+    footer.removeFromRight (8);
+    exportButton.setBounds (footer.removeFromRight (100));
+    footer.removeFromRight (8);
+    importButton.setBounds (footer.removeFromRight (100));
 }
 
 void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
 {
-    packsLabel.setBounds (s.removeFromTop (18));
     for (auto* b : packButtons)
-        b->setBounds (s.removeFromTop (26));
-    s.removeFromTop (4);
-    auto actions = s.removeFromTop (24);
-    const auto w3 = actions.getWidth() / 3;
-    newPackButton.setBounds (actions.removeFromLeft (w3 + 8));
-    importButton.setBounds (actions.removeFromLeft (w3 - 4));
-    exportButton.setBounds (actions);
-    s.removeFromTop (12);
-
-    typesLabel.setBounds (s.removeFromTop (18));
-    typeChips.setBounds (s.removeFromTop (typeChips.heightForWidth (s.getWidth())));
-    s.removeFromTop (10);
-    stylesLabel.setBounds (s.removeFromTop (18));
-    styleChips.setBounds (s.removeFromTop (styleChips.heightForWidth (s.getWidth())));
-    if (kind == Kind::room)
-    {
-        s.removeFromTop (10);
-        autoTagsLabel.setBounds (s.removeFromTop (18));
-        autoChips.setBounds (s.removeFromTop (autoChips.heightForWidth (s.getWidth())));
-    }
-    s.removeFromTop (6);
-    clearFilters.setBounds (s.removeFromTop (24).removeFromLeft (100));
+        b->setBounds (s.removeFromTop (54));
 }
 
 //==============================================================================
@@ -954,7 +1105,7 @@ PresetBar::PresetBar (const juce::String& l) : label (l)
         b->onStateChange = [this] { repaint(); };   // their glyphs are drawn on the glass
         addAndMakeVisible (b);
     }
-    save.getProperties().set ("key", "light");
+    save.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     save.setButtonText ({});
     addAndMakeVisible (save);
     save.setTooltip ("save this sound as a STUDIO (room + every knob + lfos)");
@@ -989,31 +1140,33 @@ juce::Rectangle<int> PresetBar::nameArea() const
 
 void PresetBar::paint (juce::Graphics& g)
 {
-    // One glass window: [heart]  studios / name  [<] [>]
-    const auto win = nameArea().toFloat();
-    const auto glass = Hw::drawScreen (g, win);
-    auto text = glass.withLeft ((float) heart.getRight() + 4.0f).withRight ((float) prev.getX() - 4.0f);
-    g.setFont (Fonts::mono (14.0f));
-    g.setColour (Colours::screenText);
-    const auto title = (name.isEmpty() ? juce::String ("init") : name) + (modified && name.isNotEmpty() ? " *" : "");
-    auto shown = label + " / " + title;
-    if (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), shown) > text.getWidth() / 0.78f)
-        shown = title;   // long names: the name matters more than the "studios /" label
-    g.drawFittedText (shown, text.toNearestInt(), juce::Justification::centred, 1, 0.78f);
-
-    // heart: lit crimson when this studio is a favourite
-    const auto hb = heart.getBounds().toFloat().withSizeKeepingCentre (15.0f, 13.0f);
-    const auto hc = ! canFavorite ? Colours::screenDim.withAlpha (0.35f)
-                  : favorite      ? Colours::crimson.brighter (0.15f)
-                  : heart.isMouseOver() ? Colours::screenText : Colours::screenDim;
-    if (favorite && canFavorite)
+    // WARP's preset box: one dark box with the name in caps, then the heart, a
+    // divider and the arrows; save sits outside it as a bare icon.
+    const auto box = nameArea().toFloat().reduced (0.5f);
+    g.setColour (juce::Colour (0xff141212));
+    g.fillRoundedRectangle (box, 6.0f);
+    g.setColour (Colours::moduleEdge);
+    g.drawRoundedRectangle (box, 6.0f, 1.0f);
+    if (isMouseOver (true) && nameArea().contains (getMouseXYRelative()))
     {
-        g.setColour (Colours::crimson.withAlpha (0.25f));
-        g.fillEllipse (hb.expanded (5.0f));
+        g.setColour (juce::Colours::white.withAlpha (0.03f));
+        g.fillRoundedRectangle (box, 6.0f);
     }
+
+    const auto title = (name.isEmpty() ? juce::String ("no preset") : name) + (modified && name.isNotEmpty() ? " *" : "");
+    auto text = box.withRight ((float) heart.getX() - 6.0f).withTrimmedLeft (12.0f);
+    g.setFont (Fonts::sans (13.5f, Fonts::bold).withExtraKerningFactor (0.18f));
+    g.setColour (Colours::dustWhite.withAlpha (name.isEmpty() ? 0.6f : 1.0f));
+    g.drawFittedText (title.toUpperCase(), text.toNearestInt(), juce::Justification::centred, 1, 0.8f);
+
+    const auto hb = heart.getBounds().toFloat().withSizeKeepingCentre (15.0f, 13.0f);
+    const auto hc = ! canFavorite ? Colours::dustWhite.withAlpha (0.25f)
+                  : favorite      ? Colours::crimson.brighter (0.2f)
+                  : Colours::dustWhite.withAlpha (heart.isMouseOver() ? 1.0f : 0.75f);
     drawHeart (g, hb, favorite, hc);
 
-    g.setColour (Colours::screenText.withAlpha (0.8f));
+    g.setColour (Colours::moduleEdge);
+    g.drawVerticalLine (prev.getX() - 3, box.getY() + 9.0f, box.getBottom() - 9.0f);
     for (auto* b : { &prev, &next })
     {
         const auto c = b->getBounds().toFloat().getCentre();
@@ -1022,24 +1175,19 @@ void PresetBar::paint (juce::Graphics& g)
         chevron.startNewSubPath (c.x - d * 2.5f, c.y - 5.0f);
         chevron.lineTo (c.x + d * 2.5f, c.y);
         chevron.lineTo (c.x - d * 2.5f, c.y + 5.0f);
-        g.setColour (Colours::screenText.withAlpha (b->isMouseOver() ? 1.0f : 0.7f));
+        g.setColour (Colours::dustWhite.withAlpha (b->isMouseOver() ? 1.0f : 0.75f));
         g.strokePath (chevron, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
-    // a hairline between the name and the arrows, like a segmented display
-    g.setColour (Colours::screenDim.withAlpha (0.25f));
-    g.drawVerticalLine (prev.getX() - 2, glass.getY() + 9.0f, glass.getBottom() - 9.0f);
-    Hw::drawScreenOverlay (g, glass);
 }
 
 void PresetBar::paintOverChildren (juce::Graphics& g)
 {
-    // The disk glyph on the save key
-    const auto down = save.isDown() ? 0.6f : 0.0f;
-    const auto sb = Hw::keyCap (save.getBounds().toFloat()).reduced (9.5f).translated (0.0f, down - 0.5f);
-    g.setColour (Colours::ink.withAlpha (0.88f));
-    g.drawRoundedRectangle (sb, 2.0f, 1.6f);
-    g.fillRect (sb.getX() + sb.getWidth() * 0.25f, sb.getY(), sb.getWidth() * 0.5f, sb.getHeight() * 0.35f);
-    g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.58f, sb.getWidth() * 0.56f, sb.getHeight() * 0.42f, 1.2f);
+    // The save icon: a floppy, drawn bare
+    const auto sb = save.getBounds().toFloat().withSizeKeepingCentre (20.0f, 20.0f).translated (0.0f, save.isDown() ? 0.6f : 0.0f);
+    g.setColour (Colours::dustWhite.withAlpha (save.isMouseOver() ? 1.0f : 0.85f));
+    g.drawRoundedRectangle (sb, 2.5f, 1.6f);
+    g.fillRect (sb.getX() + sb.getWidth() * 0.27f, sb.getY(), sb.getWidth() * 0.46f, sb.getHeight() * 0.32f);
+    g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.56f, sb.getWidth() * 0.56f, sb.getHeight() * 0.44f, 1.3f);
 }
 
 void PresetBar::resized()
@@ -1047,10 +1195,11 @@ void PresetBar::resized()
     auto r = getLocalBounds();
     save.setBounds (r.removeFromRight (getHeight()));
     r.removeFromRight (8);
-    auto glass = r.reduced (6, 6);
-    heart.setBounds (glass.removeFromLeft (28));
-    next.setBounds (glass.removeFromRight (24));
-    prev.setBounds (glass.removeFromRight (24));
+    auto inner = r.reduced (6, 6);
+    next.setBounds (inner.removeFromRight (24));
+    prev.setBounds (inner.removeFromRight (24));
+    inner.removeFromRight (8);
+    heart.setBounds (inner.removeFromRight (26));
 }
 
 void PresetBar::mouseUp (const juce::MouseEvent& e)

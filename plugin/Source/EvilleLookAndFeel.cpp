@@ -146,104 +146,76 @@ juce::Label* EvilleLookAndFeel::createSliderTextBox (juce::Slider& s)
 }
 
 //==============================================================================
-// Knobs: printed tick scale, black knurled body, white pointer
+// Knobs (ROOM 1.0): a ring of fine ticks, a red value arc over it ending in a
+// white dot, and a dark body with a white pointer. No glow. Line widths follow
+// the knob's size so small knobs stay delicate.
 
 void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int, float pos,
                                           float startAngle, float endAngle, juce::Slider& s)
 {
-    const auto dark = onBlack (s);
     const auto kb = knobBounds (s);
     const auto c = kb.getCentre();
     const auto r = kb.getWidth() * 0.5f;
-    const auto alpha = s.isEnabled() ? 1.0f : 0.8f;
-    const auto printCol = (dark ? Colours::dim : Colours::ink).withMultipliedAlpha (alpha);
+    const auto alpha = s.isEnabled() ? 1.0f : 0.45f;
+    const auto small = r < 20.0f;
     auto pointAt = [&] (float angle, float radius)
     {
         return juce::Point<float> (c.x + radius * std::sin (angle), c.y - radius * std::cos (angle));
     };
+    const auto a = startAngle + pos * (endAngle - startAngle);
+    const auto ringR = r * 0.98f;
 
-    // Printed scale: 11 ticks, every fifth one longer.
-    if (! s.getProperties()["noScale"])
+    if (small)
     {
-        for (int i = 0; i <= 10; ++i)
-        {
-            const auto a = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
-            const auto major = i % 5 == 0;
-            g.setColour (printCol.withMultipliedAlpha (major ? 0.9f : 0.55f));
-            g.drawLine ({ pointAt (a, r + 5.0f), pointAt (a, r + (major ? 11.0f : 8.5f)) }, major ? 1.3f : 1.0f);
-        }
-        g.setFont (Fonts::mono (std::max (8.5f, r * 0.24f)));
-        const juce::Identifier ids[3] = { "scaleMin", "scaleMid", "scaleMax" };
-        const float at[3] = { 0.0f, 0.5f, 1.0f };
-        for (int i = 0; i < 3; ++i)
-            if (auto t = s.getProperties()[ids[i]].toString(); t.isNotEmpty())
-            {
-                const auto a = startAngle + (endAngle - startAngle) * at[i];
-                const auto p = pointAt (a, r + (i == 1 ? 21.0f : 22.0f));
-                g.setColour (printCol.withMultipliedAlpha (0.85f));
-                g.drawText (t, juce::Rectangle<float> (40.0f, 12.0f).withCentre (p.translated (i == 0 ? -6.0f : i == 2 ? 6.0f : 0.0f, 0.0f)),
-                            juce::Justification::centred);
-            }
+        // Small knobs (wet, out): just the ring and the arc, WARP's knob A.
+        juce::Path track;
+        track.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, startAngle, endAngle, true);
+        g.setColour (Colours::dustWhite.withAlpha (0.28f * alpha));
+        g.strokePath (track, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
-
-    // The knob itself: a photographed knurled cap (made in Higgsfield), one for
-    // the white console and one for the black modules. The photo carries its own
-    // contact shadow. It doesn't rotate (its light stays top-left); the pointer does.
-    const auto paperKnob = Hw::asset ("knob_paper.png");
-    const auto blackKnob = Hw::asset ("knob_black.png");
-    if (const auto& knobImg = dark ? blackKnob : paperKnob; knobImg.isValid())
+    else
     {
-        const auto half = r / (dark ? 0.92f : 0.875f);
-        g.setOpacity (alpha);
-        g.drawImage (knobImg, juce::Rectangle<float> (half * 2.0f, half * 2.0f).withCentre (c),
-                     juce::RectanglePlacement::stretchToFit);
+        // The tick ring
+        const int ticks = 32;
+        for (int i = 0; i <= ticks; ++i)
+        {
+            const auto t = startAngle + (endAngle - startAngle) * (float) i / (float) ticks;
+            g.setColour (Colours::dustWhite.withAlpha ((i % 8 == 0 ? 0.42f : 0.24f) * alpha));
+            g.drawLine ({ pointAt (t, ringR - r * 0.10f), pointAt (t, ringR) }, i % 8 == 0 ? 1.1f : 0.8f);
+        }
+        // The body: a dark disc with a soft top light and a hairline rim
+        const auto body = juce::Rectangle<float> (r * 1.42f, r * 1.42f).withCentre (c);
+        juce::ColourGradient grad (juce::Colour (0xff2c2828).withMultipliedAlpha (alpha), body.getX(), body.getY(),
+                                   juce::Colour (0xff121010).withMultipliedAlpha (alpha), body.getRight(), body.getBottom(), false);
+        g.setGradientFill (grad);
+        g.fillEllipse (body);
+        g.setColour (juce::Colours::white.withAlpha (0.08f * alpha));
+        g.drawEllipse (body.reduced (0.5f), 1.0f);
         if (s.isMouseOverOrDragging() && s.isEnabled())
         {
-            g.setColour (juce::Colours::white.withAlpha (0.035f));
-            g.fillEllipse (kb.reduced (r * 0.1f));
+            g.setColour (juce::Colours::white.withAlpha (0.04f));
+            g.fillEllipse (body);
         }
-        // Pointer: a white line inlaid in the cap, with a hairline of shadow under it.
-        const auto a = startAngle + pos * (endAngle - startAngle);
-        const auto w = std::max (1.8f, r * 0.075f);
-        const juce::Line<float> line (pointAt (a, r * 0.30f), pointAt (a, r * 0.80f));
-        g.setColour (juce::Colours::black.withAlpha (0.6f * alpha));
-        g.drawLine (line.withShortenedStart (-0.5f).withShortenedEnd (-0.5f), w + 1.4f);
-        g.setColour (juce::Colour (0xfff2efe8).withAlpha (0.96f * alpha));
-        g.drawLine (line, w);
-        g.setColour (juce::Colours::white.withAlpha (0.5f * alpha));
-        g.drawLine ({ line.getStart().translated (-w * 0.2f, -w * 0.2f), line.getEnd().translated (-w * 0.2f, -w * 0.2f) }, w * 0.35f);
-        return;
+        // The pointer
+        g.setColour (Colours::dustWhite.withAlpha (0.92f * alpha));
+        g.drawLine ({ pointAt (a, r * 0.08f), pointAt (a, r * 0.62f) }, std::max (1.6f, r * 0.045f));
     }
 
-    // Knurled skirt
-    juce::ColourGradient skirt (juce::Colour (0xff2c2c2c), c.x - r, c.y - r, juce::Colour (0xff050505), c.x + r, c.y + r, false);
-    g.setGradientFill (skirt);
-    g.fillEllipse (kb);
-    g.setColour (juce::Colour (0xff3a3a3a).withAlpha (0.55f * alpha));
-    const int knurls = 56;
-    for (int i = 0; i < knurls; ++i)
+    // The value arc, from the start (or the centre, for bipolar knobs) to the value
+    const auto bipolar = (bool) s.getProperties()["bipolar"];
+    const auto from = bipolar ? (startAngle + endAngle) * 0.5f : startAngle;
+    if (std::abs (a - from) > 0.01f)
     {
-        const auto a = juce::MathConstants<float>::twoPi * (float) i / (float) knurls;
-        g.drawLine ({ pointAt (a, r * 0.86f), pointAt (a, r * 0.99f) }, 0.8f);
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, std::min (from, a), std::max (from, a), true);
+        g.setColour ((small ? Colours::redLight : Colours::crimson.brighter (0.15f)).withAlpha (alpha));
+        g.strokePath (arc, juce::PathStrokeType (small ? 2.2f : std::max (2.2f, r * 0.055f),
+                                                 juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
-
-    // Cap
-    const auto cap = kb.reduced (r * 0.13f);
-    juce::ColourGradient capGrad (juce::Colour (0xff2f2f2f), cap.getX(), cap.getY(),
-                                  juce::Colour (0xff0b0b0b), cap.getRight(), cap.getBottom(), false);
-    g.setGradientFill (capGrad);
-    g.fillEllipse (cap);
-    g.setColour (juce::Colours::white.withAlpha (0.07f * alpha));
-    g.drawEllipse (cap.reduced (0.5f), 1.0f);
-    juce::Path sheen;
-    sheen.addCentredArc (c.x, c.y, r * 0.74f, r * 0.74f, 0.0f, -2.2f, -0.6f, true);
-    g.setColour (juce::Colours::white.withAlpha (0.10f * alpha));
-    g.strokePath (sheen, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    // Pointer
-    const auto a = startAngle + pos * (endAngle - startAngle);
-    g.setColour (Colours::dustWhite.withAlpha (0.95f * alpha));
-    g.drawLine ({ pointAt (a, r * 0.18f), pointAt (a, r * 0.82f) }, std::max (2.0f, r * 0.07f));
+    // The dot at the value
+    const auto dot = small ? 3.2f : std::max (3.0f, r * 0.075f);
+    g.setColour (Colours::dustWhite.withAlpha (alpha));
+    g.fillEllipse (juce::Rectangle<float> (dot * 2.0f, dot * 2.0f).withCentre (pointAt (a, ringR)));
 }
 
 void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
@@ -254,35 +226,17 @@ void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
         LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);
         return;
     }
-    // A slot cut into the panel, crimson up to the thumb, and a small black knob as the thumb.
-    const auto thumb = std::min (22.0f, (float) h - 4.0f);
+    // A hairline track, red up to the thumb, a white dot as the thumb.
+    const auto thumb = std::min (14.0f, (float) h - 4.0f);
     const auto cy = (float) y + (float) h * 0.5f;
     const auto left = (float) x + thumb * 0.5f, right = (float) (x + w) - thumb * 0.5f;
-    const auto slot = juce::Rectangle<float> (left - 3.0f, cy - 3.5f, right - left + 6.0f, 7.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.07f));
-    g.fillRoundedRectangle (slot.translated (0.0f, 1.0f), 3.5f);
-    g.setColour (juce::Colour (0xff050505));
-    g.fillRoundedRectangle (slot, 3.5f);
-    g.setColour (juce::Colours::black.withAlpha (0.6f));
-    g.drawRoundedRectangle (slot.reduced (0.5f).translated (0.0f, 0.5f), 3.0f, 1.0f);
+    g.setColour (Colours::dustWhite.withAlpha (0.18f));
+    g.fillRoundedRectangle (juce::Rectangle<float> (left, cy - 1.0f, right - left, 2.0f), 1.0f);
     const auto px = juce::jlimit (left, right, pos);
-    g.setColour (Colours::crimson);
-    g.fillRoundedRectangle (juce::Rectangle<float> (slot.getX() + 2.0f, cy - 1.5f, px - slot.getX() - 2.0f, 3.0f), 1.5f);
-
-    const auto tb = juce::Rectangle<float> (thumb, thumb).withCentre ({ px, cy });
-    const auto knobImg = Hw::asset ("knob_black.png");
-    if (knobImg.isValid())
-    {
-        g.setOpacity (1.0f);
-        g.drawImage (knobImg, tb.expanded (thumb * 0.06f), juce::RectanglePlacement::stretchToFit);
-    }
-    else
-    {
-        g.setColour (juce::Colour (0xff1a1a1a));
-        g.fillEllipse (tb);
-    }
-    g.setColour (juce::Colour (0xfff2efe8).withAlpha (s.isMouseOverOrDragging() ? 1.0f : 0.9f));
-    g.drawLine (px, tb.getY() + thumb * 0.16f, px, tb.getY() + thumb * 0.46f, 1.8f);
+    g.setColour (Colours::crimson.brighter (0.15f));
+    g.fillRoundedRectangle (juce::Rectangle<float> (left, cy - 1.25f, px - left, 2.5f), 1.25f);
+    g.setColour (Colours::dustWhite.withAlpha (s.isMouseOverOrDragging() ? 1.0f : 0.92f));
+    g.fillEllipse (juce::Rectangle<float> (thumb, thumb).withCentre ({ px, cy }));
 }
 
 //==============================================================================
@@ -292,19 +246,16 @@ namespace
 {
     void glassPanel (juce::Graphics& g, juce::Rectangle<float> r, float corner, bool withShadow)
     {
-        if (withShadow)   // soft shadow, falling down like every other shadow on the unit
-            for (int i = 0; i < 6; ++i)
-            {
-                g.setColour (juce::Colours::black.withAlpha (0.055f));
-                g.fillRoundedRectangle (r.translated (0.0f, 3.0f).expanded ((float) i * 1.4f), corner + (float) i * 1.4f);
-            }
-        juce::ColourGradient body (juce::Colour (0xff1d1d1d), 0.0f, r.getY(), juce::Colour (0xff0e0e0e), 0.0f, r.getBottom(), false);
-        g.setGradientFill (body);
+        // WARP's menus and dialogs: a flat dark panel with a white hairline edge.
+        if (withShadow)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRoundedRectangle (r.translated (0.0f, 3.0f).expanded (2.0f), corner + 2.0f);
+        }
+        g.setColour (juce::Colour (0xff161414));
         g.fillRoundedRectangle (r, corner);
-        g.setColour (juce::Colours::black);
+        g.setColour (juce::Colours::white.withAlpha (0.14f));
         g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.10f));   // lit top lip
-        g.drawLine (r.getX() + corner, r.getY() + 1.5f, r.getRight() - corner, r.getY() + 1.5f, 1.0f);
     }
 }
 
@@ -446,7 +397,7 @@ void EvilleLookAndFeel::showMenu (juce::PopupMenu& m, juce::Component& target)
 void EvilleLookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int w, int h, const juce::PopupMenu::Options&)
 {
     g.fillAll (juce::Colours::transparentBlack);
-    glassPanel (g, juce::Rectangle<float> ((float) w, (float) h).reduced ((float) menuMargin), 9.0f, true);
+    glassPanel (g, juce::Rectangle<float> ((float) w, (float) h).reduced ((float) menuMargin), 5.0f, true);
 }
 
 void EvilleLookAndFeel::getIdealPopupMenuItemSizeWithOptions (const juce::String& text, bool isSeparator, int,
@@ -458,8 +409,8 @@ void EvilleLookAndFeel::getIdealPopupMenuItemSizeWithOptions (const juce::String
         idealHeight = 11;
         return;
     }
-    idealHeight = 30;
-    idealWidth = juce::GlyphArrangement::getStringWidthInt (getPopupMenuFont(), text) + 64;
+    idealHeight = 26;
+    idealWidth = juce::GlyphArrangement::getStringWidthInt (getPopupMenuFont(), text) + 56;
 }
 
 void EvilleLookAndFeel::drawPopupMenuSectionHeaderWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area,
@@ -467,7 +418,7 @@ void EvilleLookAndFeel::drawPopupMenuSectionHeaderWithOptions (juce::Graphics& g
 {
     g.setFont (Fonts::sans (11.0f, Fonts::bold).withExtraKerningFactor (0.12f));
     g.setColour (Colours::screenDim);
-    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (20.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);
+    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (12.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);
 }
 
 void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area, bool highlighted,
@@ -476,7 +427,8 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
     auto r = area.toFloat();
     if (item.isSeparator)
     {
-        Hw::drawGroove (g, { r.getX() + 14.0f, r.getCentreY() }, { r.getRight() - 14.0f, r.getCentreY() }, true);
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (juce::Rectangle<float> (r.getX() + 8.0f, r.getCentreY(), r.getWidth() - 16.0f, 1.0f));
         return;
     }
     if (item.customComponent != nullptr)
@@ -485,31 +437,18 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
     const auto enabled = item.isEnabled;
     if (highlighted && enabled)
     {
-        const auto pill = r.reduced (5.0f, 2.0f);
-        g.setColour (juce::Colour (0xff2a2a2a));
-        g.fillRoundedRectangle (pill, 6.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.05f));
-        g.drawLine (pill.getX() + 6.0f, pill.getY() + 0.8f, pill.getRight() - 6.0f, pill.getY() + 0.8f, 1.0f);
-        g.setColour (Colours::crimson);
-        g.fillRoundedRectangle (pill.getX() + 1.0f, pill.getY() + 6.0f, 2.5f, pill.getHeight() - 12.0f, 1.25f);
+        g.setColour (juce::Colour (0xff262222));
+        g.fillRoundedRectangle (r.reduced (4.0f, 1.0f), 4.0f);
     }
 
-    // Ticked: a lit crimson dot where a check would be
-    const auto dot = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 19.0f, r.getCentreY() });
+    // Ticked: a small red dot at the right (WARP's menus keep the text flush left).
+    const auto dot = juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getRight() - 16.0f, r.getCentreY() });
     if (item.isTicked)
     {
-        g.setColour (Colours::crimson.withAlpha (0.3f));
-        g.fillEllipse (dot.expanded (3.5f));
         g.setColour (Colours::crimson.brighter (0.2f));
         g.fillEllipse (dot);
     }
-    else if (highlighted && enabled)
-    {
-        g.setColour (Colours::screenDim.withAlpha (0.5f));
-        g.drawEllipse (dot.reduced (0.5f), 1.0f);
-    }
-
-    auto text = r.withTrimmedLeft (32.0f).withTrimmedRight (14.0f);
+    auto text = r.withTrimmedLeft (12.0f).withTrimmedRight (item.isTicked ? 26.0f : 14.0f);
     if (item.subMenu != nullptr)
     {
         const auto c = juce::Point<float> (text.getRight() - 4.0f, r.getCentreY());
@@ -573,13 +512,38 @@ void EvilleLookAndFeel::drawBubble (juce::Graphics& g, juce::BubbleComponent&, c
 //==============================================================================
 // Keys and toggles
 
+void EvilleLookAndFeel::drawChip (juce::Graphics& g, juce::Rectangle<float> r, bool on, bool over, bool down)
+{
+    // WARP's style A: a soft dark key. Chosen: its edge turns red (the text too,
+    // drawn by the caller); nothing moves.
+    const auto corner = std::min (8.0f, r.getHeight() * 0.3f);
+    auto fill = Colours::chip;
+    if (over) fill = fill.brighter (0.06f);
+    if (down) fill = fill.darker (0.12f);
+    g.setColour (fill);
+    g.fillRoundedRectangle (r, corner);
+    g.setColour (juce::Colours::white.withAlpha (0.05f));
+    g.drawLine (r.getX() + corner, r.getY() + 1.0f, r.getRight() - corner, r.getY() + 1.0f, 1.0f);
+    g.setColour (on ? Colours::crimson.brighter (0.1f) : Colours::chipEdge.withAlpha (0.8f));
+    g.drawRoundedRectangle (r.reduced (0.5f), corner, on ? 1.3f : 1.0f);
+}
+
+void EvilleLookAndFeel::drawCaps (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, float height,
+                                  juce::Colour colour, juce::Justification just, Fonts::Weight weight)
+{
+    // Small caps titles, letterspaced about 0.18 em (WARP).
+    g.setFont (Fonts::sans (height, weight).withExtraKerningFactor (0.18f));
+    g.setColour (colour);
+    g.drawText (text.toUpperCase(), r, just, false);
+}
+
 void EvilleLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& bg,
                                               bool over, bool down)
 {
     const auto key = b.getProperties()["key"].toString();
     if (key.isNotEmpty())
     {
-        Hw::drawKey (g, b.getLocalBounds().toFloat().reduced (1.0f), key == "light", over, down || b.getToggleState());
+        drawChip (g, b.getLocalBounds().toFloat().reduced (1.0f), b.getToggleState(), over, down);
         return;
     }
     if (bg.isTransparent() && ! b.getToggleState())
@@ -591,9 +555,9 @@ void EvilleLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
     if (over) col = col.brighter (0.08f);
     if (down) col = col.darker (0.1f);
     g.setColour (col);
-    g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (Colours::outline);
-    g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (Colours::chipEdge);
+    g.drawRoundedRectangle (r, 6.0f, 1.0f);
 }
 
 void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bool down)
@@ -604,24 +568,21 @@ void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, 
         LookAndFeel_V4::drawButtonText (g, b, over, down);
         return;
     }
-    g.setFont (Fonts::sans (13.0f));
-    g.setColour (key == "light" ? Colours::ink : Colours::dustWhite);
-    g.drawText (b.getButtonText(), b.getLocalBounds().translated (0, down ? 1 : 0), juce::Justification::centred);
+    const auto on = b.getToggleState();
+    drawCaps (g, b.getButtonText(), b.getLocalBounds().toFloat(), 12.0f,
+              (on ? Colours::redLight : Colours::dustWhite).withAlpha (b.isEnabled() ? (over || on ? 1.0f : 0.9f) : 0.4f),
+              juce::Justification::centred, Fonts::bold);
 }
 
 void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool down)
 {
-    if (b.getProperties()["style"].toString() == "lightkey")
+    if (b.getProperties()["style"].toString() == "lightkey" || b.getProperties()["style"].toString() == "chip")
     {
-        // A small off-white key with an LED in its cap, the label underneath.
-        auto r = b.getLocalBounds().toFloat();
-        const auto label = r.removeFromBottom (14.0f);
-        const auto key = juce::Rectangle<float> (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight())).withCentre (r.getCentre());
-        Hw::drawKey (g, key, true, over, down);
-        Hw::drawLed (g, Hw::keyCap (key).getCentre().translated (0.0f, down ? 0.6f : 0.0f), b.getToggleState(), 3.4f);
-        g.setFont (Fonts::sans (12.5f));
-        g.setColour (Colours::ink.withAlpha (over ? 1.0f : 0.85f));
-        g.drawText (b.getButtonText(), label, juce::Justification::centred);
+        // A chip that turns red while on (auto).
+        const auto r = b.getLocalBounds().toFloat().reduced (1.0f);
+        drawChip (g, r, b.getToggleState(), over, down);
+        drawCaps (g, b.getButtonText(), r, 11.0f, b.getToggleState() ? Colours::redLight : Colours::dustWhite.withAlpha (0.85f),
+                  juce::Justification::centred, Fonts::bold);
         return;
     }
     if (b.getProperties()["style"].toString() == "minikey")

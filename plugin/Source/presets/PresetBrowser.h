@@ -94,6 +94,7 @@ public:
     std::vector<int> currentList() const;
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
     void visibilityChanged() override;
@@ -116,6 +117,14 @@ private:
 
     void updateRows();
     void layoutSidebar (juce::Rectangle<int>);
+    void showFiltersMenu();
+    void showRowMenu (int row);
+    int activeFilterCount() const;
+    juce::Rectangle<int> cardArea() const;
+    juce::Rectangle<int> sectionPanel() const;
+    juce::Rectangle<int> listPanel() const;
+    juce::Rectangle<int> footerArea() const;
+    void mouseDown (const juce::MouseEvent&) override;
     const PresetLibrary::Entry* selectedEntry() const;
     void showDetailsFor (const PresetLibrary::Entry*);
     void newPack();
@@ -145,6 +154,7 @@ private:
     ChipGroup styleChips;   // ROOMS: Character  STUDIOS: Style
     ChipGroup autoChips;    // ROOMS: Decay / Tone / Source
     juce::TextButton clearFilters { "Clear filters" };
+    juce::TextButton filtersButton { "filters" }, folderButton, pathButton;
     juce::Rectangle<int> sidebarArea, detailArea;
 
     // List

@@ -98,6 +98,12 @@ public:
     juce::Font getSliderPopupFont (juce::Slider&) override { return Fonts::mono (12.0f); }
     int getSliderPopupPlacement (juce::Slider&) override { return juce::BubbleComponent::above; }
 
+    /** A soft dark chip (buttons, keys); `on` lights its edge red. */
+    static void drawChip (juce::Graphics&, juce::Rectangle<float>, bool on, bool over, bool down);
+    /** Letterspaced caps (titles, chips). */
+    static void drawCaps (juce::Graphics&, const juce::String&, juce::Rectangle<float>, float height, juce::Colour,
+                          juce::Justification = juce::Justification::centredLeft, Fonts::Weight = Fonts::bold);
+
     /** Knob centre and radius inside a slider (shared with ModSlider's rings). */
     static juce::Rectangle<float> knobBounds (const juce::Slider&);
     static bool onBlack (const juce::Component&);

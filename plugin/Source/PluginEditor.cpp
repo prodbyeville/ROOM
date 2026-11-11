@@ -30,13 +30,12 @@ namespace
 }
 
 //==============================================================================
-// Load screen
+// The stage
 
 LoadScreen::LoadScreen (RoomAudioProcessor& p) : proc (p)
 {
-    setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip ("drop any sound here to build a room from it. click for the ROOMS library, right-click for more.");
-    startTimerHz (15);
+    setTooltip ("drop any sound here to build a room from it. click a card to load that room, right-click for more.");
+    startTimerHz (30);
 }
 
 bool LoadScreen::isInterestedInFileDrag (const juce::StringArray& files)
@@ -74,6 +73,73 @@ void LoadScreen::chooseSoundFile()
                           });
 }
 
+juce::Rectangle<int> LoadScreen::boxArea() const
+{
+    const auto b = getLocalBounds();
+    return juce::Rectangle<int> (juce::roundToInt (b.getWidth() * 0.30f), juce::roundToInt (b.getHeight() * 0.52f))
+               .withCentre ({ b.getCentreX(), juce::roundToInt (b.getHeight() * 0.44f) });
+}
+
+juce::StringArray LoadScreen::cardKeys() const
+{
+    juce::StringArray keys;
+    for (auto& c : cards)
+        keys.add (c.key);
+    return keys;
+}
+
+void LoadScreen::refreshCards()
+{
+    // Favourites first, then the rest by name; the loaded room is always there.
+    auto& lib = proc.getRoomLibrary();
+    room::presets::PresetLibrary::Query q;
+    const auto all = lib.query (q);
+    std::vector<int> order;
+    for (auto i : all) if (lib.getEntries()[(size_t) i].favorite) order.push_back (i);
+    for (auto i : all) if (! lib.getEntries()[(size_t) i].favorite) order.push_back (i);
+    const auto current = proc.getCurrentRoomKey();
+    std::vector<Card> next;
+    auto add = [&] (const room::presets::PresetLibrary::Entry& e)
+    {
+        for (auto& c : next)
+            if (c.key == e.key)
+                return;
+        next.push_back ({ e.key, e.meta.name, e.tags.decay, e.tags.tone, {}, 0.0f });
+    };
+    if (auto* e = lib.find (current))
+        add (*e);
+    for (auto i : order)
+    {
+        if (next.size() >= 8)
+            break;
+        add (lib.getEntries()[(size_t) i]);
+    }
+    cards = std::move (next);
+}
+
+void LoadScreen::timerCallback()
+{
+    if (++libraryStamp % 30 == 0 || cards.empty())
+        refreshCards();
+    // One lap a minute; it holds still while the mouse is over the stage.
+    if (! isMouseOverOrDragging (true) && ! hovering)
+        orbitPhase += juce::MathConstants<float>::twoPi / (60.0f * 30.0f);
+    repaint();
+}
+
+void LoadScreen::mouseMove (const juce::MouseEvent& e)
+{
+    juce::String key;
+    for (auto it = cards.rbegin(); it != cards.rend(); ++it)   // front cards win
+        if (it->bounds.contains (e.position)) { key = it->key; break; }
+    if (key != hoverKey)
+    {
+        hoverKey = key;
+        setMouseCursor (key.isNotEmpty() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
 void LoadScreen::mouseUp (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
@@ -86,117 +152,185 @@ void LoadScreen::mouseUp (const juce::MouseEvent& e)
         EvilleLookAndFeel::showMenu (m, *this);
         return;
     }
-    if (onOpenLibrary)
-        onOpenLibrary();
+    // Sorted by depth when painted: the last hit is the front-most card.
+    const Card* hit = nullptr;
+    for (auto& c : cards)
+        if (c.bounds.contains (e.position) && (hit == nullptr || c.depth > hit->depth))
+            hit = &c;
+    if (hit != nullptr && onLoadRoom)
+        onLoadRoom (hit->key);
 }
 
-void LoadScreen::timerCallback()
+namespace
 {
-    repaint();
+    const char* cardTexture (const juce::String& key)
+    {
+        static const char* names[5] = { "card_red.jpg", "card_plum.jpg", "card_charcoal.jpg", "card_plaster.jpg", "card_rose.jpg" };
+        return names[(size_t) (key.hashCode() & 0x7fffffff) % 5];
+    }
+}
+
+void LoadScreen::paintCard (juce::Graphics& g, const Card& c, float scale, float angle, float alpha, bool loaded, bool hot)
+{
+    const auto r = c.bounds;
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::AffineTransform::rotation (angle, r.getCentreX(), r.getCentreY()));
+    const auto corner = 7.0f * scale;
+    const auto texName = cardTexture (c.key);
+    const auto light = juce::String (texName) == "card_plaster.jpg";
+
+    // The card: a crop of its texture, a little shadow under it
+    g.setColour (juce::Colours::black.withAlpha (0.35f * alpha));
+    g.fillRoundedRectangle (r.translated (0.0f, 3.0f * scale), corner);
+    {
+        juce::Graphics::ScopedSaveState clip (g);
+        juce::Path shape;
+        shape.addRoundedRectangle (r, corner);
+        g.reduceClipRegion (shape);
+        if (auto tex = Hw::asset (texName); tex.isValid())
+        {
+            const auto seed = (int) (c.key.hashCode() & 0xffff);
+            const auto cw = tex.getWidth() / 2, ch = tex.getHeight() / 2;
+            g.setOpacity (alpha);
+            g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(),
+                         seed % (tex.getWidth() - cw), (seed / 7) % (tex.getHeight() - ch), cw, ch);
+        }
+    }
+    if (loaded || hot)
+    {
+        g.setColour ((loaded ? Colours::crimson.brighter (0.15f) : Colours::dustWhite.withAlpha (0.5f)).withMultipliedAlpha (alpha));
+        g.drawRoundedRectangle (r.reduced (0.5f), corner, loaded ? 1.6f : 1.0f);
+        if (loaded)
+            g.fillRect (r.withWidth (3.0f * scale).reduced (0.0f, corner * 0.6f));
+    }
+
+    // Its decay as a hairline with a few dots: steep for short rooms, long for
+    // long ones; dark rooms sag at the end, bright ones keep a little lift.
+    const auto k = c.decay == "Short" ? 7.0f : c.decay == "Long" ? 1.9f : 3.6f;
+    const auto tone = c.tone == "Dark" ? -1.0f : c.tone == "Bright" ? 1.0f : 0.0f;
+    const auto plot = r.reduced (r.getWidth() * 0.1f, r.getHeight() * 0.16f);
+    auto yAt = [&] (float x)
+    {
+        auto v = std::exp (-k * x) + tone * 0.08f * std::sin (x * 3.14159f);
+        return plot.getBottom() - plot.getHeight() * juce::jlimit (0.0f, 1.0f, v * 0.92f + 0.04f);
+    };
+    juce::Path curve;
+    curve.startNewSubPath (plot.getX(), yAt (0.0f));
+    for (int i = 1; i <= 40; ++i)
+    {
+        const auto x = (float) i / 40.0f;
+        curve.lineTo (plot.getX() + plot.getWidth() * x, yAt (x));
+    }
+    const auto ink = light ? juce::Colour (0xff1c1a18) : Colours::dustWhite;
+    g.setColour (ink.withAlpha (0.85f * alpha));
+    g.strokePath (curve, juce::PathStrokeType (std::max (0.9f, 1.1f * scale)));
+    g.drawLine (plot.getX(), plot.getY(), plot.getX(), plot.getBottom(), std::max (0.6f, 0.7f * scale));
+    for (auto x : { 0.0f, 0.38f, 0.62f, 0.86f })
+    {
+        const auto d = (x == 0.0f ? 3.4f : 3.0f) * scale;
+        g.setColour (ink.withAlpha (alpha));
+        g.fillEllipse (juce::Rectangle<float> (d * 2.0f, d * 2.0f).withCentre ({ plot.getX() + plot.getWidth() * x, yAt (x) }));
+    }
+
+    // The name under the card
+    EvilleLookAndFeel::drawCaps (g, c.name, r.withY (r.getBottom() + 5.0f * scale).withHeight (16.0f * scale).expanded (30.0f, 0.0f),
+                                 std::max (8.5f, 11.0f * scale), Colours::dustWhite.withAlpha ((hot || loaded ? 1.0f : 0.78f) * alpha),
+                                 juce::Justification::centred);
 }
 
 void LoadScreen::paint (juce::Graphics& g)
 {
-    const auto glass = Hw::drawScreen (g, getLocalBounds().toFloat());
-    auto r = glass.reduced (12.0f, 8.0f);
+    const auto bounds = getLocalBounds().toFloat();
     const auto status = proc.getStatus();
-    const auto t = (float) (juce::Time::getMillisecondCounter() % 100000) * 0.001f;
 
-    // Title row: the room's name (or what's happening)
-    juce::String title;
-    auto titleCol = Colours::screenText;
+    // The module and the colour field: very faint, stronger with intensity.
+    g.setColour (Colours::module);
+    g.fillRoundedRectangle (bounds, 10.0f);
+    {
+        juce::Graphics::ScopedSaveState clip (g);
+        juce::Path shape;
+        shape.addRoundedRectangle (bounds, 10.0f);
+        g.reduceClipRegion (shape);
+        if (auto field = Hw::asset ("ui_stage.jpg"); field.isValid())
+        {
+            const auto amount = juce::jlimit (0.0f, 1.0f, liveParam (proc, ParamIDs::intensity).norm);
+            g.setOpacity (proc.getAnalysis().valid ? 0.07f + 0.78f * amount * amount : 0.05f);
+            const auto fr = juce::Rectangle<float> (bounds.getWidth() * 1.05f, bounds.getWidth() * 1.05f * (float) field.getHeight() / (float) field.getWidth())
+                                .withCentre (bounds.getCentre().translated (0.0f, -bounds.getHeight() * 0.04f));
+            g.drawImage (field, fr, juce::RectanglePlacement::stretchToFit);
+            g.setOpacity (1.0f);
+        }
+    }
+    g.setColour (hovering ? Colours::crimson.brighter (0.1f) : Colours::moduleEdge);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 10.0f, hovering ? 2.0f : 1.0f);
+
+    // The cards: a tilted ring around the box, the far side small and faint.
+    const auto box = boxArea().toFloat();
+    const auto centre = juce::Point<float> (bounds.getCentreX(), box.getCentreY() + box.getHeight() * 0.06f);
+    const auto rx = bounds.getWidth() * 0.34f, ry = bounds.getHeight() * 0.30f;
+    const auto n = (int) cards.size();
+    const auto current = proc.getCurrentRoomKey();
+    const auto t = (float) (juce::Time::getMillisecondCounter() % 1000000) * 0.001f;
+    for (int i = 0; i < n; ++i)
+    {
+        auto& c = cards[(size_t) i];
+        const auto a = orbitPhase + juce::MathConstants<float>::twoPi * (float) i / (float) std::max (1, n);
+        c.depth = std::cos (a);   // 1 = front (bottom), -1 = back (top)
+        const auto scale = 0.62f + 0.38f * (c.depth * 0.5f + 0.5f);
+        const auto bob = std::sin (t * 0.7f + (float) i * 1.7f) * 3.0f;
+        const auto w = 132.0f * scale, h = 84.0f * scale;
+        c.bounds = juce::Rectangle<float> (w, h).withCentre ({ centre.x + rx * std::sin (a), centre.y + ry * c.depth + bob - 8.0f });
+    }
+    std::vector<int> order ((size_t) n);
+    for (int i = 0; i < n; ++i) order[(size_t) i] = i;
+    std::sort (order.begin(), order.end(), [this] (int x, int y) { return cards[(size_t) x].depth < cards[(size_t) y].depth; });
+    for (auto i : order)
+    {
+        const auto& c = cards[(size_t) i];
+        const auto scale = 0.62f + 0.38f * (c.depth * 0.5f + 0.5f);
+        const auto angle = 0.10f * std::sin ((float) i * 2.3f + orbitPhase * 0.5f) * (1.0f - 0.5f * (c.depth * 0.5f + 0.5f));
+        const auto alpha = 0.45f + 0.55f * (c.depth * 0.5f + 0.5f);
+        paintCard (g, c, scale, angle, alpha, c.key == current, c.key == hoverKey);
+    }
+
+    // Along the bottom: the room's name, or what's happening
+    auto line = bounds.reduced (20.0f, 10.0f).removeFromBottom (22.0f);
+    const auto dot = juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
     switch (status)
     {
-        case RoomAudioProcessor::Status::empty:     title = "drop a sound"; titleCol = Colours::screenDim; break;
-        case RoomAudioProcessor::Status::analyzing: title = "listening..."; break;
-        case RoomAudioProcessor::Status::recording: title = "recording  " + juce::String (proc.getRecordedSeconds(), 1) + " s";
-                                                    titleCol = Colours::crimson.brighter (0.4f); break;
-        case RoomAudioProcessor::Status::failed:    title = lower (proc.getStatusMessage()); titleCol = Colours::crimson.brighter (0.4f); break;
-        case RoomAudioProcessor::Status::ready:     title = lower (proc.getStatusMessage()); break;
-    }
-    auto titleRow = r.removeFromTop (24.0f);
-    g.setFont (Fonts::mono (15.0f));
-    g.setColour (titleCol);
-    g.drawText (title, titleRow.withTrimmedRight (16.0f), juce::Justification::centredLeft, true);
-    g.setColour (Colours::screenText.withAlpha (0.8f));
-    g.drawText (">", titleRow, juce::Justification::centredRight);
-    r.removeFromTop (4.0f);
-    g.setColour (Colours::screenDim.withAlpha (0.35f));
-    g.drawHorizontalLine (juce::roundToInt (r.getY()), r.getX(), r.getRight());
-    r.removeFromTop (6.0f);
-
-    // The room's fingerprint: decay per band over time
-    const auto bodyArea = juce::Rectangle<float> (glass.getX(), r.getY(), glass.getWidth(), glass.getBottom() - r.getY());
-    if (status != RoomAudioProcessor::Status::recording && status != RoomAudioProcessor::Status::empty)
-        paintFingerprint (g, bodyArea, t, status == RoomAudioProcessor::Status::analyzing);
-
-    if (status == RoomAudioProcessor::Status::recording)
-    {
-        auto meter = bodyArea.reduced (14.0f, 0.0f).withHeight (4.0f).withY (bodyArea.getCentreY());
-        g.setColour (Colours::graphite);
-        g.fillRoundedRectangle (meter, 2.0f);
-        const auto lvl = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (proc.getRecordLevel(), -60.0f) + 60.0f) / 60.0f);
-        g.setColour (Colours::crimson);
-        g.fillRoundedRectangle (meter.withWidth (meter.getWidth() * lvl), 2.0f);
-        g.setColour (Colours::screenDim);
-        g.setFont (Fonts::mono (10.5f));
-        g.drawText ("press record again to stop", meter.translated (0.0f, 10.0f).withHeight (14.0f), juce::Justification::centredLeft);
-    }
-    else if (status == RoomAudioProcessor::Status::empty)
-    {
-        g.setColour (Colours::screenDim);
-        g.setFont (Fonts::mono (10.5f));
-        g.drawFittedText ("(record one, or click for rooms)", bodyArea.reduced (10.0f).toNearestInt(),
-                          juce::Justification::centred, 2);
-    }
-
-    Hw::drawScreenOverlay (g, glass);
-    if (hovering)
-    {
-        g.setColour (Colours::crimson);
-        g.drawRoundedRectangle (glass.reduced (1.0f), 4.5f, 2.0f);
-    }
-}
-
-void LoadScreen::paintFingerprint (juce::Graphics& g, juce::Rectangle<float> body, float t, bool listening)
-{
-    // Lows at the bottom, highs at the top, time to the right. Each band glows
-    // white, then crimson, and goes dark as it dies away (60 dB down), so every
-    // room has its own shape.
-    const auto& a = proc.getAnalysis();
-    if (! a.valid)
-        return;
-    const auto nb = a.numBands();
-    float maxT = 0.3f;
-    for (auto v : a.bandT60s) maxT = std::max (maxT, v);
-    const auto span = juce::jlimit (0.6f, 6.0f, maxT * 1.1f);   // seconds across the screen
-    const auto dot = juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
-    const auto caption = juce::String (a.steady ? "steady" : "a hit") + dot + juce::String (a.durationS, 1) + " s" + dot
-                         + (a.origin.isEmpty() ? juce::String ("file") : a.origin.toLowerCase());
-
-    auto inner = body.reduced (12.0f, 8.0f);
-    auto cap = inner.removeFromBottom (14.0f);
-    auto area = inner.withTrimmedBottom (2.0f);
-    const int cols = 40;
-    const auto cw = area.getWidth() / (float) cols, rh = area.getHeight() / (float) std::max (1, nb);
-    const auto sweep = listening ? std::fmod (t * 0.6f, 1.0f) : 2.0f;   // listening: a column of light runs across
-    for (int b = 0; b < nb; ++b)
-        for (int c = 0; c < cols; ++c)
+        case RoomAudioProcessor::Status::recording:
         {
-            const auto x = ((float) c + 0.5f) / (float) cols;
-            const auto v = juce::jlimit (0.0f, 1.0f, 1.0f - span * x / std::max (0.05f, a.bandT60s[(size_t) b]));
-            auto col = v > 0.5f ? Colours::crimson.interpolatedWith (Colours::screenText, (v - 0.5f) * 2.0f)
-                                : Colours::glass.interpolatedWith (Colours::crimson, v * 2.0f);
-            auto alpha = a.bandConfident[(size_t) b] ? 1.0f : 0.55f;   // bands it couldn't measure read fainter
-            if (listening)
-                alpha *= 0.35f + 0.65f * std::exp (-std::pow ((x - sweep) * 9.0f, 2.0f));
-            g.setColour (col.withAlpha (alpha));
-            g.fillRect (juce::Rectangle<float> (area.getX() + (float) c * cw, area.getBottom() - (float) (b + 1) * rh, cw, rh).reduced (0.6f));
+            EvilleLookAndFeel::drawCaps (g, "recording  " + juce::String (proc.getRecordedSeconds(), 1) + " s  -  press record again to stop",
+                                         line, 12.0f, Colours::redLight, juce::Justification::centred);
+            auto meter = line.withY (line.getY() - 10.0f).withHeight (3.0f).withSizeKeepingCentre (220.0f, 3.0f);
+            g.setColour (Colours::chip);
+            g.fillRoundedRectangle (meter, 1.5f);
+            const auto lvl = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (proc.getRecordLevel(), -60.0f) + 60.0f) / 60.0f);
+            g.setColour (Colours::crimson);
+            g.fillRoundedRectangle (meter.withWidth (meter.getWidth() * lvl), 1.5f);
+            break;
         }
-    g.setFont (Fonts::mono (10.5f));
-    g.setColour (Colours::screenDim);
-    g.drawText (caption, cap, juce::Justification::centredLeft);
-    g.drawText (juce::String (span, 1) + " s", cap, juce::Justification::centredRight);
+        case RoomAudioProcessor::Status::analyzing:
+            EvilleLookAndFeel::drawCaps (g, "listening...", line, 12.0f, Colours::dustWhite, juce::Justification::centred);
+            break;
+        case RoomAudioProcessor::Status::empty:
+            EvilleLookAndFeel::drawCaps (g, "drop any sound here, or record one", line, 12.0f, Colours::textDim, juce::Justification::centred);
+            break;
+        case RoomAudioProcessor::Status::failed:
+            EvilleLookAndFeel::drawCaps (g, proc.getStatusMessage(), line, 12.0f, Colours::redLight, juce::Justification::centred);
+            break;
+        case RoomAudioProcessor::Status::ready:
+        {
+            const auto& a = proc.getAnalysis();
+            juce::String name = proc.getStatusMessage();
+            if (auto* e = proc.getRoomLibrary().find (current))
+                name = e->meta.name + dot + e->tags.decay + dot + e->tags.tone;
+            else if (a.valid)
+                name = name + dot + juce::String (a.medianT60, 1) + " s";
+            EvilleLookAndFeel::drawCaps (g, name, line, 12.5f, Colours::dustWhite.withAlpha (0.92f), juce::Justification::centred);
+            break;
+        }
+    }
 }
 
 //==============================================================================
@@ -240,11 +374,15 @@ void RoomScreen::timerCallback()
 
 void RoomScreen::paint (juce::Graphics& g)
 {
-    const auto glass = Hw::drawScreen (g, getLocalBounds().toFloat());
+    // Transparent: the box floats on the stage, in plain hairlines (no glow).
+    const auto glass = getLocalBounds().toFloat();
     if (showInfo)
     {
-        paintInfo (g, glass);
-        Hw::drawScreenOverlay (g, glass);
+        g.setColour (Colours::window.withAlpha (0.86f));
+        g.fillRoundedRectangle (glass, 8.0f);
+        g.setColour (Colours::moduleEdge);
+        g.drawRoundedRectangle (glass.reduced (0.5f), 8.0f, 1.0f);
+        paintInfo (g, glass.reduced (6.0f));
         return;
     }
 
@@ -288,7 +426,7 @@ void RoomScreen::paint (juce::Graphics& g)
             grid.addLineSegment ({ project (t, -hh, -1.7f).xy, project (t, -hh, 1.7f).xy }, 0.0f);
             grid.addLineSegment ({ project (-1.7f, -hh, t).xy, project (1.7f, -hh, t).xy }, 0.0f);
         }
-        juce::ColourGradient fade (Colours::screenText.withAlpha (0.07f), centre.x, centre.y,
+        juce::ColourGradient fade (Colours::screenText.withAlpha (0.16f), centre.x, centre.y,
                                    Colours::screenText.withAlpha (0.0f), centre.x + view.getWidth() * 0.5f, centre.y, true);
         g.setGradientFill (fade);
         g.strokePath (grid, juce::PathStrokeType (0.8f));
@@ -303,7 +441,8 @@ void RoomScreen::paint (juce::Graphics& g)
         juce::Path e;
         e.startNewSubPath (a.xy);
         e.lineTo (b.xy);
-        Hw::strokeGlow (g, e, Colours::screenText.withAlpha (wallAlpha * (0.35f + 0.65f * near)), 1.1f, 0.35f + 0.5f * near * glow);
+        g.setColour (Colours::dustWhite.withAlpha (juce::jlimit (0.0f, 1.0f, (wallAlpha + 0.25f) * (0.45f + 0.55f * near))));
+        g.strokePath (e, juce::PathStrokeType (1.1f));
     };
     for (int i = 0; i < 2; ++i)
         for (int j = 0; j < 2; ++j)
@@ -312,6 +451,18 @@ void RoomScreen::paint (juce::Graphics& g)
             edge (project (xs[i], ys[0], zs[j]), project (xs[i], ys[1], zs[j]));
             edge (project (xs[i], ys[j], zs[0]), project (xs[i], ys[j], zs[1]));
         }
+    // A doorway in the back wall
+    {
+        const auto z = -hd;
+        const auto x0 = hw * 0.25f, x1 = hw * 0.55f, top = -hh + 2.0f * hh * 0.62f;
+        juce::Path door;
+        door.startNewSubPath (project (x0, -hh, z).xy);
+        door.lineTo (project (x0, top, z).xy);
+        door.lineTo (project (x1, top, z).xy);
+        door.lineTo (project (x1, -hh, z).xy);
+        g.setColour (Colours::dustWhite.withAlpha (0.55f * duckDim));
+        g.strokePath (door, juce::PathStrokeType (1.0f));
+    }
 
     // --- the decay per band, laid across the floor of the box, front to back ---
     if (valid)
@@ -347,7 +498,7 @@ void RoomScreen::paint (juce::Graphics& g)
             floor.lineTo (project (hw, -hh, z1).xy);
             floor.lineTo (project (-hw, -hh, z1).xy);
             floor.closeSubPath();
-            g.setColour (baseCol.withAlpha (0.10f * glow * duckDim));
+            g.setColour (baseCol.withAlpha (0.08f * glow * duckDim));
             g.fillPath (floor);
         }
 
@@ -367,27 +518,20 @@ void RoomScreen::paint (juce::Graphics& g)
             juce::Path line;
             line.startNewSubPath (project (-hw * 0.94f, -hh, z).xy);
             line.lineTo (project (hw * 0.94f, -hh, z).xy);
-            Hw::strokeGlow (g, line, baseCol.withAlpha (juce::jlimit (0.0f, 1.0f, a)), 1.1f, 1.2f);
+            g.setColour (baseCol.brighter (0.2f).withAlpha (juce::jlimit (0.0f, 1.0f, a)));
+            g.strokePath (line, juce::PathStrokeType (1.4f));
         }
 
-        g.setFont (Fonts::mono (12.0f));
-        g.setColour (Colours::screenText.withAlpha (0.85f));
-        g.drawText (juce::String (median, 1) + " s", glass.reduced (9.0f, 6.0f).removeFromTop (14.0f),
-                    juce::Justification::centredLeft);
+        juce::ignoreUnused (median);
     }
     else
     {
-        g.setFont (Fonts::mono (11.0f));
-        g.setColour (Colours::screenDim);
-        g.drawText ("(the room is empty)", glass.reduced (8.0f).removeFromBottom (18.0f), juce::Justification::centred);
+        juce::ignoreUnused (glass);
     }
     if (frozen)
     {
-        g.setFont (Fonts::mono (11.0f));
-        g.setColour (Colours::crimson.brighter (0.4f));
-        g.drawText ("freeze", glass.reduced (9.0f, 6.0f).removeFromTop (14.0f), juce::Justification::centredRight);
+        EvilleLookAndFeel::drawCaps (g, "freeze", glass.withHeight (16.0f), 10.5f, Colours::redLight, juce::Justification::centred);
     }
-    Hw::drawScreenOverlay (g, glass);
 }
 
 void RoomScreen::paintInfo (juce::Graphics& g, juce::Rectangle<float> glass)
@@ -579,76 +723,75 @@ void IconButton::mouseDown (const juce::MouseEvent& e)
 
 void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
-    auto r = getLocalBounds().toFloat();
-    const auto latched = icon == Icon::advanced && getToggleState();   // open: the key stays down, its legend lit
-    down = down || latched;
-    Hw::drawKey (g, r, true, over, down);
-    r = Hw::keyCap (r).translated (0.0f, down ? 0.6f : 0.0f);
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const auto latched = (icon == Icon::advanced || icon == Icon::record) && getToggleState();
+    const auto ink = Colours::dustWhite.withAlpha (isEnabled() ? (over ? 1.0f : 0.88f) : 0.35f);
+
+    if (chipText.isNotEmpty())
+    {
+        EvilleLookAndFeel::drawChip (g, r, latched, over, down);
+        auto text = r;
+        if (icon == Icon::record)
+        {
+            const auto on = getToggleState();
+            const auto blink = ! on || (juce::Time::getMillisecondCounter() / 450) % 2 == 0;
+            const auto dot = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ r.getX() + 18.0f, r.getCentreY() });
+            g.setColour (Colours::crimson.brighter (0.2f).withAlpha (blink ? 1.0f : 0.4f));
+            g.fillEllipse (dot);
+            text.removeFromLeft (26.0f);
+        }
+        EvilleLookAndFeel::drawCaps (g, chipText, text, 11.5f, latched ? Colours::redLight : ink,
+                                     icon == Icon::record ? juce::Justification::centredLeft : juce::Justification::centred);
+        return;
+    }
+
+    if (icon != Icon::menu)
+        EvilleLookAndFeel::drawChip (g, r, latched, over, down);
     if (badge)
     {
-        const auto d = juce::Point<float> (r.getRight() - 7.0f, r.getY() + 7.0f);
-        g.setColour (Colours::crimson.withAlpha (0.3f));
-        g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (d));
-        g.setColour (Colours::crimson);
-        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (d));
+        const auto d = juce::Point<float> (r.getRight() - 4.0f, r.getY() + 4.0f);
+        g.setColour (Colours::crimson.brighter (0.2f));
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (d));
     }
-    const auto c = r.getCentre().translated (0.0f, -0.5f);
+    const auto c = r.getCentre();
     const auto s = std::min (r.getWidth(), r.getHeight()) * 0.5f;
-    g.setColour (Colours::ink.withAlpha (0.88f));
-    juce::PathStrokeType stroke (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+    g.setColour (ink);
+    juce::PathStrokeType stroke (1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
     juce::Path p;
     switch (icon)
     {
         case Icon::record:
-        {
-            const auto on = getToggleState();
-            g.drawEllipse (juce::Rectangle<float> (s * 1.1f, s * 1.1f).withCentre (c), 1.8f);
-            const auto blink = ! on || (juce::Time::getMillisecondCounter() / 450) % 2 == 0;
-            g.setColour (on ? Colours::crimson.withAlpha (blink ? 1.0f : 0.45f) : Colours::ink);
-            g.fillEllipse (juce::Rectangle<float> (s * 0.48f, s * 0.48f).withCentre (c));
+            g.fillEllipse (juce::Rectangle<float> (s * 0.5f, s * 0.5f).withCentre (c));
             return;
-        }
         case Icon::save:
         {
-            // a folder
-            const auto w = s * 1.25f, h = s * 0.92f;
-            const auto x = c.x - w * 0.5f, y = c.y - h * 0.38f;
-            p.startNewSubPath (x, y + h);
-            p.lineTo (x, y - h * 0.2f);
-            p.lineTo (x + w * 0.38f, y - h * 0.2f);
-            p.lineTo (x + w * 0.48f, y);
-            p.lineTo (x + w, y);
-            p.lineTo (x + w, y + h);
-            p.closeSubPath();
+            // a floppy, like WARP's save
+            const auto box = juce::Rectangle<float> (s * 1.05f, s * 1.05f).withCentre (c);
+            p.addRoundedRectangle (box, 2.0f);
+            p.addRectangle (box.withTrimmedLeft (box.getWidth() * 0.25f).withTrimmedRight (box.getWidth() * 0.25f)
+                                .withHeight (box.getHeight() * 0.3f));
+            p.addRectangle (box.reduced (box.getWidth() * 0.2f, 0.0f).withTrimmedTop (box.getHeight() * 0.58f).withTrimmedBottom (box.getHeight() * 0.1f));
             break;
         }
         case Icon::advanced:
         {
-            // the unit with its side section: a frame with the right part filled.
-            // Open: the legend is backlit crimson, like the bypass key.
             const auto box = juce::Rectangle<float> (s * 1.3f, s * 0.95f).withCentre (c);
-            const auto side = box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f);
-            if (latched)
-            {
-                g.setColour (Colours::crimson.withAlpha (0.25f));
-                g.drawRoundedRectangle (box, 2.0f, 4.0f);
-                g.fillRoundedRectangle (side.expanded (2.0f), 2.0f);
-                g.setColour (Colours::crimson.brighter (0.25f));
-            }
+            g.setColour (latched ? Colours::redLight : ink);
             g.drawRoundedRectangle (box, 2.0f, 1.5f);
-            g.fillRoundedRectangle (side, 1.0f);
+            g.fillRoundedRectangle (box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f), 1.0f);
             return;
         }
         case Icon::menu:
         {
             for (int i = -1; i <= 1; ++i)
-                p.addLineSegment ({ c.x - s * 0.6f, c.y + (float) i * s * 0.38f, c.x + s * 0.6f, c.y + (float) i * s * 0.38f }, 0.0f);
+                p.addLineSegment ({ c.x - s * 0.62f, c.y + (float) i * s * 0.36f, c.x + s * 0.62f, c.y + (float) i * s * 0.36f }, 0.0f);
+            stroke = juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
             break;
         }
         case Icon::randomize:
         {
             // two arrows chasing each other round a circle
-            const auto rr = s * 0.52f;
+            const auto rr = s * 0.5f;
             const auto pi = juce::MathConstants<float>::pi;
             for (int k = 0; k < 2; ++k)
             {
@@ -671,8 +814,25 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 
 void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool down)
 {
-    // Lit crimson while ROOM is running, dark when bypassed.
-    Hw::drawGlowKey (g, getLocalBounds().toFloat(), ! getToggleState(), over, down);
+    // A round power switch: filled red while ROOM is running, a dark chip when bypassed.
+    const auto on = ! getToggleState();
+    const auto d = std::min (getWidth(), getHeight()) - 2.0f;
+    const auto r = juce::Rectangle<float> (d, d).withCentre (getLocalBounds().toFloat().getCentre());
+    auto fill = on ? Colours::crimson : Colours::chip;
+    if (over) fill = fill.brighter (0.08f);
+    if (down) fill = fill.darker (0.1f);
+    g.setColour (fill);
+    g.fillEllipse (r);
+    g.setColour (on ? juce::Colours::white.withAlpha (0.12f) : Colours::chipEdge);
+    g.drawEllipse (r.reduced (0.5f), 1.0f);
+    const auto c = r.getCentre();
+    const auto rr = d * 0.22f;
+    juce::Path p;
+    p.addCentredArc (c.x, c.y + 1.0f, rr, rr, 0.0f, 0.65f, juce::MathConstants<float>::twoPi - 0.65f, true);
+    p.startNewSubPath (c.x, c.y - rr - 2.0f);
+    p.lineTo (c.x, c.y - 0.5f);
+    g.setColour (on ? Colours::dustWhite : Colours::dustWhite.withAlpha (0.55f));
+    g.strokePath (p, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 //==============================================================================
@@ -984,8 +1144,6 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.painter = [this] (juce::Graphics& g) { paintContent (g); };
     content.layout = [this] { layoutContent(); };
 
-    paperTexture = Hw::asset ("tex_paper.jpg");    // painted steel and powder coat, made in Higgsfield
-    blackTexture = Hw::asset ("tex_black.jpg");
 
     // --- Top bar ---
     content.addAndMakeVisible (presetBar);
@@ -1017,6 +1175,13 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     };
     content.addAndMakeVisible (roomSaveButton);
     roomSaveButton.onClick = [this] { openRoomSaveDialog(); };
+    recordButton.setChipText ("record");
+    roomSaveButton.setChipText ("save room");
+    allRoomsButton.setChipText ("all rooms");
+    advancedButton.setChipText ("advanced");
+    content.addAndMakeVisible (allRoomsButton);
+    allRoomsButton.onClick = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
+    loadScreen.onLoadRoom = [this] (const juce::String& key) { loadRoom (key); };
     content.addAndMakeVisible (roomScreen);
     content.addAndMakeVisible (toneScreen);
 
@@ -1074,7 +1239,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     content.addChildComponent (roomBrowser);
     roomBrowser.onClose = [this] { roomBrowser.setVisible (false); };
-    roomBrowser.onLoad = [this] (const juce::String& key) { loadRoom (key); roomBrowser.setVisible (false); };
+    roomBrowser.onLoad = [this] (const juce::String& key) { loadRoom (key); };   // stays open to keep browsing (WARP)
     roomBrowser.onOpenSoundFile = [this] { roomBrowser.setVisible (false); loadScreen.chooseSoundFile(); };
     roomBrowser.onEdit = [this] (const juce::String& key, const room::presets::PresetMeta& meta, const juce::String& pack)
     {
@@ -1137,10 +1302,11 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
     props.set ("scaleMax", hi);
     if (onBlack)
         props.set ("surface", "black");
-    k.label.setText (name, juce::dontSendNotification);
+    juce::ignoreUnused (onBlack);
+    k.label.setText (name.toUpperCase(), juce::dontSendNotification);
     k.label.setJustificationType (juce::Justification::centred);
-    k.label.setFont (Fonts::sans (radius < 20.0f ? 13.0f : 16.0f));
-    k.label.setColour (juce::Label::textColourId, onBlack ? Colours::dustWhite : Colours::ink);
+    k.label.setFont (Fonts::sans (11.5f, Fonts::bold).withExtraKerningFactor (0.18f));
+    k.label.setColour (juce::Label::textColourId, Colours::dustWhite);
     k.label.setInterceptsMouseClicks (false, false);
     content.addAndMakeVisible (k.slider);
     content.addAndMakeVisible (k.label);
@@ -1168,15 +1334,14 @@ void RoomAudioProcessorEditor::newPreset()
 
 void RoomAudioProcessorEditor::showTour (int startStep)
 {
-    const auto knobs = intensity.slider.getBounds().getUnion (space.slider.getBounds()).getUnion (autoBalance.getBounds())
-                           .withTop (intensity.slider.getY());
+    const auto knobs = controlsArea.toNearestInt();
     tour.setBounds (0, 0, contentWidth(), baseHeight);
     tour.start ({
-        { bays[0], "load",
-          "drop any sound here, or press record and play one. room listens for the space inside it: how it decays, the tone it adds, the notes that ring." },
+        { stageArea.toNearestInt(), "load",
+          "drop any sound here, or press record and play one. room listens for the space inside it: how it decays, the tone it adds, the notes that ring. the cards are your rooms: click one to load it." },
         { knobs, "shape",
           "intensity is how much of that room you hear. balance leans to its tone or its space, tail sets how long it rings, space how wide." },
-        { finishArea.toNearestInt().reduced (14, 10), "finish",
+        { finishArea.toNearestInt(), "finish",
           "eq, tape and auto eq polish the result. advanced (top right) has pre-delay, size, ducking, freeze and two lfos." } });
     tour.showStep (startStep);
 }
@@ -1314,6 +1479,10 @@ void RoomAudioProcessorEditor::timerCallback()
     const auto isAuto = autoBalance.getToggleState();
     if (balance.slider.isEnabled() == isAuto)
         balance.slider.setEnabled (! isAuto);
+
+    // The live values and the power light
+    content.repaint (controlsArea.toNearestInt());
+    content.repaint (juce::Rectangle<int> (20, 20).withCentre (finishLed.toInt()));
 }
 
 //==============================================================================
@@ -1321,8 +1490,8 @@ void RoomAudioProcessorEditor::timerCallback()
 
 void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
 {
-    // Everything that doesn't move is drawn once into an image at the window's
-    // real pixel size (the soft shadows are expensive), then reused.
+    // What doesn't move is drawn once into an image at the window's real pixel
+    // size, then reused; the values and the power light are drawn live.
     const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
     if (! staticLayer.isValid() || std::abs (scale - staticScale) > 0.001f)
     {
@@ -1334,251 +1503,112 @@ void RoomAudioProcessorEditor::paintContent (juce::Graphics& g)
         paintUnit (sg);
     }
     g.drawImage (staticLayer, juce::Rectangle<float> (0.0f, 0.0f, (float) contentWidth(), (float) baseHeight));
+    paintValues (g);
+}
 
-    // The power LED on finish follows bypass.
-    Hw::drawLed (g, finishLed, ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f), 4.5f);
+namespace
+{
+    void drawModule (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        g.setColour (Colours::module);
+        g.fillRoundedRectangle (r, 10.0f);
+        g.setColour (Colours::moduleEdge);
+        g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
+    }
 }
 
 void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
 {
-    const auto open = proc.advancedOpen;
-    const auto unit = open ? consoleArea.getUnion (advancedArea).getUnion (finishArea) : consoleArea.getUnion (finishArea);
-
-    // --- the three panels fill the window ---
-    g.fillAll (juce::Colour (0xff161616));
-    g.saveState();
-    auto panel = [&] (juce::Rectangle<float> r, bool black)
+    // A solid near-black window; modules are recessed panels with a hairline edge.
+    g.fillAll (Colours::window);
+    drawModule (g, controlsArea);
+    drawModule (g, finishArea);
+    if (proc.advancedOpen)
     {
-        g.setColour (black ? juce::Colour (0xff161616) : Colours::paper);
-        g.fillRect (r);
-        if (const auto& tex = black ? blackTexture : paperTexture; tex.isValid())
+        const auto r = advancedArea.reduced (0.0f, 12.0f).withTrimmedRight (12.0f);
+        drawModule (g, r);
+        if (auto tex = Hw::asset ("panel_advanced.jpg"); tex.isValid())
         {
-            // One piece of the photo per panel (no tiling, so no seams), kept
-            // subtle: fine powder coat, satin paint.
-            const auto src = juce::Rectangle<int> (std::min (tex.getWidth(), (int) r.getWidth()), std::min (tex.getHeight(), (int) r.getHeight()));
-            g.setOpacity (black ? 0.30f : 0.55f);
-            g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(), src.getX(), src.getY(), src.getWidth(), src.getHeight());
-            g.setOpacity (1.0f);
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path shape;
+            shape.addRoundedRectangle (r.reduced (1.0f), 10.0f);
+            g.reduceClipRegion (shape);
+            g.setOpacity (0.85f);
+            g.drawImage (tex, r, juce::RectanglePlacement::fillDestination);
         }
-        // light falls off a touch toward the bottom
-        juce::ColourGradient shade (juce::Colours::white.withAlpha (black ? 0.035f : 0.09f), 0.0f, unit.getY(),
-                                    juce::Colours::black.withAlpha (black ? 0.22f : 0.05f), 0.0f, unit.getBottom(), false);
-        g.setGradientFill (shade);
-        g.fillRect (r);
-        // the panel's edges: lit along the top and left, in shade at the bottom and right
-        g.setColour (juce::Colours::white.withAlpha (black ? 0.09f : 0.8f));
-        g.fillRect (r.withHeight (1.0f));
-        g.fillRect (r.withWidth (1.0f));
-        g.setColour (juce::Colours::black.withAlpha (black ? 0.6f : 0.16f));
-        g.fillRect (r.withTop (r.getBottom() - 1.0f));
-        g.fillRect (r.withLeft (r.getRight() - 1.0f));
-    };
-    panel (consoleArea, false);
-    panel (finishArea, true);
-    if (open)
-        panel (advancedArea, true);
-
-    // The joints between the panels: a dark hairline gap.
-    g.setColour (juce::Colour (0xff050505));
-    g.fillRect (juce::Rectangle<float> (consoleArea.getX(), consoleArea.getBottom() - 0.5f, consoleArea.getWidth(), 1.5f));
-    if (open)
-        g.fillRect (juce::Rectangle<float> (advancedArea.getX() - 0.5f, unit.getY(), 1.5f, unit.getHeight()));
-    g.restoreState();
-
-    paintConsoleArt (g);
-
-    // Screws: four on each panel, each at its own angle.
-    for (auto r : { consoleArea, advancedArea, finishArea })
-    {
-        if (r == advancedArea && ! open)
-            continue;
-        const auto black = r != consoleArea;
-        const auto in = r.reduced (15.0f);
-        for (auto p : { in.getTopLeft(), in.getTopRight(), in.getBottomLeft(), in.getBottomRight() })
-            Hw::drawScrew (g, p, black, 13.0f);
     }
-
-    // Finish: the out jack and the power light's label
-    Hw::drawJack (g, finishJack, 34.0f);
-    g.setColour (Colours::dustWhite);
-    g.setFont (Fonts::sans (13.0f));
-    g.drawText ("out", juce::Rectangle<float> (60.0f, 18.0f).withCentre (finishJack.translated (0.0f, 34.0f)), juce::Justification::centred);
-    g.drawText ("on", juce::Rectangle<float> (60.0f, 18.0f).withCentre (finishLed.translated (0.0f, -20.0f)), juce::Justification::centred);
+    paintConsoleArt (g);
 }
 
 void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
 {
-    const auto c = consoleArea;
-
-    // The logo (Ethan's artwork), the height of the top-bar keys
-    if (auto logo = Hw::asset ("logo.png"); logo.isValid())
+    // The wordmark (Ethan's artwork) in off-white, the top bar's height
+    if (auto file = Hw::asset ("logo.png"); file.isValid())
     {
-        const auto h = 42.0f, w = h * (float) logo.getWidth() / (float) logo.getHeight();
-        g.setOpacity (1.0f);
-        g.drawImage (logo, juce::Rectangle<float> (w, h).withPosition (c.getX() + 86.0f, c.getY() + 31.0f),
-                     juce::RectanglePlacement::stretchToFit);
+        const auto logo = file.getClippedImage (file.getBounds().reduced (3));   // without the file's frame
+        const auto h = 34.0f, w = h * (float) logo.getWidth() / (float) logo.getHeight();
+        const auto r = juce::Rectangle<float> (w, h).withPosition (60.0f, 19.0f);
+        g.setColour (Colours::dustWhite);
+        g.drawImage (logo, r, juce::RectanglePlacement::stretchToFit, true);   // the letters, filled off-white
     }
 
-    // Tracking marks: very faint line art printed on the panel, like a motion
-    // tracker following the room. Hairline dashes, small nodes, corner brackets
-    // with the place they sit on the panel. Sparse on purpose.
+    // Top bar dividers either side of out, like WARP's
+    g.setColour (Colours::moduleEdge);
+    for (auto x : { (float) output.slider.getX() - 8.0f, (float) bypassButton.getX() - 8.0f })
+        g.drawLine (x, 24.0f, x, 52.0f, 1.0f);
+
+    // Controls module: the dividers and titles (the values are drawn live)
+    const auto sw = controlsArea.getWidth() / 4.0f;
+    const char* titles[4] = { "intensity", "balance", "tail", "space" };
+    for (int i = 0; i < 4; ++i)
     {
-        const auto line = Colours::ink.withAlpha (0.16f);
-        const float dashes[] = { 4.0f, 5.0f };
-        auto dashed = [&] (const juce::Path& path)
+        const auto sec = juce::Rectangle<float> (controlsArea.getX() + sw * (float) i, controlsArea.getY(), sw, controlsArea.getHeight());
+        if (i > 0)
         {
-            juce::Path d;
-            juce::PathStrokeType (0.8f).createDashedStroke (d, path, dashes, 2);
-            g.setColour (line);
-            g.fillPath (d);
-        };
-        auto node = [&] (float x, float y)
-        {
-            g.setColour (Colours::ink.withAlpha (0.28f));
-            g.fillEllipse (x - 2.0f, y - 2.0f, 4.0f, 4.0f);
-        };
-        auto corners = [&] (juce::Rectangle<float> r, float arm)
-        {
-            juce::Path p;
-            for (auto [pt, dx, dy] : { std::tuple { r.getTopLeft(), 1.0f, 1.0f }, { r.getTopRight(), -1.0f, 1.0f },
-                                       { r.getBottomLeft(), 1.0f, -1.0f }, { r.getBottomRight(), -1.0f, -1.0f } })
-            {
-                p.startNewSubPath (pt.x + dx * arm, pt.y);
-                p.lineTo (pt);
-                p.lineTo (pt.x, pt.y + dy * arm);
-            }
-            g.setColour (Colours::ink.withAlpha (0.30f));
-            g.strokePath (p, juce::PathStrokeType (0.9f));
-        };
-        auto tag = [&] (juce::Rectangle<float> r, bool twoLines)
-        {
-            corners (r, 5.0f);
-            g.setFont (Fonts::mono (8.0f));
-            g.setColour (Colours::ink.withAlpha (0.38f));
-            const auto xs = "x: " + juce::String (juce::roundToInt (r.getCentreX())), ys = "y: " + juce::String (juce::roundToInt (r.getCentreY()));
-            if (twoLines)
-            {
-                g.drawText (xs, r.reduced (3.0f, 2.0f).removeFromTop (r.getHeight() * 0.5f - 1.0f), juce::Justification::centredLeft);
-                g.drawText (ys, r.reduced (3.0f, 2.0f).removeFromBottom (r.getHeight() * 0.5f - 1.0f), juce::Justification::centredLeft);
-            }
-            else
-                g.drawText (xs + "  " + ys, r.reduced (4.0f, 0.0f), juce::Justification::centredLeft);
-        };
-        const auto x0 = c.getX(), y0 = c.getY(), w = c.getWidth();
-        const auto under = (float) bays[0].getBottom() + 12.0f;   // the band between the bays and the knobs
-
-        // A loose orbit around the panel: in from the left margin, along under the
-        // bays, out the right margin; it breaks where it would touch anything.
-        {
-            juce::Path p;
-            p.startNewSubPath (x0 + 12.0f, y0 + 150.0f);
-            p.cubicTo (x0 + 6.0f, y0 + 250.0f, x0 + 10.0f, under - 20.0f, x0 + 40.0f, under);
-            p.cubicTo (x0 + 200.0f, under + 14.0f, x0 + 330.0f, under - 6.0f, x0 + w * 0.5f, under + 2.0f);
-            dashed (p);
-            juce::Path q;
-            q.startNewSubPath (x0 + w * 0.5f + 40.0f, under + 3.0f);
-            q.cubicTo (x0 + w - 300.0f, under + 10.0f, x0 + w - 120.0f, under - 10.0f, x0 + w - 36.0f, under - 2.0f);
-            q.cubicTo (x0 + w - 8.0f, under + 6.0f, x0 + w - 8.0f, y0 + 470.0f, x0 + w - 14.0f, y0 + 540.0f);
-            dashed (q);
-            // the bottom margin, under the knobs
-            juce::Path r;
-            r.startNewSubPath (x0 + 60.0f, c.getBottom() - 10.0f);
-            r.cubicTo (x0 + 240.0f, c.getBottom() - 18.0f, x0 + 300.0f, c.getBottom() - 4.0f, x0 + 380.0f, c.getBottom() - 9.0f);
-            dashed (r);
-            juce::Path t;   // and a short arc over the top band, right of the logo
-            t.startNewSubPath (x0 + 300.0f, y0 + 116.0f);
-            t.cubicTo (x0 + 420.0f, y0 + 108.0f, x0 + 520.0f, y0 + 124.0f, x0 + 640.0f, y0 + 114.0f);
-            dashed (t);
-            for (auto pt : { juce::Point<float> (x0 + 9.0f, y0 + 215.0f), { x0 + 186.0f, under + 7.0f }, { x0 + w * 0.5f, under + 2.0f },
-                             { x0 + w - 120.0f, under - 3.0f }, { x0 + w - 11.0f, y0 + 470.0f }, { x0 + 300.0f, c.getBottom() - 7.0f },
-                             { x0 + 470.0f, y0 + 115.0f } })
-                node (pt.x, pt.y);
+            g.setColour (Colours::moduleEdge);
+            g.drawLine (sec.getX(), sec.getY() + 18.0f, sec.getX(), sec.getBottom() - 18.0f, 1.0f);
         }
-        tag ({ x0 + 676.0f, y0 + 108.0f, 92.0f, 14.0f }, false);
-        tag ({ x0 + 4.0f, under + 46.0f, 40.0f, 24.0f }, true);
-        tag ({ x0 + w - 44.0f, under + 120.0f, 40.0f, 24.0f }, true);
-        tag ({ x0 + w - 300.0f, c.getBottom() - 19.0f, 92.0f, 14.0f }, false);
-
-        // The knobs: brackets and crosshairs on a few of them, not all.
-        juce::Component* ks[4] = { &intensity.slider, &balance.slider, &tail.slider, &space.slider };
-        const bool brackets[4] = { true, false, true, false }, cross[4] = { true, true, false, true };
-        for (int i = 0; i < 4; ++i)
-        {
-            const auto kc = ks[i]->getBounds().toFloat().getCentre();
-            if (brackets[i])
-                corners (juce::Rectangle<float> (138.0f, 132.0f).withCentre (kc.translated (0.0f, 3.0f)), 9.0f);
-            if (cross[i])
-            {
-                const juce::Point<float> p (kc.x, kc.y - 74.0f);
-                g.setColour (Colours::ink.withAlpha (0.32f));
-                g.drawLine (p.x - 5.0f, p.y, p.x + 5.0f, p.y, 0.9f);
-                g.drawLine (p.x, p.y - 5.0f, p.x, p.y + 5.0f, 0.9f);
-            }
-        }
-        // a faint arc tying the first and last tracked knobs together over the top
-        {
-            const auto a0 = ks[0]->getBounds().toFloat().getCentre().translated (70.0f, -66.0f);
-            const auto a1 = ks[2]->getBounds().toFloat().getCentre().translated (-70.0f, -66.0f);
-            juce::Path p;
-            p.startNewSubPath (a0);
-            p.cubicTo (a0.translated (60.0f, -26.0f), a1.translated (-60.0f, -26.0f), a1);
-            dashed (p);
-        }
+        EvilleLookAndFeel::drawCaps (g, titles[i], { sec.getX() + 24.0f, sec.getY() + 20.0f, 120.0f, 16.0f }, 12.5f, Colours::dustWhite);
     }
 
-    // Top bar print and the crease under it
-    g.setFont (Fonts::sans (13.0f));
-    g.setColour (Colours::ink);
-    for (auto [b, name] : { std::pair<juce::Component*, const char*> { &randomButton, "randomize" }, { &advancedButton, "advanced" },
-                            { &bypassButton, "bypass" } })
-        g.drawText (name, juce::Rectangle<int> (70, 16).withCentre ({ b->getBounds().getCentreX(), b->getBottom() + 10 }),
-                    juce::Justification::centred);
-    Hw::drawGroove (g, { c.getX() + 26.0f, c.getY() + 104.0f }, { c.getRight() - 26.0f, c.getY() + 104.0f }, false);
+    // Bottom module: dividers between eq, tape, auto eq, on and out; their titles
+    g.setColour (Colours::moduleEdge);
+    for (auto x : { 560.0f, 670.0f, 780.0f, 830.0f })
+        g.drawLine (x, finishArea.getY() + 20.0f, x, finishArea.getBottom() - 20.0f, 1.0f);
+    EvilleLookAndFeel::drawCaps (g, "on", juce::Rectangle<float> (40.0f, 14.0f).withCentre (finishLed.translated (0.0f, 22.0f)),
+                                 10.5f, Colours::dustWhite, juce::Justification::centred);
+    EvilleLookAndFeel::drawCaps (g, "out", juce::Rectangle<float> (40.0f, 14.0f).withCentre (finishJack.translated (0.0f, -34.0f)),
+                                 10.5f, Colours::dustWhite, juce::Justification::centred);
+    Hw::drawJack (g, finishJack, 34.0f);
+}
 
-    // Bay frames pressed into the panel, with their names on the frame line
-    const char* names[3] = { "load", "room", "tone" };
-    for (int i = 0; i < 3; ++i)
+void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
+{
+    // The four big values, live (they follow the LFOs too)
+    Knob* ks[4] = { &intensity, &balance, &tail, &space };
+    const auto sw = controlsArea.getWidth() / 4.0f;
+    for (int i = 0; i < 4; ++i)
     {
-        const auto b = bays[i].toFloat();
-        g.setFont (Fonts::sans (16.0f));
-        const auto tw = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), names[i]);
-        const auto label = juce::Rectangle<float> (b.getX() + 14.0f, b.getY() - 10.0f, tw + 12.0f, 20.0f);
-        g.saveState();
-        g.excludeClipRegion (label.toNearestInt());
-        Hw::drawGrooveRect (g, b, 8.0f, false);
-        g.restoreState();
-        g.setColour (Colours::ink);
-        g.drawText (names[i], label, juce::Justification::centred);
+        const auto x = controlsArea.getX() + sw * (float) i + 22.0f;
+        const auto v = ks[i]->slider.getValue();
+        auto text = ks[i] == &tail ? juce::String (v, v < 10.0 ? 1 : 0) + " s"
+                                   : juce::String (juce::roundToInt (v * 100.0)) + "%";
+        if (ks[i] == &balance)
+            text = juce::String (juce::roundToInt ((autoBalance.getToggleState() ? proc.getDetectedBalance() : (float) balance.slider.getValue()) * 100.0f));
+        const auto alpha = ks[i]->slider.isEnabled() || ks[i] == &balance ? 1.0f : 0.5f;
+        g.setFont (Fonts::sans (34.0f, Fonts::bold));
+        g.setColour (Colours::dustWhite.withAlpha (alpha));
+        g.drawFittedText (text, juce::Rectangle<float> (x, controlsArea.getY() + 42.0f, sw - 128.0f, 42.0f).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
     }
-
-    // Labels beside the record / save keys
-    g.setFont (Fonts::sans (12.5f));
-    g.setColour (Colours::ink);
-    for (auto* b : { (juce::Component*) &recordButton, (juce::Component*) &roomSaveButton })
-        g.drawText (b == &recordButton ? "record" : "save",
-                    juce::Rectangle<int> (70, 14).withCentre ({ b->getBounds().getCentreX(), b->getBottom() + 8 }),
-                    juce::Justification::centred);
-
-    // The one printed path left: intensity -> balance -> tail -> space,
-    // crimson dots with a faint black companion.
-    const auto red = Colours::crimson.withAlpha (0.85f);
-    const auto blk = Colours::ink.withAlpha (0.45f);
-    const auto ky = (float) intensity.slider.getBounds().getCentreY();
-    juce::Component* knobs[4] = { &intensity.slider, &balance.slider, &tail.slider, &space.slider };
-    for (int i = 0; i < 3; ++i)
+    // The power light follows bypass.
+    const auto on = ! (proc.apvts.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f);
+    g.setColour (on ? Colours::crimson.brighter (0.2f) : Colours::chip);
+    g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (finishLed));
+    if (! on)
     {
-        const auto x0 = (float) knobs[i]->getBounds().getCentreX() + 58.0f, x1 = (float) knobs[i + 1]->getBounds().getCentreX() - 58.0f;
-        const juce::Point<float> v[4] = { { x0, ky + 4.0f }, { juce::jmap (0.33f, x0, x1), ky + 16.0f }, { juce::jmap (0.66f, x0, x1), ky - 8.0f }, { x1, ky + 4.0f } };
-        juce::Path p;   // smooth curve through the points (Catmull-Rom as cubic beziers)
-        p.startNewSubPath (v[0]);
-        for (int k = 0; k < 3; ++k)
-        {
-            const auto p0 = v[std::max (0, k - 1)], p1 = v[k], p2 = v[k + 1], p3 = v[std::min (3, k + 2)];
-            p.cubicTo (p1 + (p2 - p0) / 6.0f, p2 - (p3 - p1) / 6.0f, p2);
-        }
-        Hw::drawDottedPath (g, p, red, 5.0f, 1.0f);
-        p.applyTransform (juce::AffineTransform::translation (0.0f, 4.0f));
-        Hw::drawDottedPath (g, p, blk, 7.0f, 0.6f);
+        g.setColour (Colours::chipEdge);
+        g.drawEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (finishLed), 1.0f);
     }
 }
 
@@ -1599,70 +1629,56 @@ void RoomAudioProcessorEditor::layoutContent()
     roomBrowser.setBounds (full);
     saveDialog.setBounds (full);
     roomSaveDialog.setBounds (full);
-
-    const auto c = consoleArea.toNearestInt();
     staticLayer = {};   // the print follows the layout
 
-    // --- Top bar ---
-    // Every key up here is the same size; labels sit under them on one line.
-    const int key = 44, keyY = c.getY() + 30;
-    menuButton.setBounds (c.getX() + 30, keyY, key, key);
-    presetBar.setBounds (c.getX() + 252, keyY, 344, key);
-    randomButton.setBounds (c.getX() + 606, keyY, key, key);
-    advancedButton.setBounds (c.getX() + 658, keyY, key, key);
-    for (auto [k, x] : { std::pair { &mix, 744 }, { &output, 796 } })
+    // --- Top bar (WARP's): menu, wordmark, studios box, advanced, randomize, wet, out, power ---
+    const int keyY = 16, key = 40;
+    menuButton.setBounds (12, keyY, key, key);
+    presetBar.setBounds (196, keyY, 316, key);
+    advancedButton.setBounds (522, keyY + 2, 104, key - 4);
+    randomButton.setBounds (634, keyY + 2, key - 4, key - 4);
+    for (auto [k, x] : { std::pair { &mix, 730 }, { &output, 808 } })
     {
-        k->slider.setBounds (juce::Rectangle<int> (54, 50).withCentre ({ c.getX() + x, keyY + key / 2 }));
-        k->label.setBounds (juce::Rectangle<int> (54, 16).withCentre ({ c.getX() + x, keyY + key + 10 }));
+        k->slider.setBounds (juce::Rectangle<int> (44, 44).withCentre ({ x, keyY + key / 2 }));
+        k->label.setBounds (juce::Rectangle<int> (40, 16).withCentre ({ x - 44, keyY + key / 2 }));
+        k->label.setJustificationType (juce::Justification::centredRight);
     }
-    bypassButton.setBounds (c.getX() + 832, keyY, key, key);
+    bypassButton.setBounds (842, keyY + 2, 36, 36);
 
-    // --- Row 1: three identical bays ---
-    const int bayW = 264, bayH = 220, bayY = c.getY() + 128, gap = 20;
-    const int bayX = c.getX() + (c.getWidth() - (bayW * 3 + gap * 2)) / 2;
-    for (int i = 0; i < 3; ++i)
-        bays[i] = { bayX + i * (bayW + gap), bayY, bayW, bayH };
-    const auto screenOf = [] (juce::Rectangle<int> bay) { return bay.reduced (14).withTrimmedTop (6); };
-    {
-        auto s = screenOf (bays[0]);
-        // record and save: key on top, its label underneath
-        auto keys = s.removeFromBottom (58);
-        s.removeFromBottom (4);
-        loadScreen.setBounds (s);
-        recordButton.setBounds (juce::Rectangle<int> (42, 42).withCentre ({ keys.getX() + keys.getWidth() / 4, keys.getY() + 21 }));
-        roomSaveButton.setBounds (juce::Rectangle<int> (42, 42).withCentre ({ keys.getX() + keys.getWidth() * 3 / 4, keys.getY() + 21 }));
-    }
-    roomScreen.setBounds (screenOf (bays[1]));
-    toneScreen.setBounds (screenOf (bays[2]));
+    // --- The stage, its chips, and the room box in the middle ---
+    const auto st = stageArea.toNearestInt();
+    loadScreen.setBounds (st);
+    roomScreen.setBounds (loadScreen.boxArea() + st.getPosition());
+    recordButton.setBounds (st.getX() + 16, st.getY() + 14, 116, 32);
+    roomSaveButton.setBounds (st.getX() + 140, st.getY() + 14, 124, 32);
+    allRoomsButton.setBounds (st.getRight() - 16 - 120, st.getY() + 14, 120, 32);
+    toneScreen.setVisible (false);   // the tone now shows in the room's info (click the box)
 
-    // --- Row 2: the four knobs ---
-    // Centred between the bays and the seam: the block runs from the top scale
-    // number (ky - 66) to the bottom of "auto" (ky + 104).
-    const int kx0 = c.getX() + 28, kw = (c.getWidth() - 56) / 4;
-    const int ky = (bays[0].getBottom() + c.getBottom() + 66 - 135) / 2;   // the block runs to the bottom of "auto" (ky + 135)
+    // --- Controls: one module, four sections ---
+    const auto ca = controlsArea.toNearestInt();
+    const int sw = ca.getWidth() / 4;
     Knob* knobs[4] = { &intensity, &balance, &tail, &space };
     for (int i = 0; i < 4; ++i)
     {
-        const auto cx = kx0 + kw * i + kw / 2;
-        knobs[i]->slider.setBounds (juce::Rectangle<int> (150, 128).withCentre ({ cx, ky }));
-        knobs[i]->label.setBounds (juce::Rectangle<int> (140, 22).withCentre ({ cx, ky + 72 }));
+        const auto sec = juce::Rectangle<int> (ca.getX() + sw * i, ca.getY(), sw, ca.getHeight());
+        knobs[i]->slider.setBounds (juce::Rectangle<int> (104, 104).withCentre ({ sec.getRight() - 64, sec.getCentreY() }));
+        knobs[i]->label.setVisible (false);   // titled in the module's print
     }
-    autoBalance.setBounds (juce::Rectangle<int> (58, 54).withCentre ({ kx0 + kw + kw / 2, ky + 108 }));
+    autoBalance.setBounds (ca.getX() + sw + 22, ca.getY() + 90, 64, 24);
 
     // --- Advanced (the right side, full height) ---
-    advancedPanel.setBounds (advancedArea.toNearestInt());
+    advancedPanel.setBounds (advancedArea.reduced (0.0f, 12.0f).withTrimmedRight (12.0f).toNearestInt().reduced (4));
 
-    // --- Finish (along the bottom) ---
+    // --- Bottom module: eq, tape, auto eq, on, out (today's order) ---
     const auto f = finishArea.toNearestInt();
-    // Finish: one compact row under the console (no title)
-    eqPanel.setBounds (f.getX() + 34, f.getY() + 22, 520, f.getHeight() - 44);
-    for (auto [k, x] : { std::pair { &tape, 628 }, { &autoEq, 748 } })
+    eqPanel.setBounds (f.getX() + 14, f.getY() + 12, 520, f.getHeight() - 24);
+    for (auto [k, x] : { std::pair { &tape, 615 }, { &autoEq, 725 } })
     {
-        k->slider.setBounds (juce::Rectangle<int> (124, 116).withCentre ({ f.getX() + x, f.getY() + 80 }));
-        k->label.setBounds (juce::Rectangle<int> (100, 20).withCentre ({ f.getX() + x, f.getY() + 144 }));
+        k->slider.setBounds (juce::Rectangle<int> (76, 76).withCentre ({ x, f.getY() + 72 }));
+        k->label.setBounds (juce::Rectangle<int> (100, 16).withCentre ({ x, f.getY() + 24 }));
     }
-    finishLed = { finishArea.getRight() - 54.0f, finishArea.getY() + 56.0f };
-    finishJack = { finishArea.getRight() - 54.0f, finishArea.getY() + 106.0f };
+    finishLed = { 805.0f, finishArea.getY() + 56.0f };
+    finishJack = { 855.0f, finishArea.getY() + 76.0f };
 }
 
 //==============================================================================

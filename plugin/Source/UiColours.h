@@ -35,6 +35,17 @@ namespace Colours
     const juce::Colour screenText { 0xffe9e5dc };
     const juce::Colour screenDim  { 0xff8a867f };
 
+    // ROOM 1.0 (WARP's concept in red, black and white): a solid near-black
+    // window, recessed modules with a hairline edge, soft dark chips, one red
+    // accent for what's on or being changed (the lighter red for thin marks).
+    const juce::Colour window     { 0xff0a0a0a };
+    const juce::Colour module     { 0xff131111 };
+    const juce::Colour moduleEdge { 0xff2a2525 };
+    const juce::Colour chip       { 0xff262222 };
+    const juce::Colour chipEdge   { 0xff3a3434 };
+    const juce::Colour redLight   { 0xffe24a4a };
+    const juce::Colour textDim    { 0x9ef5f3ef };   // the text at 62%
+
     // EQ band nodes: all dust white (the selected one turns crimson).
     const juce::Colour band[5] = { accent2, accent2, accent2, accent2, accent2 };
 }

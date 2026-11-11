@@ -25,8 +25,12 @@
 
 class RoomAudioProcessorEditor;
 
-/** The load screen: the loaded room's name and its fingerprint (decay per band
-    over time). Drop a sound here, click to open ROOMS, right-click for more. */
+/** The stage (ROOM 1.0): the heart of the window. A soft blurred colour field
+    (faint, stronger as intensity goes up), the ROOMS as grainy cards drifting
+    slowly around the room box in the middle (click one to load it; the loaded
+    one has a red edge), and the room's name or what's happening along the
+    bottom. Drop a sound anywhere on it to build a room; right-click for more.
+    The motion stops while the mouse is over it, so a card holds still to click. */
 class LoadScreen : public juce::Component,
                    public juce::SettableTooltipClient,
                    public juce::FileDragAndDropTarget,
@@ -37,6 +41,8 @@ public:
 
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hoverKey.clear(); repaint(); }
 
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void fileDragEnter (const juce::StringArray&, int, int) override { hovering = true; repaint(); }
@@ -44,15 +50,29 @@ public:
     void filesDropped (const juce::StringArray&, int, int) override;
 
     std::function<void()> onOpenLibrary;
+    std::function<void (const juce::String& key)> onLoadRoom;
     void chooseSoundFile();
+
+    /** Where the room box sits (the editor puts RoomScreen there). */
+    juce::Rectangle<int> boxArea() const;
+    /** The cards shown, front to back order not implied (for tests). */
+    juce::StringArray cardKeys() const;
+    /** Move the orbit (tests, screenshots). */
+    void setOrbitPhase (float p) { orbitPhase = p; repaint(); }
 
 private:
     void timerCallback() override;
+    struct Card { juce::String key, name, decay, tone; juce::Rectangle<float> bounds; float depth = 0.0f; };
+    void refreshCards();
+    void paintCard (juce::Graphics&, const Card&, float scale, float angle, float alpha, bool loaded, bool hot);
 
     RoomAudioProcessor& proc;
     std::unique_ptr<juce::FileChooser> chooser;
-    void paintFingerprint (juce::Graphics&, juce::Rectangle<float> body, float t, bool listening);
     bool hovering = false;
+    std::vector<Card> cards;
+    juce::String hoverKey;
+    float orbitPhase = 0.0f;
+    int libraryStamp = -1;
 };
 
 /** The room itself, drawn live: a box in 3D, turning slowly, whose floor holds
@@ -101,7 +121,8 @@ private:
     float lastIntensity = -1.0f, lastBalance = -1.0f;
 };
 
-/** Square hardware key with an icon (record, save, randomize). */
+/** A chip with an icon (randomize, save) or a caps label (record, save room,
+    all rooms, advanced); the menu key is a bare icon. */
 class IconButton : public juce::Button
 {
 public:
@@ -115,13 +136,16 @@ public:
 
     /** A small crimson dot inside the key (the menu key: an update is waiting). */
     void setBadge (bool b) { if (badge != b) { badge = b; repaint(); } }
+    /** Draw as a text chip with this label (and the icon's dot for record). */
+    void setChipText (const juce::String& t) { chipText = t; repaint(); }
 
 private:
     Icon icon;
     bool badge = false;
+    juce::String chipText;
 };
 
-/** Bypass: a translucent crimson key, lit while ROOM is on. */
+/** Bypass: a round power switch, filled red while ROOM is on. */
 class BypassSwitch : public juce::Button
 {
 public:
@@ -266,15 +290,17 @@ private:
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled
 
-    // Fixed geometry of the unit's three panels (base coordinates)
-    const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 588.0f };
-    const juce::Rectangle<float> finishArea { 0.0f, 588.0f, 892.0f, 184.0f };
+    // Fixed geometry (base coordinates): the top bar, then the stage, the
+    // controls module and the bottom module; advanced pops out on the right.
+    const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 772.0f };
+    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 400.0f };
+    const juce::Rectangle<float> controlsArea { 12.0f, 484.0f, 868.0f, 132.0f };
+    const juce::Rectangle<float> finishArea { 12.0f, 628.0f, 868.0f, 132.0f };
     const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
-    juce::Rectangle<int> bays[3];
     juce::Point<float> finishLed, finishJack;
-    juce::Image paperTexture, blackTexture;   // painted steel and powder coat, made in Higgsfield
-    juce::Image staticLayer;   // the desk, the unit and its print, at the window's pixel size
+    juce::Image staticLayer;   // the window, the modules and their titles, at the window's pixel size
     float staticScale = 0.0f;
+    void paintValues (juce::Graphics&);
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
@@ -290,6 +316,7 @@ private:
     LoadScreen loadScreen;
     IconButton recordButton { IconButton::Icon::record, "record a room: play, clap or sing into this track, press again to stop (max 30 s)" };
     IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
+    IconButton allRoomsButton { IconButton::Icon::save, "every ROOM: search, favourites, packs" };
     RoomScreen roomScreen { proc };
     ToneScreen toneScreen { proc };
 
