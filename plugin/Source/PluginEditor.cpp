@@ -1157,6 +1157,153 @@ void LicensePage::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+// About
+
+namespace
+{
+    // WARP's soft pill: ends that swell a little, a gently pinched middle.
+    void drawSoftPill (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+    {
+        const auto pinch = r.getHeight() * 0.07f, rad = r.getHeight() * 0.5f;
+        juce::Path p;
+        p.startNewSubPath (r.getX() + rad, r.getY());
+        p.quadraticTo (r.getCentreX(), r.getY() + pinch, r.getRight() - rad, r.getY());
+        p.quadraticTo (r.getRight() + rad * 0.15f, r.getY(), r.getRight(), r.getCentreY());
+        p.quadraticTo (r.getRight() + rad * 0.15f, r.getBottom(), r.getRight() - rad, r.getBottom());
+        p.quadraticTo (r.getCentreX(), r.getBottom() - pinch, r.getX() + rad, r.getBottom());
+        p.quadraticTo (r.getX() - rad * 0.15f, r.getBottom(), r.getX(), r.getCentreY());
+        p.quadraticTo (r.getX() - rad * 0.15f, r.getY(), r.getX() + rad, r.getY());
+        p.closeSubPath();
+        g.setColour (c);
+        g.fillPath (p);
+    }
+
+    struct PillButtonLnF : juce::LookAndFeel_V4
+    {
+        void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) override
+        {
+            auto c = Colours::crimson;
+            if (over) c = c.brighter (0.12f);
+            if (down) c = c.darker (0.12f);
+            drawSoftPill (g, b.getLocalBounds().toFloat().reduced (2.0f), c);
+        }
+        void drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool) override
+        {
+            EvilleLookAndFeel::drawCaps (g, b.getButtonText(), b.getLocalBounds().toFloat(), 12.5f, Colours::dustWhite,
+                                         juce::Justification::centred);
+        }
+    };
+    PillButtonLnF& pillLnF() { static PillButtonLnF l; return l; }
+}
+
+AboutOverlay::AboutOverlay()
+{
+    setWantsKeyboardFocus (true);
+    for (auto* b : { &tourButton, &websiteButton, &closeButton })
+    {
+        b->setLookAndFeel (&pillLnF());
+        addAndMakeVisible (b);
+    }
+    tourButton.onClick = [this] { setVisible (false); if (onTour) onTour(); };
+    websiteButton.onClick = [] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); };
+    closeButton.onClick = [this] { setVisible (false); };
+}
+
+juce::Rectangle<int> AboutOverlay::card() const
+{
+    return getLocalBounds().withSizeKeepingCentre (std::min (620, getWidth() - 40), std::min (680, getHeight() - 30));
+}
+
+void AboutOverlay::mouseDown (const juce::MouseEvent& e)
+{
+    if (! card().contains (e.getPosition()))
+        setVisible (false);
+}
+
+bool AboutOverlay::keyPressed (const juce::KeyPress& k)
+{
+    if (k == juce::KeyPress::escapeKey)
+        setVisible (false);
+    return true;
+}
+
+void AboutOverlay::resized()
+{
+    auto row = card().removeFromBottom (78).reduced (40, 18);
+    const auto w = (row.getWidth() - 2 * 20) / 3;
+    tourButton.setBounds (row.removeFromLeft (w));
+    row.removeFromLeft (20);
+    websiteButton.setBounds (row.removeFromLeft (w));
+    row.removeFromLeft (20);
+    closeButton.setBounds (row);
+}
+
+void AboutOverlay::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (0.72f));
+    const auto c = card().toFloat();
+    g.setColour (juce::Colour (0xff121010));
+    g.fillRoundedRectangle (c, 22.0f);
+    g.setColour (Colours::crimson.withAlpha (0.85f));
+    g.drawRoundedRectangle (c.reduced (0.75f), 22.0f, 1.5f);
+
+    auto r = c.reduced (44.0f, 0.0f);
+    r.removeFromTop (34.0f);
+
+    // The wordmark
+    {
+        int size = 0;
+        if (auto* data = UiAssetFiles::get ("room_logo.svg", size))
+            if (auto logo = juce::Drawable::createFromImageData (data, (size_t) size))
+            {
+                logo->replaceColour (juce::Colours::black, Colours::dustWhite);
+                const auto w = 210.0f, h = w * 87.64f / 317.35f;
+                logo->drawWithin (g, r.removeFromTop (h).withSizeKeepingCentre (w, h), juce::RectanglePlacement::centred, 1.0f);
+            }
+    }
+    r.removeFromTop (14.0f);
+    g.setFont (Fonts::sans (16.0f, Fonts::medium));
+    g.setColour (Colours::dustWhite);
+    g.drawText ("turn any sound into a room", r.removeFromTop (22.0f), juce::Justification::centred);
+    EvilleLookAndFeel::drawCaps (g, "version " + UpdateChecker::currentVersion() + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  by eville")),
+                                 r.removeFromTop (20.0f), 10.5f, Colours::redLight, juce::Justification::centred, Fonts::medium);
+    r.removeFromTop (16.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.08f));
+    g.fillRect (r.removeFromTop (1.0f));
+    r.removeFromTop (14.0f);
+
+    const std::pair<const char*, const char*> sections[] = {
+        { "what it does", "every sound carries the space it was made in. room listens for that space, pulls it out and rebuilds it, "
+                          "so anything else you play can live inside it." },
+        { "make a room", "drop any audio on the stage (a clap in a stairwell, a voice memo, a tap on a glass) or press record and "
+                         "play into the track. room measures how it decays in every band, the tone it puts on things and the notes "
+                         "that ring. the cards are your rooms: click one to load it." },
+        { "shape it", "intensity is how much of the room you hear. balance leans to its tone or its space. tail sets how long it "
+                      "rings, space how wide. advanced adds pre-delay, size, damping, ducking, freeze and two lfos you can drag onto any knob." },
+        { "finish it", "a five-band eq, tape for warmth, and auto eq to even out the tone so the room sits in the mix." },
+        { "keep it", "a ROOM is just the space. a STUDIO is the whole sound: the room, every knob and the lfos. both have packs, "
+                     "favourites and tags." },
+    };
+    for (auto& [title, text] : sections)
+    {
+        EvilleLookAndFeel::drawCaps (g, title, r.removeFromTop (17.0f), 11.0f, Colours::redLight);
+        r.removeFromTop (4.0f);
+        juce::AttributedString as;
+        as.append (text, Fonts::sans (14.5f), Colours::dustWhite.withAlpha (0.82f));
+        as.setLineSpacing (2.0f);
+        juce::TextLayout tl;
+        tl.createLayout (as, r.getWidth());
+        tl.draw (g, r.removeFromTop (tl.getHeight()));
+        r.removeFromTop (14.0f);
+    }
+    g.setFont (Fonts::sans (11.5f));
+    g.setColour (Colours::textDim);
+    g.drawText (juce::String (juce::CharPointer_UTF8 ("\xc2\xa9 ")) + juce::String (juce::Time::getCurrentTime().getYear())
+                    + juce::String (juce::CharPointer_UTF8 (" eville  \xc2\xb7  prodbyeville.com  \xc2\xb7  ")) + UpdateChecker::supportEmail,
+                c.withTrimmedBottom (78.0f).removeFromBottom (20.0f), juce::Justification::centred);
+}
+
+//==============================================================================
 // Editor
 
 RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
@@ -1292,6 +1439,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addChildComponent (licensePage);
     licensePage.onChange = [this] { repaint(); };
 
+    content.addChildComponent (about);
+    about.onTour = [this] { showTour(); };
     content.addChildComponent (tour);
     tour.onFinished = []
     {
@@ -1409,23 +1558,9 @@ void RoomAudioProcessorEditor::showMainMenu()
 
 void RoomAudioProcessorEditor::showAbout()
 {
-    const auto dot = juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "));
-    const auto message = "by eville" + dot + "v" + UpdateChecker::currentVersion() + "\n\n"
-        "every sound carries the space it was made in. room pulls that space out and lets you put anything else inside it.\n\n"
-        "drop in any sound (a clap in a stairwell, a voice memo, a tap on a glass bottle, a few seconds of room tone) "
-        "or record one. room listens for the space inside it: how it decays in every band, the tone it puts on things, "
-        "the notes that ring. then it rebuilds that space so your own sounds can live in it.\n\n"
-        "shape it (how much of the room, tone vs space, tail, width), finish it (eq, tape, auto eq), "
-        "and keep it: a ROOM is just the space, a STUDIO is the whole sound.\n\n"
-        + juce::String (juce::CharPointer_UTF8 ("\xc2\xa9 ")) + juce::String (juce::Time::getCurrentTime().getYear()) + " eville" + dot
-        + "prodbyeville.com" + dot + UpdateChecker::supportEmail + "\n"
-        "fonts: satoshi (indian type foundry), cormorant garamond (sil open font license)";
-    EvilleLookAndFeel::showDialog (content, "room", message, { "close", "visit website" }, {},
-                                   [] (int result, const juce::String&)
-                                   {
-                                       if (result == 2)
-                                           juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser();
-                                   });
+    about.setVisible (true);
+    about.toFront (true);
+    about.grabKeyboardFocus();
 }
 
 void RoomAudioProcessorEditor::confirmDeactivate()
@@ -1655,6 +1790,7 @@ void RoomAudioProcessorEditor::layoutContent()
     const auto full = juce::Rectangle<int> (0, 0, contentWidth(), baseHeight);
     browser.setBounds (full);
     tour.setBounds (full);
+    about.setBounds (full);
     licensePage.setBounds (full);
     licensePage.update();
     roomBrowser.setBounds (full);

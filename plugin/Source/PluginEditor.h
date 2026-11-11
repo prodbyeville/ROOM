@@ -216,6 +216,23 @@ private:
     bool busy = false, messageIsGood = false;
 };
 
+/** About (WARP's layout in ROOM's colours): the wordmark, the tagline and
+    version, what ROOM does in short sections, and Tour / Website / Close. */
+class AboutOverlay : public juce::Component
+{
+public:
+    AboutOverlay();
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
+    std::function<void()> onTour;
+
+private:
+    juce::Rectangle<int> card() const;
+    juce::TextButton tourButton { "tour" }, websiteButton { "website" }, closeButton { "close" };
+};
+
 class RoomAudioProcessorEditor : public juce::AudioProcessorEditor,
                                  public juce::DragAndDropContainer,
                                  private juce::Timer
@@ -287,6 +304,7 @@ private:
     void confirmDeactivate();
     UpdateChecker updates;
     TourOverlay tour;
+    AboutOverlay about;
     LicensePage licensePage { proc };
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled

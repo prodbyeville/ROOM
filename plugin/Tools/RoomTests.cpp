@@ -1913,6 +1913,8 @@ namespace
         ed.setVisible (true);
         if (args[2] == "record")
             p.startRecording();
+        if (args[2] == "about")
+            ed.openAbout();
         if (args[2] == "lic-error")
         {
             std::function<void (juce::Component&)> fillPage = [&] (juce::Component& c)
