@@ -2,6 +2,10 @@ room 1.0
 ========
 
 INSTALL (Windows, VST3)
+0. If Chrome blocks the download ("This file is dangerous"): open
+   chrome://downloads and choose "Keep" (or "Download dangerous file"), or
+   download it with Edge or Firefox. It happens because room is new and not
+   signed yet; the file is safe.
 1. Close your DAW.
 2. Run "ROOM-<version>-Windows-Setup.exe". It puts ROOM.vst3 in
        C:\Program Files\Common Files\VST3
