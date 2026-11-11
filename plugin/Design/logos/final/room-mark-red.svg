@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" stroke="#BA2727" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+  <!-- ROOM mark: a room seen from the doorway (outer frame, back wall, four corner lines) -->
+  <rect x="64" y="64" width="384" height="384" rx="50"/>
+  <rect x="174" y="164" width="164" height="144"/>
+  <path d="M78.6 78.6 L174 164 M433.4 78.6 L338 164 M78.6 433.4 L174 308 M433.4 433.4 L338 308"/>
+</svg>
