@@ -24,16 +24,28 @@ def wordmark(width, colour):
     return mark.resize((width, h), Image.LANCZOS)
 
 
-def room_box(draw, cx, cy, size, colour, width):
-    """A room seen from the doorway: the back wall and the four edges to the corners."""
-    front, back = size, size * 0.42
-    f = [cx - front, cy - front * 0.78, cx + front, cy + front * 0.78]
-    b = [cx - back, cy - back * 0.78, cx + back, cy + back * 0.78]
-    draw.rectangle(f, outline=colour, width=width)
-    draw.rectangle(b, outline=colour, width=width)
-    for (x0, y0), (x1, y1) in [((f[0], f[1]), (b[0], b[1])), ((f[2], f[1]), (b[2], b[1])),
-                               ((f[0], f[3]), (b[0], b[3])), ((f[2], f[3]), (b[2], b[3]))]:
-        draw.line([x0, y0, x1, y1], fill=colour, width=width)
+def room_mark(img, cx, cy, size, colour, width, fill=None, inner=None):
+    """The ROOM mark (Design/logos/final/room-mark.svg): a rounded square, the
+    back wall and the four corner lines. `size` is the outer square's side.
+    With `fill`, the square is filled and the inner lines drawn in `inner`.
+    Drawn at 4x and scaled down so the thin lines stay smooth."""
+    ss = 4
+    w, h = img.size
+    layer = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    k = size / 384.0 * ss
+    P = lambda x, y: ((cx * ss) + (x - 256) * k, (cy * ss) + (y - 256) * k)
+    lw = max(1, round(width * ss))
+    frame = [P(64, 64), P(448, 448)]
+    if fill is not None:
+        d.rounded_rectangle(frame, radius=50 * k, fill=fill)
+    else:
+        d.rounded_rectangle(frame, radius=50 * k, outline=colour, width=lw)
+    line = inner if inner is not None else colour
+    d.rectangle([P(174, 164), P(338, 308)], outline=line, width=lw)
+    for a_, b_ in [((78.6, 78.6), (174, 164)), ((433.4, 78.6), (338, 164)), ((78.6, 433.4), (174, 308)), ((433.4, 433.4), (338, 308))]:
+        d.line([P(*a_), P(*b_)], fill=line, width=lw)
+    img.alpha_composite(layer.resize((w, h), Image.LANCZOS))
 
 
 def vertical_gradient(size, top, bottom):
@@ -50,35 +62,30 @@ def wizard(scale):
     w, h = 164 * scale, 314 * scale
     img = vertical_gradient((w, h), RED, DEEP)
     d = ImageDraw.Draw(img)
-    room_box(d, w / 2, h * 0.40, w * 0.36, (232, 120, 112), max(1, round(1.5 * scale)))
+    room_mark(img, w / 2, h * 0.40, w * 0.62, WHITE, 1.4 * scale)
     mark = wordmark(round(w * 0.62), WHITE)
     img.alpha_composite(mark, (round((w - mark.width) / 2), round(h * 0.78)))
     return img
 
 
 def small(scale):
+    # The mark filled red with off-white inner lines (reads at 55 px).
     s = 55 * scale
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, s - 1, s - 1], radius=round(10 * scale), fill=RED + (255,))
-    room_box(d, s / 2, s / 2, s * 0.32, WHITE, max(1, round(1.6 * scale)))
+    room_mark(img, s / 2, s / 2, s * 0.92, RED, 1.5 * scale, fill=RED + (255,), inner=WHITE)
     return img
 
 
-def icon():
-    s = 256
+def icon(s=256):
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([8, 8, s - 9, s - 9], radius=48, fill=RED + (255,))
-    room_box(d, s / 2, s / 2, s * 0.30, WHITE, 9)
+    room_mark(img, s / 2, s / 2, s * 0.94, RED, max(1.0, s / 64), fill=RED + (255,), inner=WHITE)
     return img
 
 
 def mac_background():
     w, h = 620, 418
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    room_box(d, 92, h - 118, 52, RED, 3)
+    room_mark(img, 92, h - 118, 100, RED, 2.0)
     mark = wordmark(96, RED)
     img.alpha_composite(mark, (44, h - 26 - mark.height))
     return img
@@ -90,6 +97,7 @@ if __name__ == "__main__":
     wizard(1).save(out / "wizard.png"); wizard(2).save(out / "wizard@2x.png")
     small(1).save(out / "small.png"); small(2).save(out / "small@2x.png")
     icon().save(out / "room.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    icon(1024).save(out / "icon_1024.png")
     (HERE / "mac-resources").mkdir(exist_ok=True)
     mac_background().save(HERE / "mac-resources" / "background.png")
     print("ok")
