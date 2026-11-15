@@ -227,7 +227,7 @@ void LoadScreen::paintCard (juce::Graphics& g, const Card& c, float scale, float
     g.drawLine (plot.getX(), plot.getY(), plot.getX(), plot.getBottom(), std::max (0.6f, 0.7f * scale));
     for (auto x : { 0.0f, 0.38f, 0.62f, 0.86f })
     {
-        const auto d = (x == 0.0f ? 3.4f : 3.0f) * scale;
+        const auto d = (x < 0.01f ? 3.4f : 3.0f) * scale;
         g.setColour (ink.withAlpha (alpha));
         g.fillEllipse (juce::Rectangle<float> (d * 2.0f, d * 2.0f).withCentre ({ plot.getX() + plot.getWidth() * x, yAt (x) }));
     }
@@ -753,7 +753,7 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
     if (chipText.isNotEmpty())
     {
         EvilleLookAndFeel::drawChip (g, r, latched, over, down);
-        auto text = r;
+        auto label = r;
         if (icon == Icon::record)
         {
             const auto on = getToggleState();
@@ -761,9 +761,9 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
             const auto dot = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ r.getX() + 18.0f, r.getCentreY() });
             g.setColour (Colours::crimson.brighter (0.2f).withAlpha (blink ? 1.0f : 0.4f));
             g.fillEllipse (dot);
-            text.removeFromLeft (26.0f);
+            label.removeFromLeft (26.0f);
         }
-        EvilleLookAndFeel::drawCaps (g, chipText, text, 11.5f, latched ? Colours::redLight : ink,
+        EvilleLookAndFeel::drawCaps (g, chipText, label, 11.5f, latched ? Colours::redLight : ink,
                                      icon == Icon::record ? juce::Justification::centredLeft : juce::Justification::centred);
         return;
     }
@@ -1593,7 +1593,20 @@ void RoomAudioProcessorEditor::setAdvanced (bool showLfos)
 void RoomAudioProcessorEditor::setAdvancedOpen (bool open)
 {
     // Keep the current scale; the window gets wider or narrower around the unit.
-    const auto scale = juce::jlimit (0.6f, 1.4f, getHeight() > 0 ? (float) getHeight() / (float) baseHeight : proc.editorScale);
+    auto scale = juce::jlimit (0.6f, 1.4f, getHeight() > 0 ? (float) getHeight() / (float) baseHeight : proc.editorScale);
+    if (getHeight() == 0)
+    {
+        // Opening: never bigger than the screen leaves room for (a host's own window bar and
+        // the dock on a laptop). A window that doesn't fit makes some hosts float it on its own
+        // (FL Studio on Mac shows it "Detached").
+        if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            const auto area = d->userBounds;
+            const auto w = (float) (open ? baseWidth : closedWidth);
+            const auto fit = std::min (((float) area.getHeight() - 160.0f) / (float) baseHeight, ((float) area.getWidth() - 120.0f) / w);
+            scale = juce::jlimit (0.6f, scale, fit);
+        }
+    }
     proc.advancedOpen = open;
     advancedButton.setToggleState (open, juce::dontSendNotification);
     advancedPanel.setVisible (open);
@@ -1613,7 +1626,11 @@ void RoomAudioProcessorEditor::timerCallback()
 {
     if (ticksUntilUpdateCheck > 0 && --ticksUntilUpdateCheck == 0)
         updates.checkIfDue();
-    if (ticksUntilTour > 0 && --ticksUntilTour == 0 && autoShowTour && ! proc.isLicenseLocked())
+    // The tour waits for sign-in: while ROOM is locked it holds, then starts once the
+    // sign-in page has gone (it used to give up if ROOM opened locked).
+    if (proc.isLicenseLocked() && ticksUntilTour > 0)
+        ticksUntilTour = 8;
+    else if (ticksUntilTour > 0 && --ticksUntilTour == 0 && autoShowTour)
         if (auto settings = UpdateChecker::openSettings(); settings != nullptr && ! settings->getBoolValue ("tourDone", false))
             showTour();
 
