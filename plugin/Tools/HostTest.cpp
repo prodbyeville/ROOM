@@ -242,7 +242,8 @@ int main (int argc, char* argv[])
     if (intensity == nullptr || tail == nullptr)
         return fail ("missing Intensity/Tail parameters");
     juce::Array<juce::AudioProcessorParameter*> toneParams;
-    for (auto name : { "Tape", "Auto EQ", "EQ 1 Gain", "EQ 2 Freq", "EQ 3 Gain", "EQ 3 Q", "EQ 4 Gain", "EQ 5 Gain", "Space", "Pre-delay", "Size", "Damping", "Ducking", "Duck Release", "Freeze" })
+    for (auto name : { "Tape", "Auto EQ", "EQ 1 Gain", "EQ 2 Freq", "EQ 3 Gain", "EQ 3 Q", "EQ 4 Gain", "EQ 5 Gain", "Width", "Pre-delay", "Size", "Damping", "Ducking", "Duck Release", "Freeze",
+                       "Glitch", "Glitch Sync", "Noise Type", "Noise Level", "Noise Follow", "Rate" })
     {
         auto* prm = findParam (*plugin, name);
         if (prm == nullptr)
