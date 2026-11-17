@@ -37,6 +37,8 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     preDelayBuf.setSize (numChans, (int) (maxPreDelayS * sr) + maxBlockSize + 4);
     preDelaySm.reset (sr, 0.1);
     wetFx.prepare (sr, numChans);
+    rateDry.prepare (sr);
+    rateWet.prepare (sr);
 
     const auto histLen = (int) (freezeLengthS * sr);
     wetHistory.setSize (numChans, histLen);
@@ -130,6 +132,21 @@ void RoomEngine::applyPending()
     // Wait-free: the kernel is ready; the convolver crossfades to it stage by stage.
     convolution.setKernel (std::move (pendingKernel));
     tone = pendingTone;
+    {
+        // The room's resonant notes, for the harmonic bloom at the top of Intensity:
+        // each resonator's centre frequency, read back from its coefficients.
+        float hz[ToneSettings::maxResonators] {};
+        int n = 0;
+        for (int k = 0; k < tone.numResonators; ++k)
+        {
+            const auto& c = tone.resonator[k];
+            const auto g = (c.a2 + 1.0) * 0.5;
+            const auto cosw = g > 1.0e-9 ? -c.a1 / (2.0 * g) : 1.0;
+            if (std::abs (cosw) < 1.0)
+                hz[n++] = (float) (std::acos (cosw) * sampleRate / juce::MathConstants<double>::twoPi);
+        }
+        wetFx.setHarmonics (hz, n);
+    }
     hasPending = false;
 
     if (! roomLoaded)
@@ -246,6 +263,10 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
     wetFx.setTargets (fx.extreme, fx.stutter, fx.glitchAmount, fx.glitchSync);
     wetFx.setTransport (fx.hasPpq, fx.ppq, fx.bpm);
     const auto wetFxOn = ! wetFx.isIdle() || fx.extreme > 0.0f || fx.stutter;
+    const auto rateDryOn = fx.rateDry && ! rateDry.settledOff (fx.rateHz);
+    const auto rateWetOn = fx.rateWet && ! rateWet.settledOff (fx.rateHz);
+    if (! fx.rateDry) rateDry.reset();
+    if (! fx.rateWet) rateWet.reset();
     for (int i = 0; i < n; ++i)
     {
         const auto tAmt = toneSm.getNextValue(), sAmt = spaceSm.getNextValue();
@@ -266,16 +287,20 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
         if (wetFxOn)
             wetFx.processSample (wets, chans);
 
+        float drys[2] {};
         for (int ch = 0; ch < chans; ++ch)
         {
-            auto* io = buffer.getWritePointer (ch);
-            auto wet = wets[ch];
+            drys[ch] = buffer.getSample (ch, i);
             if (! frozenActive)
-                wetHistory.setSample (ch, historyWrite, wet);
+                wetHistory.setSample (ch, historyWrite, wets[ch]);
             else
-                wet = (1.0f - fz) * wet + fz * freezeGrainSample (ch);
-            io[i] = ((1.0f - m) * io[i] + m * wet * duckGain) * g;
+                wets[ch] = (1.0f - fz) * wets[ch] + fz * freezeGrainSample (ch);
         }
+        // Rate, on the dry sound and / or the room (the D and R keys)
+        if (rateDryOn) rateDry.processSample (drys, chans, fx.rateHz);
+        if (rateWetOn) rateWet.processSample (wets, chans, fx.rateHz);
+        for (int ch = 0; ch < chans; ++ch)
+            buffer.getWritePointer (ch)[i] = ((1.0f - m) * drys[ch] + m * wets[ch] * duckGain) * g;
 
         if (frozenActive)
         {

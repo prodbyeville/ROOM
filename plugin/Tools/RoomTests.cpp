@@ -2056,6 +2056,134 @@ namespace
         }
     }
 
+    void testRound4 (const juce::File& root)
+    {
+        std::cout << "extreme bloom / smooth / rate keys\n";
+        auto hfRatio = [] (const std::vector<float>& x, size_t a, size_t b)
+        {
+            // energy of the first difference over energy: high when there's lots of top end
+            double e = 1e-20, d = 0.0;
+            for (auto i = std::max<size_t> (a, 1); i < std::min (b, x.size()); ++i)
+            {
+                e += (double) x[i] * x[i];
+                d += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]);
+            }
+            return d / e;
+        };
+
+        // --- Extreme: 165 % and below don't use the bloom; at 200 % no gating, harmonic, bounded ---
+        {
+            auto render = [] (float e, bool withNotes, std::vector<float>& out)
+            {
+                room::WetFx fx;
+                fx.prepare (48000.0, 2);
+                if (withNotes) { const float hz[] = { 196.0f, 247.0f }; fx.setHarmonics (hz, 2); }
+                fx.setTargets (e, false);
+                juce::Random r (4);
+                out.clear();
+                for (int i = 0; i < 48000 * 3; ++i)
+                {
+                    const auto in = (r.nextFloat() - 0.5f) * 0.4f * (0.6f + 0.4f * std::sin ((float) i * 0.0004f));
+                    float w[2] = { in, in };
+                    fx.processSample (w, 2);
+                    out.push_back (w[0]);
+                }
+            };
+            std::vector<float> a, b;
+            render (0.6f, false, a);
+            render (0.6f, true, b);
+            check (a == b, "at 160 % the bloom isn't used (the room's notes change nothing)");
+            render (1.0f, true, b);
+            bool finite = true;
+            float peak = 0.0f;
+            for (auto x : b) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
+            check (finite && peak <= 1.0f, "at 200 % the bloom stays finite and bounded");
+            // no gate: every 20 ms window keeps a good share of the median level
+            std::vector<double> win;
+            for (size_t k = 48000; k + 960 < b.size(); k += 960)
+            {
+                double e = 0; for (size_t i = k; i < k + 960; ++i) e += (double) b[i] * b[i];
+                win.push_back (std::sqrt (e / 960.0));
+            }
+            auto sorted = win; std::sort (sorted.begin(), sorted.end());
+            const auto median = sorted[sorted.size() / 2], lowest = sorted.front();
+            check (lowest > 0.25 * median, "at 200 % nothing gates the sound out (quietest 20 ms at "
+                                           + juce::String (lowest / median * 100.0, 0) + " % of typical)");
+            check (hfRatio (b, 48000, b.size()) < hfRatio (a, 48000, a.size()), "at 200 % the sound is more tonal than at 160 % (less hiss, more notes)");
+        }
+
+        // --- Smooth: off is untouched; on tucks the attack, keeps the body, darkens the top ---
+        {
+            room::RoomMic mic;
+            mic.prepare (48000.0);
+            check (mic.isIdle(), "smooth at 0 does nothing (idle)");
+            auto run = [&mic] (float amount, const std::vector<float>& in)
+            {
+                mic.reset();
+                mic.setAmount (amount);
+                juce::AudioBuffer<float> b (2, (int) in.size());
+                for (int i = 0; i < (int) in.size(); ++i) b.setSample (0, i, in[(size_t) i]), b.setSample (1, i, in[(size_t) i]);
+                for (int i = 0; i < 4800; ++i) { juce::AudioBuffer<float> z (2, 1); z.clear(); mic.process (z, 1); }   // settle the amount
+                mic.process (b, b.getNumSamples());
+                std::vector<float> out ((size_t) b.getNumSamples());
+                for (int i = 0; i < b.getNumSamples(); ++i) out[(size_t) i] = b.getSample (0, i);
+                return out;
+            };
+            // a hit then a steady tone
+            std::vector<float> hit (48000, 0.0f);
+            for (int i = 0; i < 48000; ++i)
+                hit[(size_t) i] = (i < 200 ? 0.9f * std::exp (-i / 40.0f) * (i % 2 ? 1.0f : -1.0f) : 0.0f)
+                                + (i > 12000 ? 0.3f * std::sin (2.0f * 3.14159f * 220.0f * (float) i / 48000.0f) : 0.0f);
+            const auto soft = run (1.0f, hit), plain = run (0.0f, hit);
+            float hitPlain = 0, hitSoft = 0;
+            for (int i = 0; i < 600; ++i) { hitPlain = std::max (hitPlain, std::abs (plain[(size_t) i])); hitSoft = std::max (hitSoft, std::abs (soft[(size_t) i])); }
+            const auto hitDb = juce::Decibels::gainToDecibels (hitSoft / hitPlain);
+            const auto bodyDb = rmsDb (soft, 0.5, 0.99) - rmsDb (plain, 0.5, 0.99);
+            check (hitDb < -6.0f, "smooth tucks the attack (" + juce::String (hitDb, 1) + " dB on the hit)");
+            check (std::abs (bodyDb) < 2.0, "and keeps the body of the note (" + juce::String (bodyDb, 2) + " dB)");
+            std::vector<float> noise (48000);
+            juce::Random r (2);
+            for (auto& x : noise) x = (r.nextFloat() - 0.5f) * 0.3f;
+            check (hfRatio (run (1.0f, noise), 4800, 48000) < 0.5 * hfRatio (run (0.0f, noise), 4800, 48000), "smooth rolls off the top");
+        }
+
+        // --- Rate keys: D / R / N choose what Rate reaches ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::mix, 0.0f);   // just the dry sound
+            setParam (rig.proc, ParamIDs::rate, 2000.0f);
+            std::vector<float> in ((size_t) (0.5 * Rig::sr));
+            juce::Random r (8);
+            for (auto& x : in) x = (r.nextFloat() - 0.5f) * 0.3f;
+            setParam (rig.proc, ParamIDs::rateDry, 0.0f);
+            rig.proc.reset();
+            const auto clean = rig.run (in, 0.1);
+            setParam (rig.proc, ParamIDs::rateDry, 1.0f);
+            rig.proc.reset();
+            const auto crushed = rig.run (in, 0.1);
+            check (hfRatio (clean, 4800, in.size()) > 4.0 * hfRatio (crushed, 4800, in.size()),
+                   "D off: rate leaves the dry sound alone; D on: it reaches it");
+
+            // N: only the noise, at follow 0
+            setParam (rig.proc, ParamIDs::rateDry, 0.0f);
+            setParam (rig.proc, ParamIDs::rateReverb, 0.0f);
+            setParam (rig.proc, ParamIDs::noiseType, 1.0f);   // tape hiss: bright
+            setParam (rig.proc, ParamIDs::noiseLevel, 0.8f);
+            std::vector<float> silence ((size_t) (0.6 * Rig::sr), 0.0f);
+            setParam (rig.proc, ParamIDs::rateNoise, 1.0f);
+            rig.proc.reset();
+            const auto noiseCrushed = rig.run (silence, 0.1);
+            setParam (rig.proc, ParamIDs::rateNoise, 0.0f);
+            rig.proc.reset();
+            const auto noiseClean = rig.run (silence, 0.1);
+            check (hfRatio (noiseClean, 9600, silence.size()) > 4.0 * hfRatio (noiseCrushed, 9600, silence.size()),
+                   "N on: rate reaches the noise; N off: it doesn't");
+            for (auto [id, v] : std::initializer_list<std::pair<const char*, float>> { { ParamIDs::noiseLevel, 0.0f }, { ParamIDs::rate, 44100.0f },
+                     { ParamIDs::rateDry, 1.0f }, { ParamIDs::rateReverb, 1.0f }, { ParamIDs::rateNoise, 1.0f }, { ParamIDs::mix, 1.0f } })
+                setParam (rig.proc, id, v);
+        }
+    }
+
     void testStage (const juce::File& root, const juce::File& roomSource)
     {
         std::cout << "Stage\n";
@@ -2638,6 +2766,7 @@ int main (int argc, char* argv[])
     testStage (root, roomSource);
     testIntensityGlitchQuick (root, roomSource);
     testNoiseRateToneSync (root);
+    testRound4 (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

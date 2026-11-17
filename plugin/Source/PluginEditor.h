@@ -375,7 +375,7 @@ private:
     ToneScreen toneScreen { proc };
 
     // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
-    Knob intensity, glitchAmount, tone, space, tail, size;
+    Knob intensity, smooth, glitchAmount, tone, space, tail, size;
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
     juce::ToggleButton glitchKey { "glitch" };
@@ -399,6 +399,8 @@ private:
     // The bottom module: noise -> level / follow | rate
     NoiseScreen noiseScreen { proc };
     Knob noiseLevel, noiseFollow, rate;
+    juce::ToggleButton rateKeys[3] { juce::ToggleButton ("d"), juce::ToggleButton ("r"), juce::ToggleButton ("n") };   // Rate on dry / reverb / noise
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> rateKeyAttachments[3];
     juce::Rectangle<int> noiseNameArea;
 
     // STUDIOS (top bar) and ROOMS (load)

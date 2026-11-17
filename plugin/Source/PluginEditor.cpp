@@ -1534,6 +1534,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     setupKnob (intensity, ParamIDs::intensity, "intensity", 30.0f, "0", "100", "200", false,
               "how much of the room you hear: its decay, tone and resonances. 50 is the room as measured, 100 twice as strong, "
               "and past 100 it turns extreme: shimmer and smear, then breaking up.");
+    setupKnob (smooth, ParamIDs::smooth, "smooth", 15.0f, "", "", "", false,
+              "smooth: the sound as a mic across the room hears it. softens and tucks the attack, rolls off the top. on everything, dry and room.");
     setupKnob (glitchAmount, ParamIDs::glitchAmount, "glitch", 15.0f, "", "", "", false,
               "how much it glitches: how often, how many repeats, how chopped.");
     setupKnob (tone, ParamIDs::toneAmount, "tone", 30.0f, "", "", "", false,
@@ -1614,7 +1616,18 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
               "down: the noise plays all the time. up: it follows your sound, only playing while audio comes in.");
     setupKnob (rate, ParamIDs::rate, "rate", 40.0f, "full", "", "low", false,
               "clean sample-rate reduction on the whole sound, like resampling with the filters on: darker and lower, never crunchy. "
-              "all the way left (44.1 khz) it's off.");
+              "all the way left (44.1 khz) it's off. the d, r and n keys choose what it reaches: the dry sound, the reverb, the noise.");
+    {
+        const char* ids[3] = { ParamIDs::rateDry, ParamIDs::rateReverb, ParamIDs::rateNoise };
+        const char* tips[3] = { "d: rate reaches the dry sound", "r: rate reaches the reverb", "n: rate reaches the noise" };
+        for (int k = 0; k < 3; ++k)
+        {
+            rateKeys[k].getProperties().set ("style", "lightkey");
+            rateKeys[k].setTooltip (tips[k]);
+            content.addAndMakeVisible (rateKeys[k]);
+            rateKeyAttachments[k] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ids[k], rateKeys[k]);
+        }
+    }
 
     // --- STUDIOS ---
     presetBar.onOpen = [this] { browser.setVisible (true); browser.toFront (true); };
@@ -1758,7 +1771,7 @@ void RoomAudioProcessorEditor::setTipsEnabled (bool on)
 void RoomAudioProcessorEditor::newPreset (bool keepName)
 {
     proc.resetToInit (keepName);
-    for (auto* k : { &intensity, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
+    for (auto* k : { &intensity, &smooth, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
     content.repaint();
@@ -1919,7 +1932,7 @@ void RoomAudioProcessorEditor::timerCallback()
     }
 
     // LFO assignments can change from presets or the right-click menu.
-    for (auto* k : { &intensity, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
+    for (auto* k : { &intensity, &smooth, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
 
@@ -2029,6 +2042,8 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     EvilleLookAndFeel::drawCaps (g, "intensity", { 40.0f, y0 + 18.0f, 140.0f, 16.0f }, 12.5f, Colours::dustWhite);
     EvilleLookAndFeel::drawCaps (g, "amount", juce::Rectangle<float> (60.0f, 12.0f).withCentre (knobCentre (glitchAmount).translated (0.0f, -knobRadius (glitchAmount) - 11.0f)),
                                  9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
+    EvilleLookAndFeel::drawCaps (g, "smooth", { knobCentre (smooth).x + knobRadius (smooth) + 9.0f, knobCentre (smooth).y - 6.0f, 70.0f, 12.0f },
+                                 9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centredLeft);
     EvilleLookAndFeel::drawCaps (g, "sync", juce::Rectangle<float> (40.0f, 12.0f).withCentre (toneSync.getBounds().toFloat().getCentre().translated (0.0f, 17.0f)),
                                  9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
     for (auto* k : { &tone, &space, &tail, &size })
@@ -2193,7 +2208,7 @@ void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
         const auto hz = (float) rate.slider.getValue();
         const auto text = hz >= 1000.0f ? juce::String (hz / 1000.0f, 1) + " kHz" : juce::String (juce::roundToInt (hz)) + " Hz";
         const auto c = knobCentre (rate);
-        value (text, { c.x + knobRadius (rate) + 26.0f, c.y - 22.0f, finishArea.getRight() - (c.x + knobRadius (rate) + 26.0f) - 18.0f, 44.0f },
+        value (text, { c.x + knobRadius (rate) + 28.0f, c.y - 36.0f, finishArea.getRight() - (c.x + knobRadius (rate) + 28.0f) - 18.0f, 44.0f },
                32.0f, juce::Justification::centredLeft);
     }
 
@@ -2280,6 +2295,7 @@ void RoomAudioProcessorEditor::layoutContent()
     syncDot.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 198, y0 + 138 }));
     glitchKey.setBounds (226, y0 + 126, 60, 24);
     placeKnob (glitchAmount, { 256, y0 + 92 });
+    placeKnob (smooth, { 60, y0 + 132 });
     placeKnob (tone, { 375, y0 + 108 });
     placeKnob (space, { 515, y0 + 108 });
     toneSync.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 445, y0 + 65 }));
@@ -2299,6 +2315,8 @@ void RoomAudioProcessorEditor::layoutContent()
     placeKnob (noiseLevel, { 476, y1 + 52 });
     placeKnob (noiseFollow, { 476, y1 + 118 });
     placeKnob (rate, { 690, y1 + 80 });
+    for (int k = 0; k < 3; ++k)
+        rateKeys[k].setBounds (758 + k * 34, y1 + 104, 28, 20);
 }
 
 //==============================================================================

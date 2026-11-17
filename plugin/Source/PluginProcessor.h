@@ -7,6 +7,7 @@
 #include "dsp/ResonanceSuppressor.h"
 #include "dsp/SpectrumTap.h"
 #include "dsp/StereoWidth.h"
+#include "dsp/RoomMic.h"
 #include "presets/PresetLibrary.h"
 #include "dsp/Lfo.h"
 #include "Modulation.h"
@@ -40,7 +41,11 @@ namespace ParamIDs
     inline constexpr const char* noiseType   = "noiseType";
     inline constexpr const char* noiseLevel  = "noiseLevel";
     inline constexpr const char* noiseFollow = "noiseFollow";
-    inline constexpr const char* rate        = "rate";       // sample-rate reduction on the room, Hz
+    inline constexpr const char* rate        = "rate";       // clean sample-rate reduction, Hz
+    inline constexpr const char* rateDry     = "rateDry";    // the D / R / N keys: which paths Rate reaches
+    inline constexpr const char* rateReverb  = "rateReverb";
+    inline constexpr const char* rateNoise   = "rateNoise";
+    inline constexpr const char* smooth      = "smooth";     // the room-mic softening (intensity section)
     // Top bar
     inline constexpr const char* bypass      = "bypass";
 
@@ -234,7 +239,9 @@ private:
     room::StereoWidth stereoWidth;
     juce::SharedResourcePointer<room::NoiseBank> noiseBank;
     room::NoisePlayer noise;
-    room::RateReducer rateReducer;   // the whole output, dry and wet
+    room::RateReducer noiseRate;     // Rate on the noise (the N key); dry and room are in the engine
+    juce::AudioBuffer<float> noiseBuf;
+    room::RoomMic roomMic;           // Smooth
     juce::SmoothedValue<float> outputGain;
 
     // Bypass: a latency-matched copy of the input, crossfaded in.
@@ -274,6 +281,10 @@ private:
     std::atomic<float>* noiseLevelParam = nullptr;
     std::atomic<float>* noiseFollowParam = nullptr;
     std::atomic<float>* rateParam = nullptr;
+    std::atomic<float>* rateDryParam = nullptr;
+    std::atomic<float>* rateReverbParam = nullptr;
+    std::atomic<float>* rateNoiseParam = nullptr;
+    std::atomic<float>* smoothParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
 
     // LFOs

@@ -36,6 +36,8 @@ struct RoomFx
     bool glitchSync = false;       // stutter in time with the host
     bool hasPpq = false;           // the host's position at the start of this block (for sync)
     double ppq = 0.0, bpm = 120.0;
+    float rateHz = RateReducer::offHz;   // Rate (top = off)
+    bool rateDry = true, rateWet = true; // the D and R keys: which paths Rate reaches
 };
 
 class RoomEngine
@@ -86,6 +88,7 @@ private:
 
     // Extreme intensity and the stutter glitch, on the wet sound
     WetFx wetFx;
+    RateReducer rateDry, rateWet;
 
     // Ducking: envelope of the dry input
     float duckEnv = 0.0f;

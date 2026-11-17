@@ -3,6 +3,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <cmath>
 #include <vector>
+#include "Biquad.h"
 
 // Two effects on the wet (room) sound only, after the room and before freeze:
 //
@@ -40,6 +41,7 @@ public:
         extremeSm.reset (sr, 0.08);
         stutterSm.reset (sr, 0.03);
         reset();
+        setHarmonics (nullptr, 0);
     }
 
     void reset()
@@ -60,6 +62,8 @@ public:
         stutterWait = (int) (0.3 * sampleRate);
         extremeSm.setCurrentAndTargetValue (0.0f);
         stutterSm.setCurrentAndTargetValue (0.0f);
+        for (auto& chan : res) for (auto& f : chan) f.reset();
+        fifthPhase = lowPhase = 0.0;
     }
 
     /** Sample by sample: `wet` holds one sample per channel and is changed in place. */
@@ -129,7 +133,10 @@ private:
     void extreme (float* wet, int ch, float e)
     {
         const auto a = smooth (e * 2.0f);             // smear + shimmer: full by 150%
-        const auto d = smooth ((e - 0.5f) * 2.0f);    // digital breakup: 150% .. 200%
+        // Digital breakup from 150 %, held at its 165 % amount (where it sounds best), then
+        // handed over to the harmonic bloom, which takes 165 % .. 200 %.
+        const auto h = smooth ((e - bloomStart) / (1.0f - bloomStart));
+        const auto d = smooth ((std::min (e, bloomStart) - 0.5f) * 2.0f) * (1.0f - h);
 
         // --- Shimmer: two read heads sweeping at double speed (octave up), crossfaded.
         shimPhase += 1.0;   // the delay shrinks by one sample per sample = 2x speed
@@ -158,6 +165,8 @@ private:
             gate = rng.nextFloat() < 0.35f * d ? 0.0f : 1.0f;
         }
         gateSm += (gate - gateSm) * 0.004f;
+        if (h > 0.0f)
+            advanceBloomHeads();
 
         for (int c = 0; c < ch; ++c)
         {
@@ -176,9 +185,79 @@ private:
                 y = (1.0f - d) * y + d * z;
                 y *= 1.0f - 0.85f * d * (1.0f - gateSm);
             }
+            if (h > 0.0f)
+                y = bloom (c, y, h);
             // Keep it about as loud as the room it came from, and tame the feedback.
             wet[c] = std::tanh (y * (1.0f / (1.0f + 0.45f * a)));
         }
+    }
+
+    // --- HARMONIC BLOOM (165 % .. 200 %) -------------------------------------------
+    // Instead of breaking up further, the room starts to sing: a bank of resonators
+    // tuned to the room's own notes (and their fifths and octaves) rings out of the
+    // wet sound, a choir of grains a fifth up and an octave down thickens it, and a
+    // warm, slightly asymmetric saturation glues it. No crushing, ring mod or gating.
+    static constexpr float bloomStart = 0.65f;   // 165 % on the knob
+    static constexpr int maxPartials = 8;
+
+public:
+    /** The room's resonant notes (Hz). Called when a room loads (engine, audio thread). */
+    void setHarmonics (const float* hz, int count)
+    {
+        numPartials = 0;
+        auto add = [this] (double f)
+        {
+            if (numPartials >= maxPartials || f < 40.0 || f > 0.42 * sampleRate)
+                return;
+            for (int k = 0; k < numPartials; ++k)
+                if (std::abs (partialHz[k] - f) < f * 0.03)
+                    return;   // already there
+            partialHz[numPartials] = f;
+            const auto q = 30.0 + 30.0 * (double) (numPartials % 3) / 2.0;   // Q 30..60
+            const auto c = design::resonator (f, q, sampleRate);
+            for (int ch = 0; ch < maxCh; ++ch) { res[ch][numPartials].c = c; res[ch][numPartials].reset(); }
+            ++numPartials;
+        };
+        // the room's notes first, then their fifths and octaves while there's room
+        for (int i = 0; i < count; ++i) add (hz[i]);
+        for (int i = 0; i < count; ++i) add (hz[i] * 1.5);
+        for (int i = 0; i < count; ++i) add (hz[i] * 2.0);
+        if (numPartials == 0)
+            for (auto f : { 110.0, 165.0, 220.0, 330.0, 440.0 })   // no room: an open fifth on A
+                add (f);
+    }
+
+private:
+    void advanceBloomHeads()
+    {
+        // a fifth up: the delay shrinks by half a sample per sample; an octave down: it grows by half
+        fifthPhase += 0.5;
+        if (fifthPhase >= shimmerWin) fifthPhase -= shimmerWin;
+        lowPhase += 0.5;
+        if (lowPhase >= shimmerWin) lowPhase -= shimmerWin;
+    }
+
+    float bloom (int c, float y, float h)
+    {
+        const auto pi = juce::MathConstants<double>::pi;
+        // the grain choir
+        const auto f0 = fifthPhase, f1 = std::fmod (fifthPhase + shimmerWin * 0.5, (double) shimmerWin);
+        const auto l0 = lowPhase, l1 = std::fmod (lowPhase + shimmerWin * 0.5, (double) shimmerWin);
+        const auto fifth = readHist (c, shimmerWin - f0) * (float) std::sin (pi * f0 / shimmerWin)
+                         + readHist (c, shimmerWin - f1) * (float) std::sin (pi * f1 / shimmerWin);
+        const auto low = readHist (c, l0 + 1.0) * (float) std::sin (pi * l0 / shimmerWin)
+                       + readHist (c, l1 + 1.0) * (float) std::sin (pi * l1 / shimmerWin);
+        // the room's notes ringing
+        double ring = 0.0;
+        const auto drive = (double) (y + 0.3f * fifth);
+        for (int k = 0; k < numPartials; ++k)
+            ring += res[c][k].process (drive) * (k < 3 ? 1.0 : 0.6);
+        const auto sung = (float) ring * (2.2f / std::sqrt ((float) std::max (1, numPartials)));
+        auto z = y * (1.0f - 0.45f * h) + h * (0.55f * fifth + 0.35f * low + 0.9f * sung);
+        // warm saturation: soft, a little lopsided (even harmonics), level kept
+        const auto drv = 1.0f + 1.5f * h;
+        z = std::tanh (drv * z + 0.12f * h * z * z) / std::tanh (drv);
+        return z;
     }
 
     void stutter (float* wet, int ch, float st)
@@ -257,6 +336,11 @@ private:
     int shimmerWin = 1, reverseLen = 1, revPos = 0;
     double shimPhase = 0.0;
     float shimmerOut[maxCh] {};
+
+    Biquad res[maxCh][maxPartials];
+    double partialHz[maxPartials] {};
+    int numPartials = 0;
+    double fifthPhase = 0.0, lowPhase = 0.0;
 
     int holdCount = 0;
     float held[maxCh] {};

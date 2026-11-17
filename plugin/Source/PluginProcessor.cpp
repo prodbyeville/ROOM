@@ -123,6 +123,10 @@ RoomAudioProcessor::RoomAudioProcessor()
     noiseLevelParam  = apvts.getRawParameterValue (ParamIDs::noiseLevel);
     noiseFollowParam = apvts.getRawParameterValue (ParamIDs::noiseFollow);
     rateParam        = apvts.getRawParameterValue (ParamIDs::rate);
+    rateDryParam     = apvts.getRawParameterValue (ParamIDs::rateDry);
+    rateReverbParam  = apvts.getRawParameterValue (ParamIDs::rateReverb);
+    rateNoiseParam   = apvts.getRawParameterValue (ParamIDs::rateNoise);
+    smoothParam      = apvts.getRawParameterValue (ParamIDs::smooth);
     noise.setBank (&noiseBank.get());
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
 
@@ -299,6 +303,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
                 return v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (juce::roundToInt (v)) + " Hz";
             })));
     }
+    for (auto [id, name] : { std::pair { ParamIDs::rateDry, "Rate Dry" }, { ParamIDs::rateReverb, "Rate Reverb" }, { ParamIDs::rateNoise, "Rate Noise" } })
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { id, 1 }, name, true));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::smooth, 1 }, "Smooth",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
 
@@ -357,7 +366,9 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
     stereoWidth.prepare (sampleRate);
     noise.prepare (sampleRate, std::max (1, samplesPerBlock));
-    rateReducer.prepare (sampleRate);
+    noiseRate.prepare (sampleRate);
+    noiseBuf.setSize (2, std::max (1, samplesPerBlock));
+    roomMic.prepare (sampleRate);
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -486,6 +497,9 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fx.hasPpq = blockHasPpq && blockPlaying;
         fx.ppq = blockPpq + start / std::max (1.0, currentSampleRate.load()) * blockBpm / 60.0;
         fx.bpm = blockBpm;
+        fx.rateHz = eff (ParamIDs::rate, rateParam);
+        fx.rateDry = rateDryParam->load() > 0.5f;
+        fx.rateWet = rateReverbParam->load() > 0.5f;
 
         // Tone and space (auto: from what ROOM detected in the sound)
         const auto isAuto = balanceAutoParam->load() > 0.5f;
@@ -499,17 +513,31 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         if (noiseOn)
             noise.trackInput (part, len);
 
-        // Room -> Noise -> Tape -> Auto EQ -> Width -> Rate -> output gain
+        // Room (Rate on dry / room) -> Noise (Rate on noise) -> Smooth -> Tape -> Auto EQ -> Width -> output gain
         engine.process (part, toneNow, spaceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
-        if (noiseOn)
-            noise.addTo (part, len);
+        if (noiseOn && len <= noiseBuf.getNumSamples())
+        {
+            noiseBuf.clear();
+            noise.addTo (noiseBuf, len);
+            const auto hz = fx.rateHz;
+            if (rateNoiseParam->load() > 0.5f)
+            {
+                if (! noiseRate.settledOff (hz))
+                    noiseRate.process (noiseBuf, len, hz);
+            }
+            else
+                noiseRate.reset();
+            for (int ch = 0; ch < std::min (part.getNumChannels(), 2); ++ch)
+                part.addFrom (ch, 0, noiseBuf, ch, 0, len);
+        }
+        roomMic.setAmount (eff (ParamIDs::smooth, smoothParam));
+        if (! roomMic.isIdle())
+            roomMic.process (part, len);
 
         static const room::EqBand flat[room::tone::numEqBands] = {};   // the eq is gone: tape only
         toneShaper.process (part, eff (ParamIDs::tape, tapeParam), flat);
         suppressor.process (part, eff (ParamIDs::autoEq, autoEqParam));
         stereoWidth.process (part, eff (ParamIDs::space, spaceParam));
-        if (const auto hz = eff (ParamIDs::rate, rateParam); ! rateReducer.settledOff (hz))
-            rateReducer.process (part, len, hz);
 
         outputGain.setTargetValue (juce::Decibels::decibelsToGain (eff (ParamIDs::output, outputParam)));
         const auto outChans = std::min (part.getNumChannels(), 2);
