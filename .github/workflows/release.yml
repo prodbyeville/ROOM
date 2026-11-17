@@ -90,7 +90,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Upload the installers, then latest.json
         env:
@@ -102,7 +102,7 @@ jobs:
           MAC_FILE="ROOM-$VERSION-macOS.pkg"
           [ -f "dist/$WIN_FILE" ] || { echo "::error::dist/$WIN_FILE missing (is the version in CMakeLists the one that was built?)"; ls -la dist; exit 1; }
 
-          put () { npx --yes wrangler@3 r2 object put "$BUCKET/$PRODUCT/$1" --file "$2" --content-type "$3" --remote; }
+          put () { npx --yes wrangler@4 r2 object put "$BUCKET/$PRODUCT/$1" --file "$2" --content-type "$3" --remote; }
 
           echo "Uploading $WIN_FILE"
           put "$WIN_FILE" "dist/$WIN_FILE" "application/vnd.microsoft.portable-executable"
