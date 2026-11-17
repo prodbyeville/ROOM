@@ -62,14 +62,24 @@ jobs:
       - name: Find this commit's green builds
         id: runs
         run: |
+          # This commit's green build, or (e.g. when only the workflows changed) the
+          # latest green build on main; the installer's file name still has to match
+          # the version below, so an older version can't slip through.
           find_run () {
-            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --commit "$GITHUB_SHA" \
-              --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty'
+            local id
+            id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --commit "$GITHUB_SHA" \
+                   --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [ -z "$id" ]; then
+              id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --branch main \
+                     --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+              [ -n "$id" ] && echo "::warning::No green $1 for $GITHUB_SHA: using the latest green one on main (run $id)." >&2
+            fi
+            echo "$id"
           }
           WIN=$(find_run build-windows.yml)
           MAC=$(find_run build-macos.yml)
-          [ -n "$WIN" ] || { echo "::error::No successful Windows build for $GITHUB_SHA yet. Wait for it to finish (or re-run it), then run this again."; exit 1; }
-          if [ -z "$MAC" ]; then echo "::warning::No successful Mac build for $GITHUB_SHA: publishing Windows only."; fi
+          [ -n "$WIN" ] || { echo "::error::No successful Windows build yet. Wait for it to finish (or re-run it), then run this again."; exit 1; }
+          if [ -z "$MAC" ]; then echo "::warning::No successful Mac build: publishing Windows only."; fi
           echo "win=$WIN" >> "$GITHUB_OUTPUT"
           echo "mac=$MAC" >> "$GITHUB_OUTPUT"
 
