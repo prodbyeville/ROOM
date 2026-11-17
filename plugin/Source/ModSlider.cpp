@@ -57,6 +57,15 @@ juce::Rectangle<float> ModSlider::depthDotBounds (int lfo) const
     return juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ x, geo.centre.y - 6.0f + (float) k * 16.0f });
 }
 
+bool ModSlider::hitTest (int x, int y)
+{
+    const auto p = juce::Point<float> ((float) x, (float) y);
+    if (dotAt (p) >= 0)
+        return true;
+    const auto geo = ringGeometry();
+    return p.getDistanceFrom (geo.centre) <= geo.ringR + 10.0f;   // the knob and its ring, with a little slack
+}
+
 int ModSlider::dotAt (juce::Point<float> p) const
 {
     for (int l = 0; l < room::Modulation::numLfos; ++l)

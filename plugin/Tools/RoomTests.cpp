@@ -1668,6 +1668,100 @@ namespace
         check (finite, "convolution output stays finite through a switch");
     }
 
+    // Intensity 0..200 % (old 100 % is 50), extreme mode, the glitch stutter,
+    // new rooms starting at 50 %, and the stage's quick-select slots.
+    void testIntensityGlitchQuick (const juce::File& root, const juce::File& roomSource)
+    {
+        std::cout << "intensity / glitch / quick select\n";
+        {
+            Rig rig (root);
+            auto* p = rig.proc.apvts.getParameter (ParamIDs::intensity);
+            check (p->getText (p->convertTo0to1 (1.0f), 16) == "50%" && p->getText (p->convertTo0to1 (2.0f), 16) == "100%"
+                       && p->getText (p->convertTo0to1 (4.0f), 16) == "200%",
+                   "intensity shows the measured room as 50 %, twice as 100 %, extreme as 200 %");
+            check (std::abs (p->convertFrom0to1 (p->getDefaultValue()) - 1.0f) < 1e-4f, "intensity defaults to the room as measured (50 %)");
+
+            std::vector<float> noise ((size_t) (0.6 * Rig::sr));
+            juce::Random r (3);
+            for (auto& x : noise) x = (r.nextFloat() * 2.0f - 1.0f) * 0.25f;
+
+            setParam (rig.proc, ParamIDs::intensity, 2.0f);
+            rig.settle();
+            const auto at100 = rig.run (noise, 1.5);
+            {
+                // Up to 100 % the extreme / stutter stage is off: the wet sound passes untouched.
+                room::WetFx fx;
+                fx.prepare (Rig::sr, 2);
+                fx.setTargets (0.0f, false);
+                float worst = 0.0f;
+                for (int i = 0; i < 20000; ++i)
+                {
+                    float w[2] = { noise[(size_t) (i % (int) noise.size())], -noise[(size_t) (i % (int) noise.size())] };
+                    const float in0 = w[0], in1 = w[1];
+                    fx.processSample (w, 2);
+                    worst = std::max ({ worst, std::abs (w[0] - in0), std::abs (w[1] - in1) });
+                }
+                check (worst == 0.0f && fx.isIdle(), "up to 100 % there is no extreme processing (untouched)");
+            }
+            setParam (rig.proc, ParamIDs::intensity, 4.0f);
+            rig.settle();
+            const auto at200 = rig.run (noise, 1.5);
+            float peak = 0.0f, diff = 0.0f;
+            bool finite = true;
+            for (size_t i = 0; i < at200.size(); ++i)
+            {
+                finite = finite && std::isfinite (at200[i]);
+                peak = std::max (peak, std::abs (at200[i]));
+                diff = std::max (diff, std::abs (at200[i] - at100[i]));
+            }
+            check (finite && peak < 2.0f, "extreme mode stays finite and bounded");
+            check (diff > 0.05f, "extreme mode (200 %) changes the sound");
+            const auto lv100 = rmsDb (at100, 0.0, 1.0), lv200 = rmsDb (at200, 0.0, 1.0);
+            check (std::abs (lv200 - lv100) < 12.0, "extreme mode stays near the room's level (" + juce::String (lv200 - lv100, 1) + " dB)");
+
+            setParam (rig.proc, ParamIDs::intensity, 1.0f);
+            rig.settle();
+            const auto plain = rig.run (noise, 2.0);
+            setParam (rig.proc, ParamIDs::glitch, 1.0f);
+            rig.proc.reset();
+            const auto glitched = rig.run (noise, 2.0);
+            float gd = 0.0f, gp = 0.0f;
+            for (size_t i = 0; i < glitched.size(); ++i)
+            {
+                gd = std::max (gd, std::abs (glitched[i] - plain[i]));
+                gp = std::max (gp, std::abs (glitched[i]));
+            }
+            check (gd > 0.01f && gp < 2.0f, "glitch stutters the room (and stays bounded)");
+            setParam (rig.proc, ParamIDs::glitch, 0.0f);
+        }
+        {
+            RoomAudioProcessor proc;
+            proc.setPresetRoot (root);
+            proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+            proc.prepareToPlay (48000.0, 512);
+            setParam (proc, ParamIDs::intensity, 3.2f);
+            proc.loadRoomFile (roomSource);
+            waitForAnalysis (proc);
+            check (std::abs (paramValue (proc, ParamIDs::intensity) - 1.0f) < 1e-3f, "a new room starts at intensity 50 %");
+
+            auto& rooms = proc.getRoomLibrary();
+            const auto first = rooms.getEntries().front().key;
+            const auto second = rooms.getEntries().back().key;
+            rooms.setQuickSlot (2, first);
+            check (rooms.getQuickSlots()[2] == first && rooms.isQuick (first), "a quick-select slot takes a room");
+            check (rooms.setQuick (second, true) && rooms.getQuickSlots().indexOf (second) == 0, "add to quick select fills the first free slot");
+            rooms.setQuickSlot (4, first);
+            check (rooms.getQuickSlots()[2].isEmpty() && rooms.getQuickSlots()[4] == first, "a room sits in one quick slot only");
+            {
+                PresetLibrary again (rooms.getRoot(), {}, Kind::room);
+                check (again.getQuickSlots()[4] == first && again.getQuickSlots()[0] == second, "quick select is saved");
+            }
+            rooms.setQuick (second, false);
+            rooms.setQuickSlot (4, {});
+            check (! rooms.isQuick (first) && ! rooms.isQuick (second), "quick select slots can be emptied");
+        }
+    }
+
     void testStage (const juce::File& root, const juce::File& roomSource)
     {
         std::cout << "Stage\n";
@@ -1848,8 +1942,8 @@ namespace
             return m;
         };
         const std::map<int, juce::StringArray> owns {
-            { RoomAudioProcessor::randomRoom, { "intensity", "balanceAuto", "balance", "tail", "space" } },
-            { RoomAudioProcessor::randomAdvanced, { "preDelay", "size", "damping", "duck", "duckRelease" } },
+            { RoomAudioProcessor::randomRoom, { "intensity", "balanceAuto", "balance", "tail", "size" } },
+            { RoomAudioProcessor::randomAdvanced, { "preDelay", "space", "damping", "duck", "duckRelease" } },
             { RoomAudioProcessor::randomEq, { "eq1Gain", "eq2Gain", "eq3Gain", "eq4Gain", "eq5Gain" } },
             { RoomAudioProcessor::randomFinish, { "tape", "autoEq" } },
             { RoomAudioProcessor::randomLfos, { "lfo1Shape", "lfo1Sync", "lfo1Div", "lfo1Rate", "lfo2Shape", "lfo2Sync", "lfo2Div", "lfo2Rate" } },
@@ -2054,8 +2148,8 @@ namespace
             {
             drawMenu ({ 600, 100 }, { { "randomize", 1, false, false }, { "randomize now", 0, false, false }, { "", 2, false, false },
                                       { "what moves", 1, false, false },
-                                      { "room knobs  (intensity, balance, tail, space)", 0, true, true },
-                                      { "advanced  (pre-delay, size, damping, ducking)", 0, true, false },
+                                      { "room knobs  (intensity, balance, tail, size)", 0, true, true },
+                                      { "advanced  (pre-delay, space, damping, ducking)", 0, true, false },
                                       { "eq bands", 0, false, false }, { "tape and auto eq", 0, false, false },
                                       { "lfo settings  (shape, rate)", 0, true, false }, { "", 2, false, false },
                                       { "all", 0, false, false }, { "none", 0, false, false }, { "back to default", 0, false, false } });
@@ -2232,6 +2326,7 @@ int main (int argc, char* argv[])
     testFactoryPresets (root);
     testModulationUi (root);
     testStage (root, roomSource);
+    testIntensityGlitchQuick (root, roomSource);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

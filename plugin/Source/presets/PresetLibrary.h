@@ -96,6 +96,15 @@ public:
 
     bool remove (const juce::String& key);
     void setFavorite (const juce::String& key, bool);
+
+    // QUICK SELECT (rooms): the go-to rooms shown on the stage, in slots.
+    static constexpr int numQuickSlots = 6;
+    /** Always numQuickSlots long; "" is an empty slot. */
+    juce::StringArray getQuickSlots() const { return quickKeys; }
+    void setQuickSlot (int slot, const juce::String& key);   // "" clears it; a key moves out of any other slot
+    bool isQuick (const juce::String& key) const { return key.isNotEmpty() && quickKeys.contains (key); }
+    /** Adds to the first empty slot (false if they're all full), or removes it. */
+    bool setQuick (const juce::String& key, bool on);
     bool createPack (const juce::String& name, juce::String& errorOut);
 
     /** Copies .room files into a pack. Returns how many were imported. */
@@ -110,6 +119,10 @@ public:
 private:
     juce::File packFolder (const juce::String& pack) const { return root.getChildFile (pack); }
     juce::File favoritesFile() const { return root.getChildFile ("favorites.xml"); }
+    juce::File quickFile() const { return root.getChildFile ("quick.xml"); }
+    void loadQuick();
+    void saveQuick() const;
+    void renameQuick (const juce::String& from, const juce::String& to);
     void loadFavorites();
     void saveFavorites() const;
 
@@ -118,6 +131,7 @@ private:
     std::vector<juce::String> factoryXml;
     std::vector<Entry> entries;
     juce::StringArray favoriteKeys;
+    juce::StringArray quickKeys;
     int unreadable = 0;
 };
 

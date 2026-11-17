@@ -6,7 +6,7 @@
 
 // The black "advanced" section bolted to the right of the console:
 //   advanced
-//   (pre-delay) (size)
+//   (pre-delay) (space)
 //   (damping)   (ducking)
 //   (release)   [freeze]
 //   [ lfo 1 card ]
@@ -41,7 +41,7 @@ private:
                     const juce::String& lo, const juce::String& mid, const juce::String& hi);
 
     RoomAudioProcessor& proc;
-    Knob preDelay, size, damping, duck, duckRelease;
+    Knob preDelay, space, damping, duck, duckRelease;   // size is on the front panel now
     juce::TextButton freeze { {} };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 

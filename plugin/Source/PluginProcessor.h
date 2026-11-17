@@ -30,6 +30,7 @@ namespace ParamIDs
     inline constexpr const char* duck        = "duck";
     inline constexpr const char* duckRelease = "duckRelease";
     inline constexpr const char* freeze      = "freeze";
+    inline constexpr const char* glitch      = "glitch";     // the stutter key under Tail
     // Top bar
     inline constexpr const char* bypass      = "bypass";
 
@@ -50,6 +51,10 @@ class RoomAudioProcessor : public juce::AudioProcessor,
                            private juce::AudioProcessorValueTreeState::Listener
 {
 public:
+    /** Intensity values up to this build the room (2 = twice the measured room, shown as 100 %);
+        above it, extreme mode. */
+    static constexpr float maxRoomIntensity = 2.0f;
+
     RoomAudioProcessor();
     ~RoomAudioProcessor() override;
 
@@ -135,6 +140,8 @@ public:
 
     /** Swap in a ROOM: only the room changes, every knob and LFO stays. */
     void applyRoom (const juce::ValueTree& roomTree, const juce::String& key);
+    /** Rooms you pick, drop or record start at intensity 50 % (the room as measured). */
+    void resetIntensityForNewRoom();
 
     juce::String getCurrentRoomKey() const { return currentRoomKey; }
     void setCurrentRoomKey (const juce::String& key) { currentRoomKey = key; }
@@ -179,7 +186,7 @@ public:
 
     /** "new preset": every knob, the eq and the lfos back to their defaults
         (Output and Bypass untouched). The loaded room stays. */
-    void resetToInit();
+    void resetToInit (bool keepPresetName = false);
 
     /** LFO -> knob assignments (edited by the UI, read by the audio thread). */
     room::Modulation modulation;
@@ -266,6 +273,7 @@ private:
     std::atomic<float>* duckParam = nullptr;
     std::atomic<float>* duckReleaseParam = nullptr;
     std::atomic<float>* freezeParam = nullptr;
+    std::atomic<float>* glitchParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};

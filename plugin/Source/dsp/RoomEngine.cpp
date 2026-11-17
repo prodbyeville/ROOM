@@ -35,6 +35,7 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
 
     preDelayBuf.setSize (numChans, (int) (maxPreDelayS * sr) + maxBlockSize + 4);
     preDelaySm.reset (sr, 0.1);
+    wetFx.prepare (sr, numChans);
 
     const auto histLen = (int) (freezeLengthS * sr);
     wetHistory.setSize (numChans, histLen);
@@ -57,6 +58,7 @@ void RoomEngine::reset()
     wetHistory.clear();
     historyWrite = 0;
     duckEnv = 0.0f;
+    wetFx.reset();
     frozenActive = false;
     freezeMix.setCurrentAndTargetValue (0.0f);
 }
@@ -237,8 +239,10 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
     const auto release = (float) std::exp (-1.0 / (juce::jlimit (0.05, 1.0, fx.duckReleaseMs * 0.001) * sampleRate));
     const auto duckAmount = juce::jlimit (0.0f, 1.0f, fx.duck);
 
-    // --- 3 + 4. blend by balance (= wet), freeze, duck, then wet/dry ----------
+    // --- 3 + 4. blend by balance (= wet), extreme / stutter, freeze, duck, then wet/dry
     const auto histLen = wetHistory.getNumSamples();
+    wetFx.setTargets (fx.extreme, fx.stutter);
+    const auto wetFxOn = ! wetFx.isIdle() || fx.extreme > 0.0f || fx.stutter;
     for (int i = 0; i < n; ++i)
     {
         const auto b = balanceSm.getNextValue();
@@ -253,11 +257,16 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
                                   : release * duckEnv + (1.0f - release) * level;
         const auto duckGain = 1.0f / (1.0f + kDuckDepth * duckAmount * duckEnv);
 
+        float wets[2] {};
+        for (int ch = 0; ch < chans; ++ch)
+            wets[ch] = (1.0f - b) * tonalBuf.getSample (ch, i) + b * kSpatialGain * spatialBuf.getSample (ch, i);
+        if (wetFxOn)
+            wetFx.processSample (wets, chans);
+
         for (int ch = 0; ch < chans; ++ch)
         {
             auto* io = buffer.getWritePointer (ch);
-            auto wet = (1.0f - b) * tonalBuf.getSample (ch, i)
-                     + b * kSpatialGain * spatialBuf.getSample (ch, i);
+            auto wet = wets[ch];
             if (! frozenActive)
                 wetHistory.setSample (ch, historyWrite, wet);
             else

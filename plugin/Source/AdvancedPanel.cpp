@@ -6,12 +6,12 @@
 AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
 {
     setupKnob (preDelay, ParamIDs::preDelay, "pre-delay", "0", "", "500");
-    setupKnob (size, ParamIDs::size, "size", "50", "", "200");
+    setupKnob (space, ParamIDs::space, "space", "mono", "", "wide");
     setupKnob (damping, ParamIDs::damping, "damping", "-", "0", "+");
     setupKnob (duck, ParamIDs::duck, "ducking", "0", "", "100");
     setupKnob (duckRelease, ParamIDs::duckRelease, "release", "50", "", "1k");
     preDelay.slider.setTooltip ("a gap before the room starts, so your dry sound stays clear.");
-    size.slider.setTooltip ("makes the room bigger or smaller.");
+    space.slider.setTooltip ("how wide the room sounds, from mono to wide.");
     damping.slider.setTooltip ("darker or brighter: how fast the highs die away in the room.");
     duck.slider.setTooltip ("turns the room down while you play and lets it bloom in the gaps.");
     duckRelease.slider.setTooltip ("how fast the room comes back after ducking.");
@@ -56,14 +56,14 @@ void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::Stri
 
 void AdvancedPanel::refreshModulation()
 {
-    for (auto* k : { &preDelay, &size, &damping, &duck, &duckRelease })
+    for (auto* k : { &preDelay, &space, &damping, &duck, &duckRelease })
         k->slider.refreshModulation();
 }
 
 void AdvancedPanel::showModulationTab (bool lfos)
 {
     lfoPanel.setVisible (lfos);
-    for (auto* k : { &preDelay, &size, &damping, &duck, &duckRelease })
+    for (auto* k : { &preDelay, &space, &damping, &duck, &duckRelease })
     {
         k->slider.setVisible (! lfos);
         k->label.setVisible (! lfos);
@@ -101,11 +101,13 @@ void AdvancedPanel::resized()
     const int rows[3] = { 128, 244, 360 };
     auto place = [&] (Knob& k, int col, int row)
     {
-        k.slider.setBounds (juce::Rectangle<int> (124, 112).withCentre ({ cols[col], rows[row] }));
+        // 100 wide: neighbouring columns must not overlap, or the knob on top steals
+        // clicks meant for the other one's lfo depth dot (it sits right of its knob).
+        k.slider.setBounds (juce::Rectangle<int> (100, 112).withCentre ({ cols[col], rows[row] }));
         k.label.setBounds (juce::Rectangle<int> (110, 18).withCentre ({ cols[col], rows[row] + 50 }));
     };
     place (preDelay, 0, 0);
-    place (size, 1, 0);
+    place (space, 1, 0);
     place (damping, 0, 1);
     place (duck, 1, 1);
     place (duckRelease, 0, 2);

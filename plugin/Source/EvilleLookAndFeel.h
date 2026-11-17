@@ -96,7 +96,14 @@ public:
     juce::Font getComboBoxFont (juce::ComboBox&) override { return Fonts::sans (13.0f); }
     juce::Font getTextButtonFont (juce::TextButton&, int height) override;
     juce::Font getSliderPopupFont (juce::Slider&) override { return Fonts::mono (12.0f); }
-    int getSliderPopupPlacement (juce::Slider&) override { return juce::BubbleComponent::above; }
+    // Above, except where there's no room above (the top bar's rings set "popupBelow").
+    int getSliderPopupPlacement (juce::Slider& s) override
+    {
+        return (bool) s.getProperties().getWithDefault ("popupBelow", false) ? juce::BubbleComponent::below
+                                                                              : juce::BubbleComponent::above;
+    }
+    /** The width drawCaps' letterspaced caps take (to centre groups like the record chip's dot + text). */
+    static float capsWidth (const juce::String&, float height, Fonts::Weight = Fonts::bold);
 
     /** A soft dark chip (buttons, keys); `on` lights its edge red. */
     static void drawChip (juce::Graphics&, juce::Rectangle<float>, bool on, bool over, bool down);

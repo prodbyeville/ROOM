@@ -115,6 +115,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     duckParam        = apvts.getRawParameterValue (ParamIDs::duck);
     duckReleaseParam = apvts.getRawParameterValue (ParamIDs::duckRelease);
     freezeParam      = apvts.getRawParameterValue (ParamIDs::freeze);
+    glitchParam      = apvts.getRawParameterValue (ParamIDs::glitch);
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
     for (int b = 0; b < room::tone::numEqBands; ++b)
     {
@@ -183,9 +184,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     auto pct = AudioParameterFloatAttributes().withStringFromValueFunction (
         [] (float v, int) { return String (juce::roundToInt (v * 100.0f)) + "%"; });
 
+    // Intensity: the stored value is the room's strength, 1 = the room as measured.
+    // Shown as 0..200 % with the measured room at 50 %: 0..100 % (0..2) is the room
+    // from nothing to twice as strong, 100..200 % (2..4) is extreme mode (WetFx).
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::intensity, 1 }, "Intensity",
-        NormalisableRange<float> (0.0f, 2.0f, 0.01f), 1.0f, pct));
+        NormalisableRange<float> (0.0f, 4.0f, 0.01f), 1.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction (
+            [] (float v, int) { return String (juce::roundToInt (v * 50.0f)) + "%"; })));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::mix, 1 }, "Dry/Wet",
@@ -251,6 +257,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     }
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::freeze, 1 }, "Freeze", false));
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::glitch, 1 }, "Glitch", false));   // stutters the room now and then
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
 
@@ -458,6 +466,9 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fx.duck = eff (ParamIDs::duck, duckParam);
         fx.duckReleaseMs = eff (ParamIDs::duckRelease, duckReleaseParam);
         fx.freeze = freezeParam->load() > 0.5f;
+        fx.extreme = juce::jlimit (0.0f, 1.0f, (eff (ParamIDs::intensity, intensityParam) - maxRoomIntensity)
+                                                   / (4.0f - maxRoomIntensity));
+        fx.stutter = glitchParam->load() > 0.5f;
 
         const auto baseBalance = balanceAutoParam->load() > 0.5f ? detectedBalance.load() : balanceParam->load();
         const auto balanceNow = juce::jlimit (0.0f, 1.0f, baseBalance + modOffset[(size_t) M::targetIndex (ParamIDs::balance)]);
@@ -581,7 +592,10 @@ float RoomAudioProcessor::effectiveForRebuild (const char* paramId) const
     // Not modulated: the knob itself. Modulated: what the audio thread last computed.
     const auto t = room::Modulation::targetIndex (paramId);
     const auto modulated = modulation.isAssigned (0, t) || modulation.isAssigned (1, t);
-    return modulated ? effValue[(size_t) t].load() : apvts.getRawParameterValue (paramId)->load();
+    const auto v = modulated ? effValue[(size_t) t].load() : apvts.getRawParameterValue (paramId)->load();
+    // The room itself stops growing at 100 % intensity (2x the measured room); above
+    // that, extreme mode acts in real time, so there's nothing more to rebuild.
+    return juce::String (paramId) == ParamIDs::intensity ? std::min (v, maxRoomIntensity) : v;
 }
 
 bool RoomAudioProcessor::rebuildTargetsMoved() const
@@ -621,7 +635,7 @@ void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
         set (ParamIDs::balanceAuto, maybe (0.5f) ? 1.0f : 0.0f);
         set (ParamIDs::balance, between (0.1f, 0.9f));
         set (ParamIDs::tail, between (0.6f, 4.0f));
-        set (ParamIDs::space, between (0.7f, 1.6f));
+        set (ParamIDs::size, between (0.7f, 1.5f));
     }
     if (mask & randomFinish)
     {
@@ -634,7 +648,7 @@ void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
     if (mask & randomAdvanced)
     {
         set (ParamIDs::preDelay, maybe (0.5f) ? between (5.0f, 120.0f) : 0.0f);
-        set (ParamIDs::size, between (0.7f, 1.5f));
+        set (ParamIDs::space, between (0.7f, 1.6f));
         set (ParamIDs::damping, between (-0.5f, 0.7f));
         set (ParamIDs::duck, maybe (0.3f) ? between (0.2f, 0.7f) : 0.0f);
         set (ParamIDs::duckRelease, between (120.0f, 600.0f));
@@ -656,14 +670,19 @@ void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
     }
 }
 
-void RoomAudioProcessor::resetToInit()
+void RoomAudioProcessor::resetToInit (bool keepPresetName)
 {
     for (auto* p : getParameters())
         if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (p))
             if (withId->paramID != ParamIDs::bypass && withId->paramID != ParamIDs::output)
+            {
+                p->beginChangeGesture();
                 p->setValueNotifyingHost (p->getDefaultValue());
+                p->endChangeGesture();
+            }
     clearModulation();
-    setCurrentPreset ({}, {});
+    if (! keepPresetName)   // "reset all knobs" keeps the studio's name; it then shows as modified
+        setCurrentPreset ({}, {});
 }
 
 void RoomAudioProcessor::clearModulation()
@@ -682,7 +701,7 @@ void RoomAudioProcessor::clearModulation()
 
 double RoomAudioProcessor::getTailLengthSeconds() const
 {
-    return tailParam->load() * std::max (1.0f, intensityParam->load()) + preDelayParam->load() * 0.001;
+    return tailParam->load() * std::max (1.0f, std::min (maxRoomIntensity, intensityParam->load())) + preDelayParam->load() * 0.001;
 }
 
 void RoomAudioProcessor::parameterChanged (const juce::String&, float)
@@ -693,10 +712,22 @@ void RoomAudioProcessor::parameterChanged (const juce::String&, float)
 //==============================================================================
 // Room handling
 
+void RoomAudioProcessor::resetIntensityForNewRoom()
+{
+    // A new room starts at 50 %: the room as measured.
+    if (auto* p = apvts.getParameter (ParamIDs::intensity))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->getDefaultValue());
+        p->endChangeGesture();
+    }
+}
+
 void RoomAudioProcessor::loadRoomFile (const juce::File& file)
 {
     // A dropped sound replaces the room. The STUDIO stays loaded and shows as
     // modified once the new room is in.
+    resetIntensityForNewRoom();
     currentRoomKey = {};
     {
         const juce::ScopedLock sl (analysisLock);
@@ -709,6 +740,7 @@ void RoomAudioProcessor::loadRoomFile (const juce::File& file)
 
 void RoomAudioProcessor::startRecording()
 {
+    resetIntensityForNewRoom();
     if (recordArmed.load() || recordBuf.getNumSamples() == 0)
         return;
     currentRoomKey = {};

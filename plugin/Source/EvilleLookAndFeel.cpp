@@ -608,3 +608,10 @@ void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
     g.setColour ((dark ? Colours::dustWhite : Colours::ink).withAlpha (over ? 1.0f : 0.8f));
     g.drawText (b.getButtonText(), r.withTrimmedLeft (3.0f), juce::Justification::centredLeft);
 }
+
+float EvilleLookAndFeel::capsWidth (const juce::String& text, float height, Fonts::Weight weight)
+{
+    juce::GlyphArrangement ga;
+    ga.addLineOfText (Fonts::sans (height, weight).withExtraKerningFactor (0.18f), text.toUpperCase(), 0.0f, 0.0f);
+    return ga.getBoundingBox (0, -1, true).getWidth();
+}

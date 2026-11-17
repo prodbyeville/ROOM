@@ -87,6 +87,7 @@ void PresetLibrary::rescan()
     unreadable = 0;
     root.getChildFile (userPack).createDirectory();
     loadFavorites();
+    loadQuick();
 
     // Built-in presets
     for (auto& xml : factoryXml)
@@ -357,6 +358,8 @@ bool PresetLibrary::updateMeta (const juce::String& key, const PresetMeta& meta,
         favoriteKeys.addIfNotAlreadyThere (newKeyOut);
         saveFavorites();
     }
+    if (newKeyOut != key)
+        renameQuick (key, newKeyOut);
     rescan();
     return true;
 }
@@ -372,6 +375,7 @@ bool PresetLibrary::remove (const juce::String& key)
         favoriteKeys.removeString (key);
         saveFavorites();
     }
+    renameQuick (key, {});
     rescan();
     return ok;
 }
@@ -449,6 +453,69 @@ void PresetLibrary::loadFavorites()
 void PresetLibrary::saveFavorites() const
 {
     writeFavoriteKeys (favoritesFile(), favoriteKeys);
+}
+
+void PresetLibrary::loadQuick()
+{
+    quickKeys.clear();
+    if (auto xml = juce::parseXML (quickFile()))
+        for (auto* e : xml->getChildWithTagNameIterator ("SLOT"))
+            if (quickKeys.size() < numQuickSlots)
+                quickKeys.add (e->getStringAttribute ("key"));
+    while (quickKeys.size() < numQuickSlots)
+        quickKeys.add ({});
+}
+
+void PresetLibrary::saveQuick() const
+{
+    juce::XmlElement xml ("ROOMS_QUICK");
+    for (auto& k : quickKeys)
+        xml.createNewChildElement ("SLOT")->setAttribute ("key", k);
+    quickFile().getParentDirectory().createDirectory();
+    juce::TemporaryFile temp (quickFile());
+    if (xml.writeTo (temp.getFile()))
+        temp.overwriteTargetFileWithTemporary();
+}
+
+void PresetLibrary::setQuickSlot (int slot, const juce::String& key)
+{
+    if (! juce::isPositiveAndBelow (slot, numQuickSlots))
+        return;
+    if (key.isNotEmpty())
+        for (auto& k : quickKeys)
+            if (k == key)
+                k = {};
+    quickKeys.set (slot, key);
+    saveQuick();
+}
+
+bool PresetLibrary::setQuick (const juce::String& key, bool on)
+{
+    if (! on)
+    {
+        renameQuick (key, {});
+        return true;
+    }
+    if (isQuick (key))
+        return true;
+    const auto free = quickKeys.indexOf ({});
+    if (free < 0)
+        return false;
+    setQuickSlot (free, key);
+    return true;
+}
+
+void PresetLibrary::renameQuick (const juce::String& from, const juce::String& to)
+{
+    auto changed = false;
+    for (auto& k : quickKeys)
+        if (k == from && from.isNotEmpty())
+        {
+            k = to;
+            changed = true;
+        }
+    if (changed)
+        saveQuick();
 }
 
 } // namespace room::presets

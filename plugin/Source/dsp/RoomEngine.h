@@ -2,6 +2,7 @@
 
 #include "RoomSynth.h"
 #include "PartitionedConvolver.h"
+#include "WetFx.h"
 #include <juce_dsp/juce_dsp.h>
 
 // REAL-TIME PROCESSING CHAIN (C++ port of room_engine/process.py)
@@ -28,6 +29,8 @@ struct RoomFx
     float duck = 0.0f;             // 0 .. 1
     float duckReleaseMs = 250.0f;  // 50 .. 1000
     bool freeze = false;
+    float extreme = 0.0f;          // 0 .. 1: Intensity above 100% (see WetFx)
+    bool stutter = false;          // the glitch key
 };
 
 class RoomEngine
@@ -74,6 +77,9 @@ private:
     juce::AudioBuffer<float> preDelayBuf;
     int preDelayWrite = 0;
     juce::SmoothedValue<float> preDelaySm;       // in samples
+
+    // Extreme intensity and the stutter glitch, on the wet sound
+    WetFx wetFx;
 
     // Ducking: envelope of the dry input
     float duckEnv = 0.0f;

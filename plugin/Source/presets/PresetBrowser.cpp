@@ -907,6 +907,26 @@ void PresetBrowser::showRowMenu (int row)
     {
         if (auto* x = lib().find (key)) { lib().setFavorite (key, ! x->favorite); updateRows(); }
     });
+    if (kind == Kind::room)
+    {
+        // Quick select: the six rooms on the stage
+        if (lib().isQuick (key))
+            m.addItem ("remove from quick select", [this, key] { lib().setQuick (key, false); });
+        else
+        {
+            juce::PopupMenu slots;
+            const auto current = lib().getQuickSlots();
+            for (int s = 0; s < room::presets::PresetLibrary::numQuickSlots; ++s)
+            {
+                const auto* in = lib().find (current[s]);
+                slots.addItem ("slot " + juce::String (s + 1) + (in != nullptr ? "  (replaces " + in->meta.name.toLowerCase() + ")" : juce::String()),
+                               [this, key, s] { lib().setQuickSlot (s, key); });
+            }
+            const auto hasFree = current.contains ({});
+            m.addItem ("add to quick select", hasFree, false, [this, key] { lib().setQuick (key, true); });
+            m.addSubMenu ("quick select slot", slots);
+        }
+    }
     if (! e.factory)
     {
         m.addItem (juce::String::fromUTF8 ("edit\xe2\x80\xa6"), [this, key]

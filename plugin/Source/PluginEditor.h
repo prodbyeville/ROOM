@@ -37,6 +37,8 @@ class LoadScreen : public juce::Component,
                    private juce::Timer
 {
 public:
+    /** Re-reads which rooms the stage shows (quick select, the loaded room, favourites). */
+    void refreshCards();
     explicit LoadScreen (RoomAudioProcessor&);
 
     void paint (juce::Graphics&) override;
@@ -64,7 +66,6 @@ public:
 private:
     void timerCallback() override;
     struct Card { juce::String key, name, decay, tone; juce::Rectangle<float> bounds; float depth = 0.0f; };
-    void refreshCards();
     void paintCard (juce::Graphics&, const Card&, float scale, float angle, float alpha, bool loaded, bool hot);
 
     RoomAudioProcessor& proc;
@@ -127,7 +128,7 @@ private:
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { randomize, record, save, advanced, menu };
+    enum class Icon { randomize, record, save, advanced, menu, display };
     IconButton (Icon i, const juce::String& tooltip);
     void paintButton (juce::Graphics&, bool over, bool down) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -256,7 +257,7 @@ public:
     /** Tips on / off (the main menu's "tips"). */
     bool areTipsEnabled() const { return tooltips != nullptr; }
     /** Menu actions (public for tests). */
-    void newPreset();
+    void newPreset (bool keepName = false);   // keepName: "reset all knobs"
     void showTour (int startStep = 0);
     /** Show the tour the first time the editor opens (tests switch it off). */
     static inline bool autoShowTour = true;
@@ -337,13 +338,17 @@ private:
     IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
     IconButton allRoomsButton { IconButton::Icon::save, "every ROOM: search, favourites, packs" };
     IconButton clearRoomButton { IconButton::Icon::save, "clear the room (the knobs stay)" };
+    IconButton quickButton { IconButton::Icon::display, "quick select: choose the six rooms on this stage" };
+    void showQuickMenu();
     RoomScreen roomScreen { proc };
     ToneScreen toneScreen { proc };
 
     // Shape the room
-    Knob intensity, balance, tail, space;
+    Knob intensity, balance, tail, size;   // space lives on the Advanced panel
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
+    juce::ToggleButton glitchKey { "glitch" };   // under tail: the stutter
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> glitchAttachment;
 
     // Advanced (black, the right side)
     AdvancedPanel advancedPanel { proc };

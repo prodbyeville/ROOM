@@ -38,6 +38,9 @@ public:
 
     /** Where the depth dot for this LFO sits (empty if not assigned or no room for it). */
     juce::Rectangle<float> depthDotBounds (int lfo) const;
+    /** Only the knob itself and its depth dots take clicks: a neighbour's dot can sit
+        inside this slider's bounds and must still reach that neighbour. */
+    bool hitTest (int x, int y) override;
 
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragEnter (const SourceDetails&) override { dropHighlight = true; repaint(); }

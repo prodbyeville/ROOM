@@ -90,7 +90,8 @@ juce::StringArray LoadScreen::cardKeys() const
 
 void LoadScreen::refreshCards()
 {
-    // Favourites first, then the rest by name; the loaded room is always there.
+    // Your quick-select rooms (slot order) first; any free places are filled with
+    // the loaded room, then favourites, then the rest by name.
     auto& lib = proc.getRoomLibrary();
     room::presets::PresetLibrary::Query q;
     const auto all = lib.query (q);
@@ -106,11 +107,15 @@ void LoadScreen::refreshCards()
                 return;
         next.push_back ({ e.key, e.meta.name, e.tags.decay, e.tags.tone, {}, 0.0f });
     };
-    if (auto* e = lib.find (current))
+    constexpr auto maxCards = (size_t) room::presets::PresetLibrary::numQuickSlots;
+    for (auto& k : lib.getQuickSlots())
+        if (auto* e = lib.find (k))
+            add (*e);
+    if (auto* e = lib.find (current); e != nullptr && next.size() < maxCards)
         add (*e);
     for (auto i : order)
     {
-        if (next.size() >= 8)
+        if (next.size() >= maxCards)
             break;
         add (lib.getEntries()[(size_t) i]);
     }
@@ -270,7 +275,7 @@ void LoadScreen::paint (juce::Graphics& g)
         g.reduceClipRegion (shape);
         if (auto field = Hw::asset ("ui_stage.jpg"); field.isValid())
         {
-            const auto amount = juce::jlimit (0.0f, 1.0f, liveParam (proc, ParamIDs::intensity).norm);
+            const auto amount = juce::jlimit (0.0f, 1.0f, liveParam (proc, ParamIDs::intensity).value * 0.5f);
             g.setOpacity (proc.getAnalysis().valid ? 0.07f + 0.78f * amount * amount : 0.05f);
             const auto fr = juce::Rectangle<float> (bounds.getWidth() * 1.05f, bounds.getWidth() * 1.05f * (float) field.getHeight() / (float) field.getWidth())
                                 .withCentre (bounds.getCentre().translated (0.0f, -bounds.getHeight() * 0.04f));
@@ -438,7 +443,7 @@ void RoomScreen::paint (juce::Graphics& g)
         return P { { centre.x + f * x1 / d, centre.y - f * y2 / d }, z2 };
     };
     const auto duckDim = 1.0f - 0.6f * duck.norm * levelSmooth;
-    const auto glow = 0.3f + 0.7f * juce::jlimit (0.0f, 1.0f, intensity.norm * 1.4f);
+    const auto glow = 0.3f + 0.7f * juce::jlimit (0.0f, 1.0f, intensity.value * 0.5f * 1.4f);
 
     // The floor the box stands on: a faint grid that turns with it.
     {
@@ -496,7 +501,8 @@ void RoomScreen::paint (juce::Graphics& g)
         for (int b = 0; b < nb; ++b)
         {
             decay[(size_t) b] = room::bandDecay (analysis.bandT60s[(size_t) b], analysis.bandCentersHz[(size_t) b],
-                                                 intensity.value, size.value, damping.value);
+                                                 std::min (intensity.value, RoomAudioProcessor::maxRoomIntensity),
+                                                 size.value, damping.value);
             maxT = std::max (maxT, decay[(size_t) b]);
         }
         {
@@ -758,10 +764,14 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
         {
             const auto on = getToggleState();
             const auto blink = ! on || (juce::Time::getMillisecondCounter() / 450) % 2 == 0;
-            const auto dot = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ r.getX() + 18.0f, r.getCentreY() });
+            // dot + gap + text, centred together like the other chips' text
+            const auto textW = EvilleLookAndFeel::capsWidth (chipText, 11.5f);
+            const auto groupW = 9.0f + 7.0f + textW;
+            const auto x0 = r.getCentreX() - groupW * 0.5f;
+            const auto dot = juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ x0 + 4.5f, r.getCentreY() });
             g.setColour (Colours::crimson.brighter (0.2f).withAlpha (blink ? 1.0f : 0.4f));
             g.fillEllipse (dot);
-            label.removeFromLeft (26.0f);
+            label = { x0 + 16.0f, r.getY(), textW + 4.0f, r.getHeight() };
         }
         EvilleLookAndFeel::drawCaps (g, chipText, label, 11.5f, latched ? Colours::redLight : ink,
                                      icon == Icon::record ? juce::Justification::centredLeft : juce::Justification::centred);
@@ -803,6 +813,15 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
             g.drawRoundedRectangle (box, 2.0f, 1.5f);
             g.fillRoundedRectangle (box.withTrimmedLeft (box.getWidth() * 0.64f).reduced (2.5f), 1.0f);
             return;
+        }
+        case Icon::display:
+        {
+            // a small screen on a stand
+            const auto scr = juce::Rectangle<float> (s * 1.3f, s * 0.86f).withCentre (c.translated (0.0f, -s * 0.12f));
+            g.drawRoundedRectangle (scr, 2.0f, 1.5f);
+            p.addLineSegment ({ c.x, scr.getBottom(), c.x, scr.getBottom() + s * 0.24f }, 0.0f);
+            p.addLineSegment ({ c.x - s * 0.34f, scr.getBottom() + s * 0.26f, c.x + s * 0.34f, scr.getBottom() + s * 0.26f }, 0.0f);
+            break;
         }
         case Icon::menu:
         {
@@ -1279,7 +1298,7 @@ void AboutOverlay::paint (juce::Graphics& g)
                          "play into the track. room measures how it decays in every band, the tone it puts on things and the notes "
                          "that ring. the cards are your rooms: click one to load it." },
         { "shape it", "intensity is how much of the room you hear. balance leans to its tone or its space. tail sets how long it "
-                      "rings, space how wide. advanced adds pre-delay, size, damping, ducking, freeze and two lfos you can drag onto any knob." },
+                      "rings, size how big the room is. glitch stutters it. advanced adds pre-delay, space, damping, ducking, freeze and two lfos you can drag onto any knob." },
         { "finish it", "a five-band eq, tape for warmth, and auto eq to even out the tone so the room sits in the mix." },
         { "keep it", "a ROOM is just the space. a STUDIO is the whole sound: the room, every knob and the lfos. both have packs, "
                      "favourites and tags." },
@@ -1332,6 +1351,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
               "how much of the room you hear against your dry sound.");
     setupKnob (output, ParamIDs::output, "out", 15.0f, "", "", "", false,
               "the final level, after everything.");
+    for (auto* k : { &mix, &output })
+        k->slider.getProperties().set ("popupBelow", true);   // the value bubble would be cut off above the window
 
     // --- Load / room / tone ---
     content.addAndMakeVisible (loadScreen);
@@ -1351,6 +1372,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     clearRoomButton.setChipText ("clear");
     loadScreen.addAndMakeVisible (clearRoomButton);
     clearRoomButton.onClick = [this] { proc.clearRoom(); };
+    loadScreen.addAndMakeVisible (quickButton);   // bottom right of the stage
+    quickButton.onClick = [this] { showQuickMenu(); };
     advancedButton.setChipText ("advanced");
     loadScreen.addAndMakeVisible (allRoomsButton);   // on the stage, so drops over it still reach the stage
     allRoomsButton.onClick = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
@@ -1360,13 +1383,18 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     // --- Shape the room ---
     setupKnob (intensity, ParamIDs::intensity, "intensity", 37.0f, "0", "100", "200", false,
-              "how much of the room you hear: its decay, tone and resonances. 100 is the room as measured.");
+              "how much of the room you hear: its decay, tone and resonances. 50 is the room as measured, 100 twice as strong, "
+              "and past 100 it turns extreme: shimmer and smear, then breaking up.");
     setupKnob (balance, ParamIDs::balance, "balance", 37.0f, "tone", "", "space", false,
               "tone vs space. left keeps the room's colour (its eq and rings), right keeps its sense of space (decay and width). auto uses what room detected.");
     setupKnob (tail, ParamIDs::tail, "tail", 37.0f, "0.3", "", "6 s", false,
               "how long the room rings out.");
-    setupKnob (space, ParamIDs::space, "space", 37.0f, "mono", "", "wide", false,
-              "how wide the room sounds, from mono to wide.");
+    setupKnob (size, ParamIDs::size, "size", 37.0f, "small", "", "big", false,
+              "how big the room is: shorter or longer decays, like a smaller or larger version of the same room.");
+    glitchKey.getProperties().set ("style", "lightkey");
+    glitchKey.setTooltip ("glitch: stutters the room now and then, repeating short slices of it");
+    content.addAndMakeVisible (glitchKey);
+    glitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::glitch, glitchKey);
     autoBalance.getProperties().set ("style", "lightkey");
     autoBalance.setTooltip ("auto: use the balance ROOM detected in the sound");
     content.addAndMakeVisible (autoBalance);
@@ -1498,10 +1526,10 @@ void RoomAudioProcessorEditor::setTipsEnabled (bool on)
         tooltips.reset();
 }
 
-void RoomAudioProcessorEditor::newPreset()
+void RoomAudioProcessorEditor::newPreset (bool keepName)
 {
-    proc.resetToInit();
-    for (auto* k : { &intensity, &balance, &tail, &space, &mix, &output, &tape, &autoEq })
+    proc.resetToInit (keepName);
+    for (auto* k : { &intensity, &balance, &tail, &size, &mix, &output, &tape, &autoEq })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
     content.repaint();
@@ -1515,9 +1543,9 @@ void RoomAudioProcessorEditor::showTour (int startStep)
         { stageArea.toNearestInt(), "load",
           "drop any sound here, or press record and play one. room listens for the space inside it: how it decays, the tone it adds, the notes that ring. the cards are your rooms: click one to load it." },
         { knobs, "shape",
-          "intensity is how much of that room you hear. balance leans to its tone or its space, tail sets how long it rings, space how wide." },
+          "intensity is how much of that room you hear (past 100 it goes extreme). balance leans to its tone or its space, tail sets how long it rings, size how big it is." },
         { finishArea.toNearestInt(), "finish",
-          "eq, tape and auto eq polish the result. advanced (top right) has pre-delay, size, ducking, freeze and two lfos." } });
+          "eq, tape and auto eq polish the result. advanced (top right) has pre-delay, space, ducking, freeze and two lfos." } });
     tour.showStep (startStep);
 }
 
@@ -1526,6 +1554,7 @@ void RoomAudioProcessorEditor::showMainMenu()
     const auto version = UpdateChecker::currentVersion();
     juce::PopupMenu m;
     m.addItem ("new preset", [this] { newPreset(); });
+    m.addItem ("reset all knobs", [this] { newPreset (true); });   // defaults, keeping the room and the studio's name
     m.addSeparator();
     m.addItem ("tips", true, areTipsEnabled(), [this] { setTipsEnabled (! areTipsEnabled()); });
     m.addItem ("show the tour", [this] { showTour(); });
@@ -1641,7 +1670,7 @@ void RoomAudioProcessorEditor::timerCallback()
     }
 
     // LFO assignments can change from presets or the right-click menu.
-    for (auto* k : { &intensity, &balance, &tail, &space, &mix, &output, &tape, &autoEq })
+    for (auto* k : { &intensity, &balance, &tail, &size, &mix, &output, &tape, &autoEq })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
 
@@ -1735,14 +1764,14 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
             }
     }
 
-    // Top bar dividers either side of out, like WARP's
+    // Top bar dividers: between the wet ring and the out label, and between the out ring and power
     g.setColour (Colours::moduleEdge);
-    for (auto x : { (float) output.slider.getX() - 8.0f, (float) bypassButton.getX() - 8.0f })
+    for (auto x : { (float) mix.slider.getBounds().getCentreX() + 25.0f, (float) bypassButton.getX() - 6.0f })
         g.drawLine (x, 24.0f, x, 52.0f, 1.0f);
 
     // Controls module: the dividers and titles (the values are drawn live)
     const auto sw = controlsArea.getWidth() / 4.0f;
-    const char* titles[4] = { "intensity", "balance", "tail", "space" };
+    const char* titles[4] = { "intensity", "balance", "tail", "size" };
     for (int i = 0; i < 4; ++i)
     {
         const auto sec = juce::Rectangle<float> (controlsArea.getX() + sw * (float) i, controlsArea.getY(), sw, controlsArea.getHeight());
@@ -1768,14 +1797,14 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
 void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
 {
     // The four big values, live (they follow the LFOs too)
-    Knob* ks[4] = { &intensity, &balance, &tail, &space };
+    Knob* ks[4] = { &intensity, &balance, &tail, &size };
     const auto sw = controlsArea.getWidth() / 4.0f;
     for (int i = 0; i < 4; ++i)
     {
         const auto x = controlsArea.getX() + sw * (float) i + 22.0f;
         const auto v = ks[i]->slider.getValue();
         auto text = ks[i] == &tail ? juce::String (v, v < 10.0 ? 1 : 0) + " s"
-                                   : juce::String (juce::roundToInt (v * 100.0)) + "%";
+                                   : juce::String (juce::roundToInt (v * (ks[i] == &intensity ? 50.0 : 100.0))) + "%";
         if (ks[i] == &balance)
             text = juce::String (juce::roundToInt ((autoBalance.getToggleState() ? proc.getDetectedBalance() : (float) balance.slider.getValue()) * 100.0f));
         const auto alpha = ks[i]->slider.isEnabled() || ks[i] == &balance ? 1.0f : 0.5f;
@@ -1821,10 +1850,11 @@ void RoomAudioProcessorEditor::layoutContent()
     presetBar.setBounds (196, keyY, 316, key);
     advancedButton.setBounds (522, keyY + 2, 104, key - 4);
     randomButton.setBounds (634, keyY + 2, key - 4, key - 4);
-    for (auto [k, x] : { std::pair { &mix, 730 }, { &output, 808 } })
+    // wet ring | out ring | power: each label sits left of its ring, a divider between the groups
+    for (auto [k, x] : { std::pair { &mix, 726 }, { &output, 814 } })
     {
         k->slider.setBounds (juce::Rectangle<int> (44, 44).withCentre ({ x, keyY + key / 2 }));
-        k->label.setBounds (juce::Rectangle<int> (40, 16).withCentre ({ x - 44, keyY + key / 2 }));
+        k->label.setBounds (juce::Rectangle<int> (40, 16).withCentre ({ x - 41, keyY + key / 2 }));
         k->label.setJustificationType (juce::Justification::centredRight);
     }
     bypassButton.setBounds (842, keyY + 2, 36, 36);
@@ -1837,19 +1867,22 @@ void RoomAudioProcessorEditor::layoutContent()
     roomSaveButton.setBounds (140, 14, 124, 32);
     clearRoomButton.setBounds (272, 14, 84, 32);
     allRoomsButton.setBounds (st.getWidth() - 16 - 120, 14, 120, 32);
+    quickButton.setBounds (st.getWidth() - 16 - 36, st.getHeight() - 12 - 32, 36, 32);
     toneScreen.setVisible (false);   // the tone now shows in the room's info (click the box)
 
     // --- Controls: one module, four sections ---
     const auto ca = controlsArea.toNearestInt();
     const int sw = ca.getWidth() / 4;
-    Knob* knobs[4] = { &intensity, &balance, &tail, &space };
+    Knob* knobs[4] = { &intensity, &balance, &tail, &size };
     for (int i = 0; i < 4; ++i)
     {
         const auto sec = juce::Rectangle<int> (ca.getX() + sw * i, ca.getY(), sw, ca.getHeight());
-        knobs[i]->slider.setBounds (juce::Rectangle<int> (104, 104).withCentre ({ sec.getRight() - 64, sec.getCentreY() }));
+        // 128 wide (to the section's edge) so the lfo depth dots fit right of the knob
+        knobs[i]->slider.setBounds (juce::Rectangle<int> (128, 104).withCentre ({ sec.getRight() - 64, sec.getCentreY() }));
         knobs[i]->label.setVisible (false);   // titled in the module's print
     }
     autoBalance.setBounds (ca.getX() + sw + 22, ca.getY() + 90, 64, 24);
+    glitchKey.setBounds (ca.getX() + sw * 2 + 22, ca.getY() + 90, 72, 24);
 
     // --- Advanced (the right side, full height) ---
     advancedPanel.setBounds (advancedArea.reduced (0.0f, 12.0f).withTrimmedRight (12.0f).toNearestInt().reduced (4));
@@ -1873,8 +1906,8 @@ void RoomAudioProcessorEditor::showRandomizeMenu()
 {
     using P = RoomAudioProcessor;
     const std::pair<int, const char*> groups[] = {
-        { P::randomRoom,     "room knobs  (intensity, balance, tail, space)" },
-        { P::randomAdvanced, "advanced  (pre-delay, size, damping, ducking)" },
+        { P::randomRoom,     "room knobs  (intensity, balance, tail, size)" },
+        { P::randomAdvanced, "advanced  (pre-delay, space, damping, ducking)" },
         { P::randomEq,       "eq bands" },
         { P::randomFinish,   "tape and auto eq" },
         { P::randomLfos,     "lfo settings  (shape, rate)" },
@@ -1901,6 +1934,49 @@ void RoomAudioProcessorEditor::showRandomizeMenu()
 //==============================================================================
 // STUDIOS (full presets, top bar) and ROOMS (the room only, tier 1)
 
+void RoomAudioProcessorEditor::showQuickMenu()
+{
+    // Six slots; each opens your rooms (favourites first, then by pack) to pick from.
+    auto& lib = proc.getRoomLibrary();
+    const auto slots = lib.getQuickSlots();
+    room::presets::PresetLibrary::Query q;
+    const auto all = lib.query (q);
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("quick select rooms");
+    for (int slot = 0; slot < room::presets::PresetLibrary::numQuickSlots; ++slot)
+    {
+        const auto* cur = lib.find (slots[slot]);
+        juce::PopupMenu pick;
+        juce::PopupMenu favs;
+        std::map<juce::String, juce::PopupMenu> packs;
+        for (auto i : all)
+        {
+            const auto& e = lib.getEntries()[(size_t) i];
+            const auto key = e.key;
+            auto item = [this, slot, key] { proc.getRoomLibrary().setQuickSlot (slot, key); loadScreen.refreshCards(); loadScreen.repaint(); };
+            const auto ticked = cur != nullptr && cur->key == key;
+            if (e.favorite)
+                favs.addItem (e.meta.name, true, ticked, item);
+            packs[e.pack.isEmpty() ? juce::String ("rooms") : e.pack].addItem (e.meta.name, true, ticked, item);
+        }
+        if (favs.getNumItems() > 0)
+        {
+            pick.addSubMenu ("favourites", favs);
+            pick.addSeparator();
+        }
+        for (auto& [name, sub] : packs)
+            pick.addSubMenu (name.toLowerCase(), sub);
+        pick.addSeparator();
+        pick.addItem ("empty this slot", cur != nullptr, false,
+                      [this, slot] { proc.getRoomLibrary().setQuickSlot (slot, {}); loadScreen.refreshCards(); loadScreen.repaint(); });
+        m.addSubMenu (juce::String (slot + 1) + "   " + (cur != nullptr ? cur->meta.name : juce::String ("(empty)")), pick);
+    }
+    m.addSeparator();
+    m.addItem ("tip: right-click a room in all rooms to add it", false, false, nullptr);
+    EvilleLookAndFeel::showMenu (m, quickButton);
+}
+
 void RoomAudioProcessorEditor::loadRoom (const juce::String& key)
 {
     auto& lib = proc.getRoomLibrary();
@@ -1913,6 +1989,8 @@ void RoomAudioProcessorEditor::loadRoom (const juce::String& key)
         EvilleLookAndFeel::showDialog (content, "rooms", "\"" + e->meta.name + "\" couldn't be read.", { "ok" });
         return;
     }
+    if (key != proc.getCurrentRoomKey())
+        proc.resetIntensityForNewRoom();
     proc.applyRoom (tree, key);
 }
 
