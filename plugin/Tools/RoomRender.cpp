@@ -180,7 +180,7 @@ int main (int argc, char* argv[])
     for (int tries = 0; tries < 400; ++tries)
     {
         io.clear();
-        engine.process (io, balance, mix, 0.0f);
+        engine.process (io, 1.0f - balance, balance, mix, 0.0f);   // tone = 1 - balance, space = balance
         if (engine.isRoomActive() && tries > 40)
             break;
         std::this_thread::sleep_for (std::chrono::milliseconds (5));
@@ -214,7 +214,7 @@ int main (int argc, char* argv[])
             if (pos < inLen)
                 io.copyFrom (ch, 0, target, srcCh, pos, std::min (len, inLen - pos));
         }
-        engine.process (io, balance, mix, 0.0f);
+        engine.process (io, 1.0f - balance, balance, mix, 0.0f);   // tone = 1 - balance, space = balance
         toneShaper.process (io, tape, bands);
         suppressor.process (io, autoEq);
         stereoWidth.process (io, space);
