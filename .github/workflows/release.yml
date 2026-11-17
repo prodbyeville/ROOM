@@ -1,0 +1,137 @@
+# Publishes a ROOM release to the download page (update.prodbyeville.com/room) and the
+# plugin's update check, the same way WARP's Server/release.ps1 does:
+#   room/ROOM-<version>-Windows-Setup.exe, room/ROOM-<version>-macOS.pkg, then room/latest.json
+# in the "warp-downloads" R2 bucket (latest.json goes last, so nobody is told about an
+# installer that isn't up yet).
+#
+# Run it from Actions -> "Release ROOM" -> Run workflow, on main, with release notes.
+# It takes the installers from the Windows and Mac builds of that exact commit (they must
+# both have finished green), so push, wait for the two builds, then run this.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   an API token with "Workers R2 Storage: Edit" on the account
+#   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account id (dashboard sidebar)
+
+name: Release ROOM
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What's new, separated by | (shown on the download page)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-room
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      BUCKET: warp-downloads
+      PRODUCT: room
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the secrets are set
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Version
+        id: v
+        run: |
+          VERSION=$(sed -nE 's/^project\(ROOM VERSION ([0-9.]+).*/\1/p' plugin/CMakeLists.txt)
+          [ -n "$VERSION" ] || { echo "::error::No version in plugin/CMakeLists.txt"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing ROOM $VERSION from $GITHUB_SHA"
+
+      - name: Find this commit's green builds
+        id: runs
+        run: |
+          find_run () {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$1" --commit "$GITHUB_SHA" \
+              --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty'
+          }
+          WIN=$(find_run build-windows.yml)
+          MAC=$(find_run build-macos.yml)
+          [ -n "$WIN" ] || { echo "::error::No successful Windows build for $GITHUB_SHA yet. Wait for it to finish (or re-run it), then run this again."; exit 1; }
+          if [ -z "$MAC" ]; then echo "::warning::No successful Mac build for $GITHUB_SHA: publishing Windows only."; fi
+          echo "win=$WIN" >> "$GITHUB_OUTPUT"
+          echo "mac=$MAC" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: ROOM-Windows
+          path: dist
+          run-id: ${{ steps.runs.outputs.win }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v5
+        if: steps.runs.outputs.mac != ''
+        with:
+          name: ROOM-macOS
+          path: dist
+          run-id: ${{ steps.runs.outputs.mac }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Upload the installers, then latest.json
+        env:
+          NOTES: ${{ github.event.inputs.notes }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          WIN_FILE="ROOM-$VERSION-Windows-Setup.exe"
+          MAC_FILE="ROOM-$VERSION-macOS.pkg"
+          [ -f "dist/$WIN_FILE" ] || { echo "::error::dist/$WIN_FILE missing (is the version in CMakeLists the one that was built?)"; ls -la dist; exit 1; }
+
+          put () { npx --yes wrangler@3 r2 object put "$BUCKET/$PRODUCT/$1" --file "$2" --content-type "$3" --remote; }
+
+          echo "Uploading $WIN_FILE"
+          put "$WIN_FILE" "dist/$WIN_FILE" "application/vnd.microsoft.portable-executable"
+          HAS_MAC=false
+          if [ -f "dist/$MAC_FILE" ]; then
+            echo "Uploading $MAC_FILE"
+            put "$MAC_FILE" "dist/$MAC_FILE" "application/octet-stream"
+            HAS_MAC=true
+          fi
+
+          # The same latest.json release.ps1 writes.
+          python3 - "$VERSION" "$WIN_FILE" "$MAC_FILE" "$HAS_MAC" > latest.json <<'PY'
+          import json, os, sys, datetime
+          version, win, mac, has_mac = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "true"
+          notes = [n.strip() for n in os.environ.get("NOTES", "").split("|") if n.strip()]
+          m = {
+              "version": version,
+              "file": win,
+              "size": os.path.getsize(os.path.join("dist", win)),
+              "date": datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+              "notes": notes,
+          }
+          if has_mac:
+              m["macFile"] = mac
+              m["macSize"] = os.path.getsize(os.path.join("dist", mac))
+          print(json.dumps(m, indent=2))
+          PY
+          cat latest.json
+          put "latest.json" "latest.json" "application/json"
+
+          echo "### Released ROOM $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows$( [ "$HAS_MAC" = true ] && echo ' + Mac'). Check https://update.prodbyeville.com/room" >> "$GITHUB_STEP_SUMMARY"
