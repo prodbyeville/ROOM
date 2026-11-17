@@ -1567,7 +1567,24 @@ void RoomAudioProcessorEditor::showMainMenu()
         m.addItem (std::move (item));
     }
     else
-        m.addItem ("check for updates", [this] { juce::URL (UpdateChecker::downloadPageUrl).launchInDefaultBrowser(); });
+        m.addItem ("check for updates", [this]
+        {
+            updates.checkNow ([this] (bool answered)
+            {
+                menuButton.setBadge (updates.isUpdateAvailable());
+                if (! answered)
+                    EvilleLookAndFeel::showDialog (content, "check for updates",
+                                                   "couldn't reach the update server. check your connection and try again.", { "ok" });
+                else if (updates.isUpdateAvailable())
+                    EvilleLookAndFeel::showDialog (content, "update available",
+                                                   "room v" + updates.getLatestVersion() + " is out (you have v" + UpdateChecker::currentVersion() + ").",
+                                                   { "download", "later" }, {},
+                                                   [this] (int r, const juce::String&) { if (r == 1) juce::URL (updates.getDownloadUrl()).launchInDefaultBrowser(); });
+                else
+                    EvilleLookAndFeel::showDialog (content, "up to date",
+                                                   "you have the latest room (v" + UpdateChecker::currentVersion() + ").", { "ok" });
+            });
+        });
     m.addItem ("visit website", [] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
     m.addItem ("get support", [version]
     {
@@ -1654,7 +1671,10 @@ void RoomAudioProcessorEditor::setAdvancedOpen (bool open)
 void RoomAudioProcessorEditor::timerCallback()
 {
     if (ticksUntilUpdateCheck > 0 && --ticksUntilUpdateCheck == 0)
-        updates.checkIfDue();
+    {
+        updates.checkIfDue();                  // does nothing if the last check is under 30 min old
+        ticksUntilUpdateCheck = 30 * 60 * 5;   // look again in 5 minutes while the window stays open
+    }
     // The tour waits for sign-in: while ROOM is locked it holds, then starts once the
     // sign-in page has gone (it used to give up if ROOM opened locked).
     if (proc.isLicenseLocked() && ticksUntilTour > 0)

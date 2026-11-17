@@ -3,7 +3,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_data_structures/juce_data_structures.h>
 
-// Checks for a newer ROOM, at most once a day, in the background. WARP's
+// Checks for a newer ROOM in the background: when a window opens and every so often
+// while one is open, at most once every 30 minutes (checkIntervalMs). WARP's
 // server (update.prodbyeville.com) publishes it with Server/release.ps1:
 //
 //   https://update.prodbyeville.com/room/latest.json
@@ -19,8 +20,12 @@ public:
     UpdateChecker();
     ~UpdateChecker() override;
 
-    /** Start a check if the last one is more than a day old. */
+    /** Start a check if the last one is more than checkIntervalMs old. */
     void checkIfDue();
+    /** "check for updates": ask the server now. `done` gets true if it answered. */
+    void checkNow (std::function<void (bool answered)> done);
+
+    static constexpr juce::int64 checkIntervalMs = (juce::int64) 30 * 60 * 1000;
 
     bool isUpdateAvailable() const { return isNewer (latestVersion, currentVersion()); }
     juce::String getLatestVersion() const { return latestVersion; }
@@ -47,5 +52,6 @@ private:
     juce::String latestVersion, downloadUrl;
     juce::CriticalSection lock;
     juce::String fetchedVersion, fetchedUrl;
-    bool fetched = false;
+    bool fetched = false, failed = false;
+    std::function<void (bool)> manualDone;   // message thread only
 };
