@@ -72,6 +72,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-ChildItem package
 
+      # The plugin on its own, to drop into C:\Program Files\Common Files\VST3 for testing.
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ROOM-VST3-Windows
+          # two paths, so the zip keeps the ROOM.vst3 folder itself (not just its contents)
+          path: |
+            package/ROOM.vst3
+            package/INSTALL.txt
+          if-no-files-found: error
+
       - uses: actions/upload-artifact@v5
         with:
           name: ROOM-Windows

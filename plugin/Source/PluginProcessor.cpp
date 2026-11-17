@@ -280,7 +280,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     {
         // Hz, but the knob runs the other way: left = 44.1 kHz (clean, off), right = 500 Hz
         // (crushed), on a log scale so the musical part isn't squeezed into the end.
-        constexpr float lo = 500.0f, hi = room::RateReducer::offHz;
+        static constexpr float lo = 500.0f, hi = room::RateReducer::offHz;   // static: usable in the lambdas without capture (MSVC)
         NormalisableRange<float> r (lo, hi,
             [] (float, float, float x) { return hi * std::pow (lo / hi, juce::jlimit (0.0f, 1.0f, x)); },
             [] (float, float, float v) { return std::log (juce::jlimit (lo, hi, v) / hi) / std::log (lo / hi); },
