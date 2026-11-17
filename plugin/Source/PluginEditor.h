@@ -1,7 +1,6 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "EqPanel.h"
 #include "AdvancedPanel.h"
 #include "EvilleLookAndFeel.h"
 #include "presets/PresetBrowser.h"
@@ -13,10 +12,10 @@
 //   +-------------------------------------------------+-------------+
 //   | [≡] room  [♥ studios / name < >][save] [randomize] | advanced    |
 //   |                  [advanced] (wet) (out) [bypass]|  knobs      |
-//   | ( load )        ( room )        ( tone )        |  freeze     |
-//   |  (intensity)  (balance)  (tail)  (space)        |             |
-//   +-------------------------------------------------+  lfo 1      |
-//   | finish   [ eq screen ]   (tape) (auto eq)  out  |  lfo 2      |
+//   |   the stage: the room box and the rooms around it | knobs, tape |
+//   |  intensity -> glitch (sync) | tone -> space (auto) | tail -> size |
+//   +-------------------------------------------------+  eq, lfos   |
+//   | noise [screen] -> level / follow   |  rate (Hz)    |             |
 //   +-------------------------------------------------+-------------+
 //
 // Dust-white console, black finish and advanced. Everything is laid out at
@@ -153,6 +152,38 @@ class BypassSwitch : public juce::Button
 public:
     BypassSwitch() : juce::Button ("bypass") { setClickingTogglesState (true); setTooltip ("bypass"); }
     void paintButton (juce::Graphics&, bool over, bool down) override;
+};
+
+/** Sync for the glitch: a small round push button on the glitch line, its core
+    glowing red while on (Warm Tone's little buttons). */
+class SyncDot : public juce::Button
+{
+public:
+    SyncDot() : juce::Button ("sync") { setClickingTogglesState (true); }
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+};
+
+/** NOISE: a small dark screen of drifting particles, a different texture for each
+    profile, livelier the louder the noise is set. The profile's name sits above it
+    with arrows; click the screen (or the name) for the list. */
+class NoiseScreen : public juce::Component,
+                    public juce::SettableTooltipClient,
+                    private juce::Timer
+{
+public:
+    explicit NoiseScreen (RoomAudioProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void step (int delta);
+    void showMenu();
+    /** Where the name and its arrows go (the editor lays them out above the screen). */
+    juce::TextButton prev { {} }, next { {} };
+
+private:
+    void timerCallback() override;
+    RoomAudioProcessor& proc;
+    juce::RangedAudioParameter* type = nullptr;
+    float phase = 0.0f;
 };
 
 /** The first-run tour: dims the window, lights up one area at a time and
@@ -313,11 +344,10 @@ private:
     // Fixed geometry (base coordinates): the top bar, then the stage, the
     // controls module and the bottom module; advanced pops out on the right.
     const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 772.0f };
-    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 400.0f };
-    const juce::Rectangle<float> controlsArea { 12.0f, 484.0f, 868.0f, 132.0f };
-    const juce::Rectangle<float> finishArea { 12.0f, 628.0f, 868.0f, 132.0f };
+    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 346.0f };
+    const juce::Rectangle<float> controlsArea { 12.0f, 430.0f, 868.0f, 170.0f };
+    const juce::Rectangle<float> finishArea { 12.0f, 612.0f, 868.0f, 148.0f };
     const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
-    juce::Point<float> finishLed, finishJack;
     juce::Image staticLayer;   // the window, the modules and their titles, at the window's pixel size
     float staticScale = 0.0f;
     void paintValues (juce::Graphics&);
@@ -338,24 +368,29 @@ private:
     IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
     IconButton allRoomsButton { IconButton::Icon::save, "every ROOM: search, favourites, packs" };
     IconButton clearRoomButton { IconButton::Icon::save, "clear the room (the knobs stay)" };
-    IconButton quickButton { IconButton::Icon::display, "quick select: choose the six rooms on this stage" };
-    void showQuickMenu();
     RoomScreen roomScreen { proc };
     ToneScreen toneScreen { proc };
 
-    // Shape the room
-    Knob intensity, balance, tail, size;   // space lives on the Advanced panel
+    // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
+    Knob intensity, tone, space, tail, size;   // tone and space are one parameter (balance), seen from both ends
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
-    juce::ToggleButton glitchKey { "glitch" };   // under tail: the stutter
+    juce::ToggleButton glitchKey { "glitch" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> glitchAttachment;
+    SyncDot syncDot;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
+    void paintSignalLines (juce::Graphics&);
+    /** The knob's centre in base coordinates (what the signal lines join). */
+    static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }
+    static float knobRadius (const Knob& k) { return (float) k.slider.getProperties()["knobRadius"]; }
 
     // Advanced (black, the right side)
     AdvancedPanel advancedPanel { proc };
 
-    // Finish (black, along the bottom)
-    EqPanel eqPanel { proc };
-    Knob tape, autoEq;
+    // The bottom module: noise -> level / follow | rate
+    NoiseScreen noiseScreen { proc };
+    Knob noiseLevel, noiseFollow, rate;
+    juce::Rectangle<int> noiseNameArea;
 
     // STUDIOS (top bar) and ROOMS (load)
     void loadPreset (const juce::String& key);

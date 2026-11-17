@@ -6,9 +6,10 @@
 
 // The black "advanced" section bolted to the right of the console:
 //   advanced
-//   (pre-delay) (space)
-//   (damping)   (ducking)
-//   (release)   [freeze]
+//   (pre-delay) (damping) (width)
+//   (ducking)   (release) [freeze]
+//   (tape)      (auto eq)
+//   eq   (low) (lo mid) (mid) (hi mid) (high)
 //   [ lfo 1 card ]
 //   [ lfo 2 card ]   (down to the bottom of the unit)
 // Clicking an LFO card swaps the knobs and cards for that LFO's full controls
@@ -38,13 +39,16 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
     void setupKnob (Knob&, const juce::String& id, const juce::String& name,
-                    const juce::String& lo, const juce::String& mid, const juce::String& hi);
+                    const juce::String& lo, const juce::String& mid, const juce::String& hi, float radius = 20.0f);
 
     RoomAudioProcessor& proc;
-    Knob preDelay, space, damping, duck, duckRelease;   // size is on the front panel now
+    Knob preDelay, space, damping, duck, duckRelease, tape, autoEq;   // "space" shows as width
+    Knob eqGain[room::tone::numEqBands];
+    std::vector<Knob*> allKnobs();
     juce::TextButton freeze { {} };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 
     LfoCard card1 { proc, 0 }, card2 { proc, 1 };
+    int eqTop = 336, lfoTop = 440;
     LfoPanel lfoPanel;
 };

@@ -80,6 +80,39 @@ private:
 };
 
 //==============================================================================
+/** ROOMS browser: the six quick-select slots (the rooms on the stage), as cards
+    along the top. Click a filled slot to load it; click an empty one, then a room
+    in the list, to fill it; right-click a slot to set it to the selected room or
+    clear it. */
+class QuickSlotStrip : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit QuickSlotStrip (PresetLibrary& l) : lib (l) {}
+
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+
+    /** The slot waiting for a room (-1 = none). */
+    int getArmed() const { return armed; }
+    void disarm() { armed = -1; repaint(); }
+    /** Put this room in the armed slot. Returns true if a slot was waiting. */
+    bool fillArmed (const juce::String& key);
+
+    std::function<void (const juce::String& key)> onLoad;
+    std::function<juce::String()> selectedKey;   // the room selected in the list
+    std::function<void()> onChange;
+
+    juce::Rectangle<float> slotBounds (int slot) const;
+
+private:
+    int slotAt (juce::Point<float>) const;
+    PresetLibrary& lib;
+    int armed = -1, hover = -1;
+};
+
+//==============================================================================
 class PresetBrowser : public juce::Component,
                       private juce::TableListBoxModel
 {
@@ -157,7 +190,8 @@ private:
     juce::TextButton filtersButton { "filters" }, folderButton, pathButton;
     juce::Rectangle<int> sidebarArea, detailArea;
 
-    // List
+    // List (ROOMS: the quick-select slots above it)
+    QuickSlotStrip quickSlots { lib() };
     juce::TableListBox table { "LIBRARY", this };
     std::vector<int> rows;
 

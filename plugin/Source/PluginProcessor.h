@@ -30,7 +30,13 @@ namespace ParamIDs
     inline constexpr const char* duck        = "duck";
     inline constexpr const char* duckRelease = "duckRelease";
     inline constexpr const char* freeze      = "freeze";
-    inline constexpr const char* glitch      = "glitch";     // the stutter key under Tail
+    inline constexpr const char* glitch      = "glitch";     // the stutter key (linked to Intensity)
+    inline constexpr const char* glitchSync  = "glitchSync"; // stutter in time with the host
+    // Bottom module
+    inline constexpr const char* noiseType   = "noiseType";
+    inline constexpr const char* noiseLevel  = "noiseLevel";
+    inline constexpr const char* noiseFollow = "noiseFollow";
+    inline constexpr const char* rate        = "rate";       // sample-rate reduction on the room, Hz
     // Top bar
     inline constexpr const char* bypass      = "bypass";
 
@@ -167,10 +173,10 @@ public:
     /** What Randomize touches (right-click the Randomize button to choose). */
     enum RandomizeGroup
     {
-        randomRoom     = 1 << 0,   // Intensity, Balance, Tail, Space
-        randomAdvanced = 1 << 1,   // Pre-delay, Size, Damping, Ducking, Release
+        randomRoom     = 1 << 0,   // Intensity, Tone / Space, Tail, Size
+        randomAdvanced = 1 << 1,   // Pre-delay, Width, Damping, Ducking, Release
         randomEq       = 1 << 2,   // EQ band gains
-        randomFinish   = 1 << 3,   // Tape, Auto EQ
+        randomFinish   = 1 << 3,   // Tape, Auto EQ (noise and rate are never randomized)
         randomLfos     = 1 << 4,   // LFO shape / rate / sync / division (not what they're assigned to)
         randomDefault  = randomRoom | randomAdvanced | randomEq | randomFinish,
         randomAll      = randomDefault | randomLfos
@@ -242,6 +248,8 @@ private:
     room::ToneShaper toneShaper;
     room::ResonanceSuppressor suppressor;
     room::StereoWidth stereoWidth;
+    juce::SharedResourcePointer<room::NoiseBank> noiseBank;
+    room::NoisePlayer noise;
     juce::SmoothedValue<float> outputGain;
 
     // Bypass: a latency-matched copy of the input, crossfaded in.
@@ -274,6 +282,11 @@ private:
     std::atomic<float>* duckReleaseParam = nullptr;
     std::atomic<float>* freezeParam = nullptr;
     std::atomic<float>* glitchParam = nullptr;
+    std::atomic<float>* glitchSyncParam = nullptr;
+    std::atomic<float>* noiseTypeParam = nullptr;
+    std::atomic<float>* noiseLevelParam = nullptr;
+    std::atomic<float>* noiseFollowParam = nullptr;
+    std::atomic<float>* rateParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
     std::atomic<float>* eqGainParam[room::tone::numEqBands] {};

@@ -36,6 +36,7 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     preDelayBuf.setSize (numChans, (int) (maxPreDelayS * sr) + maxBlockSize + 4);
     preDelaySm.reset (sr, 0.1);
     wetFx.prepare (sr, numChans);
+    rate.prepare (sr);
 
     const auto histLen = (int) (freezeLengthS * sr);
     wetHistory.setSize (numChans, histLen);
@@ -59,6 +60,7 @@ void RoomEngine::reset()
     historyWrite = 0;
     duckEnv = 0.0f;
     wetFx.reset();
+    rate.reset();
     frozenActive = false;
     freezeMix.setCurrentAndTargetValue (0.0f);
 }
@@ -241,8 +243,12 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
 
     // --- 3 + 4. blend by balance (= wet), extreme / stutter, freeze, duck, then wet/dry
     const auto histLen = wetHistory.getNumSamples();
-    wetFx.setTargets (fx.extreme, fx.stutter);
+    wetFx.setTargets (fx.extreme, fx.stutter, fx.glitchAmount, fx.glitchSync);
+    wetFx.setTransport (fx.hasPpq, fx.ppq, fx.bpm);
     const auto wetFxOn = ! wetFx.isIdle() || fx.extreme > 0.0f || fx.stutter;
+    const auto rateOn = ! RateReducer::isOff (fx.rateHz);
+    if (! rateOn)
+        rate.reset();
     for (int i = 0; i < n; ++i)
     {
         const auto b = balanceSm.getNextValue();
@@ -262,6 +268,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float balance, float
             wets[ch] = (1.0f - b) * tonalBuf.getSample (ch, i) + b * kSpatialGain * spatialBuf.getSample (ch, i);
         if (wetFxOn)
             wetFx.processSample (wets, chans);
+        if (rateOn)
+            rate.processSample (wets, chans, fx.rateHz);
 
         for (int ch = 0; ch < chans; ++ch)
         {

@@ -16,6 +16,9 @@
 //   STUTTER (the glitch key): every so often it grabs a short slice of the
 //     room and repeats it a few times, sometimes chopped; between stutters the
 //     room passes through. Switching it off finishes the current repeat.
+//     How much follows Intensity (`glitchAmount` 0..1): more often, more repeats
+//     and more chopping as it goes up. Sync: slices are 1/32 to 1/8 notes at the
+//     host tempo and every stutter starts on a 1/16 (free timing without a tempo).
 //
 // Everything is preallocated in prepare(); process() never allocates.
 
@@ -31,7 +34,7 @@ public:
         chans = juce::jlimit (1, maxCh, channels);
         histLen = std::max (64, (int) (2.0 * sr));
         hist.setSize (maxCh, histLen);
-        stutterBuf.setSize (maxCh, std::max (64, (int) (0.4 * sr)));
+        stutterBuf.setSize (maxCh, std::max (64, (int) (1.0 * sr)));
         shimmerWin = std::max (64, (int) (0.09 * sr));
         reverseLen = std::max (64, (int) (0.35 * sr));
         extremeSm.reset (sr, 0.08);
@@ -60,10 +63,21 @@ public:
     }
 
     /** Sample by sample: `wet` holds one sample per channel and is changed in place. */
-    void setTargets (float extremeAmount, bool stutterOn)
+    void setTargets (float extremeAmount, bool stutterOn, float glitchAmount = 0.25f, bool syncOn = false)
     {
         extremeSm.setTargetValue (juce::jlimit (0.0f, 1.0f, extremeAmount));
         stutterSm.setTargetValue (stutterOn ? 1.0f : 0.0f);
+        amount = juce::jlimit (0.0f, 1.0f, glitchAmount);
+        sync = syncOn;
+    }
+
+    /** The host's position at the start of the next slice (for Sync). */
+    void setTransport (bool hasPosition, double ppqNow, double bpmNow)
+    {
+        bpm = juce::jlimit (20.0, 999.0, bpmNow);
+        hasPpq = hasPosition;
+        if (hasPosition)
+            ppq = ppqNow;
     }
 
     bool isIdle() const
@@ -77,6 +91,8 @@ public:
         const auto ch = std::min (numCh, chans);
         const auto e = extremeSm.getNextValue();
         const auto st = stutterSm.getNextValue();
+        lastPpq = ppq;
+        ppq += bpm / 60.0 / sampleRate;
 
         // Keep a short history of the (incoming) room for the shimmer / reverse / stutter reads.
         for (int c = 0; c < ch; ++c)
@@ -175,16 +191,31 @@ private:
         {
             for (int c = 0; c < ch; ++c)
                 wet[c] *= roomUnder;
-            if (st >= 0.999f && --stutterWait <= 0)
+            const auto synced = sync && hasPpq;
+            if (stutterWait > 0)
+                --stutterWait;
+            // Synced, a stutter waits for the next 1/16 to start.
+            const auto onGrid = ! synced || std::floor (ppq * 4.0) != std::floor (lastPpq * 4.0);
+            if (st >= 0.999f && stutterWait <= 0 && onGrid)
             {
                 // Grab a slice that just went by and start repeating it.
-                static constexpr double lens[] = { 0.045, 0.06, 0.09, 0.125, 0.18 };
-                sliceLen = std::min (stutterBuf.getNumSamples(), (int) (lens[rng.nextInt (5)] * sampleRate));
+                if (sync)
+                {
+                    static constexpr double beats[] = { 0.125, 0.25, 0.25, 0.5 };   // 1/32, 1/16, 1/16, 1/8
+                    sliceLen = (int) std::round (beats[rng.nextInt (4)] * 60.0 / bpm * sampleRate);
+                }
+                else
+                {
+                    static constexpr double lens[] = { 0.045, 0.06, 0.09, 0.125, 0.18 };
+                    sliceLen = (int) (lens[rng.nextInt (5)] * sampleRate);
+                }
+                sliceLen = juce::jlimit (16, stutterBuf.getNumSamples(), sliceLen);
                 for (int c = 0; c < ch; ++c)
                     for (int k = 0; k < sliceLen; ++k)
                         stutterBuf.setSample (c, k, readHist (c, (double) (sliceLen - k)));
-                repeatsLeft = 2 + rng.nextInt (5);
-                chopped = rng.nextFloat() < 0.4f;
+                // More intensity: more repeats, more chopping.
+                repeatsLeft = 2 + rng.nextInt (2 + juce::roundToInt (amount * 6.0f));
+                chopped = rng.nextFloat() < 0.25f + 0.35f * amount;
                 slicePos = 0;
                 stutterActive = true;
             }
@@ -207,7 +238,12 @@ private:
             if (--repeatsLeft <= 0 || st < 0.5f)
             {
                 stutterActive = false;
-                stutterWait = (int) ((0.25 + rng.nextFloat() * 1.1) * sampleRate);
+                // More intensity: shorter gaps between stutters.
+                const auto spread = 1.6 - 1.3 * (double) amount;
+                if (sync)
+                    stutterWait = (int) (60.0 / bpm * 0.25 * sampleRate * (1.0 + rng.nextInt (1 + juce::roundToInt (12.0 * spread))));
+                else
+                    stutterWait = (int) ((0.25 + rng.nextFloat() * 1.1) * spread * sampleRate);
             }
         }
     }
@@ -231,6 +267,9 @@ private:
     bool stutterActive = false, chopped = false;
     float roomUnder = 1.0f;
     int stutterWait = 0, sliceLen = 1, slicePos = 0, repeatsLeft = 0;
+    float amount = 0.25f;
+    bool sync = false, hasPpq = false;
+    double ppq = 0.0, lastPpq = 0.0, bpm = 120.0;
 };
 
 } // namespace room

@@ -75,7 +75,6 @@ target_sources(ROOM PRIVATE
     ${ROOM_DSP_SOURCES}
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
-    Source/EqPanel.cpp
     Source/AdvancedPanel.cpp
     Source/ModSlider.cpp
     Source/LfoPanel.cpp
@@ -106,6 +105,21 @@ juce_add_binary_data(ROOM_UiAssets
     HEADER_NAME UiAssets.h
     NAMESPACE UiAssets
     SOURCES ${ROOM_UI_ASSETS})
+
+# Noise profiles (the bottom module): every WAV / AIFF in Resources/Noise, compiled in and
+# listed by file name ("01 vinyl.wav" -> "vinyl"). Empty folder: built-in placeholders.
+file(GLOB ROOM_NOISE_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.wav"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aif"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aiff")
+if (ROOM_NOISE_FILES)
+    juce_add_binary_data(ROOM_NoiseFiles
+        HEADER_NAME NoiseFiles.h
+        NAMESPACE NoiseFiles
+        SOURCES ${ROOM_NOISE_FILES})
+    target_link_libraries(ROOM PRIVATE ROOM_NoiseFiles)
+    target_compile_definitions(ROOM PUBLIC ROOM_HAS_NOISE_FILES=1)
+endif()
 
 target_link_libraries(ROOM
     PRIVATE

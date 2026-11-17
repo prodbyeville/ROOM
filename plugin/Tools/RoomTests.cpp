@@ -1762,6 +1762,215 @@ namespace
         }
     }
 
+    void testNoiseRateToneSync (const juce::File& root)
+    {
+        std::cout << "noise / rate / tone + space / glitch sync / quick slots\n";
+        juce::MessageManager::getInstance();
+
+        // --- Noise loops are seamless ---
+        {
+            room::NoiseBank bank;
+            check (bank.size() == room::NoiseBank::names().size() && bank.size() >= 1, "every noise profile has a loop");
+            float worstJump = 0.0f, typical = 0.0f;
+            for (int i = 0; i < bank.size(); ++i)
+            {
+                const auto& a = bank.get (i).audio;
+                const auto n = a.getNumSamples();
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    double sum = 0.0;
+                    for (int k = 1; k < n; ++k)
+                        sum += std::abs (a.getSample (ch, k) - a.getSample (ch, k - 1));
+                    const auto mean = (float) (sum / (n - 1));
+                    typical = std::max (typical, mean);
+                    // the wrap (last sample -> first) should look like any other step
+                    worstJump = std::max (worstJump, std::abs (a.getSample (ch, 0) - a.getSample (ch, n - 1)) / std::max (1.0e-6f, mean));
+                }
+            }
+            check (worstJump < 8.0f, "noise loops wrap without a click (" + juce::String (worstJump, 1) + "x a normal step)");
+
+            // A sine with a non-whole number of cycles: the crossfade hides the seam.
+            juce::AudioBuffer<float> sine (2, 44100);
+            for (int k = 0; k < 44100; ++k)
+                for (int ch = 0; ch < 2; ++ch)
+                    sine.setSample (ch, k, std::sin (2.0f * juce::MathConstants<float>::pi * 3.37f * (float) k / 44100.0f));
+            const auto loop = room::NoiseBank::makeSeamless (sine, 4000);
+            const auto seam = std::abs (loop.getSample (0, 0) - loop.getSample (0, loop.getNumSamples() - 1));
+            check (seam < 0.01f, "the loop crossfade joins the end to the start smoothly");
+        }
+
+        // --- Noise in the plugin: off = untouched; follow 1 = silent without input ---
+        {
+            Rig rig (root);
+            std::vector<float> hit ((size_t) (0.2 * Rig::sr), 0.0f);
+            for (size_t i = 0; i < 2000; ++i) hit[i] = 0.5f * std::sin ((float) i * 0.05f);
+            {
+                // Level 0: the noise stage is idle and adds nothing at all.
+                room::NoiseBank bank;
+                room::NoisePlayer np;
+                np.setBank (&bank);
+                np.prepare (Rig::sr, 512);
+                np.setTargets (0, 0.0f, 0.5f);
+                juce::AudioBuffer<float> b (2, 512);
+                for (int i = 0; i < 512; ++i) for (int ch = 0; ch < 2; ++ch) b.setSample (ch, i, hit[(size_t) i]);
+                juce::AudioBuffer<float> copy (b);
+                np.trackInput (b, 512);
+                if (! np.isIdle()) np.addTo (b, 512);
+                float d = 0.0f;
+                for (int i = 0; i < 512; ++i) d = std::max (d, std::abs (b.getSample (0, i) - copy.getSample (0, i)));
+                check (np.isIdle() && d == 0.0f, "noise at level 0 is off and adds nothing");
+            }
+            setParam (rig.proc, ParamIDs::noiseLevel, 0.8f);
+            setParam (rig.proc, ParamIDs::noiseFollow, 0.0f);
+            rig.proc.reset();
+            std::vector<float> silence ((size_t) (0.5 * Rig::sr), 0.0f);
+            const auto always = rig.run (silence, 1.0);
+            check (rmsDb (always, 0.5, 1.4) > -50.0, "noise at follow 0 plays with nothing coming in (" + juce::String (rmsDb (always, 0.5, 1.4), 1) + " dB)");
+            setParam (rig.proc, ParamIDs::noiseFollow, 1.0f);
+            rig.proc.reset();
+            const auto followed = rig.run (silence, 1.5);
+            check (rmsDb (followed, 1.0, 1.9) < rmsDb (always, 0.5, 1.4) - 30.0, "noise at follow 1 stays quiet while nothing comes in");
+            std::vector<float> loud ((size_t) (1.0 * Rig::sr));
+            for (size_t i = 0; i < loud.size(); ++i) loud[i] = 0.3f * std::sin ((float) i * 0.03f);
+            setParam (rig.proc, ParamIDs::mix, 0.0f);   // only the dry and the noise
+            rig.proc.reset();
+            const auto playing = rig.run (loud, 0.5);
+            float noiseOnTop = 0.0f;
+            for (size_t i = (size_t) (0.3 * Rig::sr); i < (size_t) (0.9 * Rig::sr); ++i)
+                noiseOnTop = std::max (noiseOnTop, std::abs (playing[i] - loud[i]));
+            check (noiseOnTop > 0.003f, "noise at follow 1 plays while sound comes in");
+            setParam (rig.proc, ParamIDs::mix, 1.0f);
+            setParam (rig.proc, ParamIDs::noiseLevel, 0.0f);
+        }
+
+        // --- Rate: off at 44.1 kHz, a hard sample-and-hold below ---
+        {
+            RoomAudioProcessor pp;
+            pp.setPresetRoot (root);
+            auto* p = pp.apvts.getParameter (ParamIDs::rate);
+            check (p->getDefaultValue() == 0.0f && p->getText (0.0f, 16) == "44.1 kHz", "rate starts at 44.1 kHz with the knob all the way left (off)");
+            check (p->convertFrom0to1 (1.0f) < 600.0f && p->convertFrom0to1 (0.5f) < 6000.0f, "turning rate right crushes (down to 500 Hz, log scale)");
+            room::RateReducer rr;
+            rr.prepare (48000.0);
+            int changes = 0;
+            float last = 0.0f;
+            for (int i = 0; i < 48000; ++i)
+            {
+                float x[2] = { std::sin ((float) i * 0.07f), 0.0f };
+                rr.processSample (x, 2, 2000.0f);
+                if (x[0] != last) ++changes;
+                last = x[0];
+            }
+            check (std::abs (changes - 2000) <= 2, "rate at 2 kHz holds each value for 1/2000 s (" + juce::String (changes) + " steps a second)");
+            check (room::RateReducer::isOff (44100.0f) && ! room::RateReducer::isOff (44000.0f), "only the top of rate is off");
+        }
+
+        // --- Glitch: more with intensity, and on the 1/16s when synced ---
+        {
+            auto run = [] (float amount, bool sync, int& firstDiff)
+            {
+                room::WetFx fx;
+                fx.prepare (48000.0, 2);
+                fx.setTargets (0.0f, true, amount, sync);
+                fx.setTransport (true, 0.0, 120.0);
+                juce::Random r (9);
+                int changed = 0;
+                firstDiff = -1;
+                for (int i = 0; i < 48000 * 10; ++i)
+                {
+                    const auto in = r.nextFloat() - 0.5f;
+                    float w[2] = { in, in };
+                    fx.processSample (w, 2);
+                    if (w[0] != in) { ++changed; if (firstDiff < 0) firstDiff = i; }
+                }
+                return changed;
+            };
+            int f = 0;
+            const auto low = run (0.1f, false, f), high = run (1.0f, false, f);
+            check (high > low * 1.3, "glitch stutters more as intensity goes up (" + juce::String (low) + " -> " + juce::String (high) + " samples)");
+            run (0.6f, true, f);
+            const auto sixteenths = (double) f / 48000.0 * 2.0 * 4.0;   // 120 bpm: 2 beats a second, 4 sixteenths a beat
+            check (f > 0 && std::abs (sixteenths - std::round (sixteenths)) < 0.01, "synced glitch starts on a 1/16 (at " + juce::String (sixteenths, 3) + ")");
+        }
+
+        // --- Tone and space are one balance; the editor's new pieces ---
+        {
+            RoomAudioProcessor p;
+            p.setPresetRoot (root);
+            RoomAudioProcessorEditor ed (p);
+            ed.setSize (RoomAudioProcessorEditor::closedWidth, RoomAudioProcessorEditor::baseHeight);
+            ModSlider* toneKnob = nullptr;
+            std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+            {
+                if (auto* m = dynamic_cast<ModSlider*> (&c); m != nullptr && m->getTooltip().startsWith ("how much of the room's tone"))
+                    toneKnob = m;
+                for (auto* child : c.getChildren()) find (*child);
+            };
+            find (ed);
+            check (toneKnob != nullptr, "the tone knob is on the front panel");
+            if (toneKnob != nullptr)
+            {
+                toneKnob->setValue (0.3, juce::sendNotificationSync);
+                check (std::abs (paramValue (p, ParamIDs::balance) - 0.7f) < 0.011f, "turning tone to 30 sets space to 70 (one balance)");
+            }
+            check (findChild<NoiseScreen> (ed) != nullptr, "the noise screen is in the bottom module");
+            check (findChild<SyncDot> (ed) != nullptr, "the glitch has its sync button");
+            auto* noiseType = dynamic_cast<juce::AudioParameterChoice*> (p.apvts.getParameter (ParamIDs::noiseType));
+            check (noiseType != nullptr && noiseType->choices.size() == room::NoiseBank::names().size(), "the noise list matches the profiles");
+            if (auto* scr = findChild<NoiseScreen> (ed); scr != nullptr && noiseType != nullptr)
+            {
+                scr->step (1);
+                check (noiseType->getIndex() == 1, "the arrows step through the noise profiles");
+                scr->step (-2);
+                check (noiseType->getIndex() == noiseType->choices.size() - 1, "and wrap around");
+            }
+            auto* adv = p.apvts.getParameter (ParamIDs::space);
+            check (adv->getName (32) == "Width", "advanced space is called width");
+        }
+
+        // --- Quick slots: your own packs come before the factory rooms on the stage ---
+        {
+            RoomAudioProcessor p;
+            p.setPresetRoot (root);
+            auto& rooms = p.getRoomLibrary();
+            const auto factoryKey = rooms.getEntries().front().key;
+            const auto tree = rooms.loadPreset (*rooms.find (factoryKey));
+            rooms.getRoot().getChildFile ("Eville").createDirectory();
+            room::presets::save (tree, rooms.getRoot().getChildFile ("Eville").getChildFile ("Stairwell" + juce::String (room::presets::extensionFor (Kind::room))));
+            rooms.rescan();
+            const auto* mine = rooms.find ("Eville/Stairwell");
+            check (mine != nullptr, "a room in a user pack (Eville) is in the library");
+            for (int s = 0; s < room::presets::PresetLibrary::numQuickSlots; ++s)
+                rooms.setQuickSlot (s, {});
+            RoomAudioProcessorEditor ed (p);
+            if (auto* stage = findChild<LoadScreen> (ed))
+            {
+                stage->refreshCards();
+                check (stage->cardKeys().contains ("Eville/Stairwell"), "user-pack rooms show on the stage before factory ones");
+                rooms.setQuickSlot (3, "Eville/Stairwell");
+                stage->refreshCards();
+                check (stage->cardKeys()[0] == "Eville/Stairwell", "a user-pack room in a quick slot is on the stage");
+                rooms.setQuickSlot (3, {});
+            }
+            auto* strip = findChild<room::presets::QuickSlotStrip> (ed);
+            check (strip != nullptr, "the rooms browser has the six quick-select slots");
+            if (strip != nullptr)
+            {
+                strip->setBounds (0, 0, 600, 66);
+                juce::MouseEvent click (juce::Desktop::getInstance().getMainMouseSource(), strip->slotBounds (1).getCentre(),
+                                        {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, strip, strip, juce::Time::getCurrentTime(),
+                                        strip->slotBounds (1).getCentre(), juce::Time::getCurrentTime(), 1, false);
+                strip->mouseUp (click);
+                check (strip->getArmed() == 1, "clicking an empty slot waits for a room");
+                strip->fillArmed ("Eville/Stairwell");
+                check (rooms.getQuickSlots()[1] == "Eville/Stairwell" && strip->getArmed() < 0, "the next room clicked fills it");
+                rooms.setQuickSlot (1, {});
+            }
+            rooms.getRoot().getChildFile ("Eville").deleteRecursively();
+            rooms.rescan();
+        }
+    }
+
     void testStage (const juce::File& root, const juce::File& roomSource)
     {
         std::cout << "Stage\n";
@@ -2148,8 +2357,8 @@ namespace
             {
             drawMenu ({ 600, 100 }, { { "randomize", 1, false, false }, { "randomize now", 0, false, false }, { "", 2, false, false },
                                       { "what moves", 1, false, false },
-                                      { "room knobs  (intensity, balance, tail, size)", 0, true, true },
-                                      { "advanced  (pre-delay, space, damping, ducking)", 0, true, false },
+                                      { "room knobs  (intensity, tone / space, tail, size)", 0, true, true },
+                                      { "advanced  (pre-delay, width, damping, ducking)", 0, true, false },
                                       { "eq bands", 0, false, false }, { "tape and auto eq", 0, false, false },
                                       { "lfo settings  (shape, rate)", 0, true, false }, { "", 2, false, false },
                                       { "all", 0, false, false }, { "none", 0, false, false }, { "back to default", 0, false, false } });
@@ -2327,6 +2536,7 @@ int main (int argc, char* argv[])
     testModulationUi (root);
     testStage (root, roomSource);
     testIntensityGlitchQuick (root, roomSource);
+    testNoiseRateToneSync (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

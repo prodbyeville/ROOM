@@ -116,6 +116,12 @@ RoomAudioProcessor::RoomAudioProcessor()
     duckReleaseParam = apvts.getRawParameterValue (ParamIDs::duckRelease);
     freezeParam      = apvts.getRawParameterValue (ParamIDs::freeze);
     glitchParam      = apvts.getRawParameterValue (ParamIDs::glitch);
+    glitchSyncParam  = apvts.getRawParameterValue (ParamIDs::glitchSync);
+    noiseTypeParam   = apvts.getRawParameterValue (ParamIDs::noiseType);
+    noiseLevelParam  = apvts.getRawParameterValue (ParamIDs::noiseLevel);
+    noiseFollowParam = apvts.getRawParameterValue (ParamIDs::noiseFollow);
+    rateParam        = apvts.getRawParameterValue (ParamIDs::rate);
+    noise.setBank (&noiseBank.get());
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
     for (int b = 0; b < room::tone::numEqBands; ++b)
     {
@@ -216,7 +222,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
             [] (float v, int) { return String (v, 2) + " s"; })));
 
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::space, 1 }, "Space",
+        ParameterID { ParamIDs::space, 1 }, "Width",   // shown as "width" (the id stays "space": saved in projects)
         NormalisableRange<float> (0.0f, 2.0f, 0.01f), 1.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
         {
@@ -259,6 +265,37 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         ParameterID { ParamIDs::freeze, 1 }, "Freeze", false));
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::glitch, 1 }, "Glitch", false));   // stutters the room now and then
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::glitchSync, 1 }, "Glitch Sync", false));
+
+    // --- Bottom module: noise and rate -------------------------------------
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { ParamIDs::noiseType, 1 }, "Noise Type", room::NoiseBank::names(), 0));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::noiseLevel, 1 }, "Noise Level",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::noiseFollow, 1 }, "Noise Follow",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    {
+        // Hz, but the knob runs the other way: left = 44.1 kHz (clean, off), right = 500 Hz
+        // (crushed), on a log scale so the musical part isn't squeezed into the end.
+        constexpr float lo = 500.0f, hi = room::RateReducer::offHz;
+        NormalisableRange<float> r (lo, hi,
+            [] (float, float, float x) { return hi * std::pow (lo / hi, juce::jlimit (0.0f, 1.0f, x)); },
+            [] (float, float, float v) { return std::log (juce::jlimit (lo, hi, v) / hi) / std::log (lo / hi); },
+            [] (float, float, float v)
+            {
+                v = juce::jlimit (lo, hi, v);
+                return v > hi - 50.0f ? hi : (v >= 1000.0f ? std::round (v / 10.0f) * 10.0f : std::round (v));
+            });
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::rate, 1 }, "Rate", r, hi,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            {
+                return v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (juce::roundToInt (v)) + " Hz";
+            })));
+    }
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
 
@@ -346,6 +383,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     toneShaper.prepare (sampleRate, getTotalNumOutputChannels());
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
     stereoWidth.prepare (sampleRate);
+    noise.prepare (sampleRate, std::max (1, samplesPerBlock));
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -469,12 +507,28 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fx.extreme = juce::jlimit (0.0f, 1.0f, (eff (ParamIDs::intensity, intensityParam) - maxRoomIntensity)
                                                    / (4.0f - maxRoomIntensity));
         fx.stutter = glitchParam->load() > 0.5f;
+        // Glitch follows Intensity: 0..200 % on the knob -> 0..1
+        fx.glitchAmount = juce::jlimit (0.0f, 1.0f, eff (ParamIDs::intensity, intensityParam) / 4.0f);
+        fx.glitchSync = glitchSyncParam->load() > 0.5f;
+        fx.hasPpq = blockHasPpq && blockPlaying;
+        fx.ppq = blockPpq + start / std::max (1.0, currentSampleRate.load()) * blockBpm / 60.0;
+        fx.bpm = blockBpm;
+        fx.rateHz = eff (ParamIDs::rate, rateParam);
 
         const auto baseBalance = balanceAutoParam->load() > 0.5f ? detectedBalance.load() : balanceParam->load();
         const auto balanceNow = juce::jlimit (0.0f, 1.0f, baseBalance + modOffset[(size_t) M::targetIndex (ParamIDs::balance)]);
 
-        // Room -> Tape -> EQ -> Auto EQ -> Space -> output gain
+        // Noise follows what comes in, so look at the input before the room.
+        noise.setTargets (juce::roundToInt (noiseTypeParam->load()), eff (ParamIDs::noiseLevel, noiseLevelParam),
+                          eff (ParamIDs::noiseFollow, noiseFollowParam));
+        const auto noiseOn = ! noise.isIdle();
+        if (noiseOn)
+            noise.trackInput (part, len);
+
+        // Room (with rate) -> Noise -> Tape -> EQ -> Auto EQ -> Width -> output gain
         engine.process (part, balanceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
+        if (noiseOn)
+            noise.addTo (part, len);
 
         room::EqBand bands[room::tone::numEqBands];
         getEqBands (bands);

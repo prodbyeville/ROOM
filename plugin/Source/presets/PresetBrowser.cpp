@@ -353,6 +353,14 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     search.onEscapeKey = [this] { if (onClose) onClose(); };
     addAndMakeVisible (search);
 
+    if (kind == Kind::room)
+    {
+        addAndMakeVisible (quickSlots);
+        quickSlots.onLoad = [this] (const juce::String& key) { if (onLoad) onLoad (key); table.repaint(); };
+        quickSlots.selectedKey = [this] { return selectedKey; };
+        quickSlots.onChange = [this] { table.repaint(); };
+    }
+
     styleLabel (countLabel, {}, 12.0f, false);
     countLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (countLabel);
@@ -677,6 +685,12 @@ void PresetBrowser::cellClicked (int row, int col, const juce::MouseEvent& e)
         showRowMenu (row);
         return;
     }
+    // A quick-select slot waiting for a room: this click fills it (and doesn't load).
+    if (kind == Kind::room && quickSlots.getArmed() >= 0 && row >= 0 && row < (int) rows.size())
+    {
+        quickSlots.fillArmed (lib().getEntries()[(size_t) rows[(size_t) row]].key);
+        return;
+    }
     // WARP: a click loads it and the browser stays open, so you can keep browsing.
     if (col != colFav && row >= 0 && row < (int) rows.size() && onLoad)
     {
@@ -911,7 +925,7 @@ void PresetBrowser::showRowMenu (int row)
     {
         // Quick select: the six rooms on the stage
         if (lib().isQuick (key))
-            m.addItem ("remove from quick select", [this, key] { lib().setQuick (key, false); });
+            m.addItem ("remove from quick select", [this, key] { lib().setQuick (key, false); quickSlots.repaint(); });
         else
         {
             juce::PopupMenu slots;
@@ -920,10 +934,10 @@ void PresetBrowser::showRowMenu (int row)
             {
                 const auto* in = lib().find (current[s]);
                 slots.addItem ("slot " + juce::String (s + 1) + (in != nullptr ? "  (replaces " + in->meta.name.toLowerCase() + ")" : juce::String()),
-                               [this, key, s] { lib().setQuickSlot (s, key); });
+                               [this, key, s] { lib().setQuickSlot (s, key); quickSlots.repaint(); });
             }
             const auto hasFree = current.contains ({});
-            m.addItem ("add to quick select", hasFree, false, [this, key] { lib().setQuick (key, true); });
+            m.addItem ("add to quick select", hasFree, false, [this, key] { lib().setQuick (key, true); quickSlots.repaint(); });
             m.addSubMenu ("quick select slot", slots);
         }
     }
@@ -1121,6 +1135,11 @@ void PresetBrowser::resized()
     search.setIndents (34, 12);
     search.setColour (juce::TextEditor::outlineColourId, Colours::crimson.withAlpha (0.8f));   // WARP: the accent edge
     right.removeFromTop (8);
+    if (kind == Kind::room)
+    {
+        quickSlots.setBounds (right.removeFromTop (66));
+        right.removeFromTop (10);
+    }
     table.setBounds (right);
 
     auto footer = footerArea().reduced (0, 10);
@@ -1135,6 +1154,142 @@ void PresetBrowser::layoutSidebar (juce::Rectangle<int> s)
 {
     for (auto* b : packButtons)
         b->setBounds (s.removeFromTop (54));
+}
+
+//==============================================================================
+// Quick select slots (ROOMS browser)
+
+juce::Rectangle<float> QuickSlotStrip::slotBounds (int slot) const
+{
+    const auto n = PresetLibrary::numQuickSlots;
+    const auto gap = 8.0f;
+    const auto w = ((float) getWidth() - gap * (float) (n - 1)) / (float) n;
+    return { (w + gap) * (float) slot, 0.0f, w, (float) getHeight() };
+}
+
+int QuickSlotStrip::slotAt (juce::Point<float> p) const
+{
+    for (int i = 0; i < PresetLibrary::numQuickSlots; ++i)
+        if (slotBounds (i).contains (p))
+            return i;
+    return -1;
+}
+
+bool QuickSlotStrip::fillArmed (const juce::String& key)
+{
+    if (armed < 0)
+        return false;
+    lib.setQuickSlot (armed, key);
+    armed = -1;
+    repaint();
+    if (onChange) onChange();
+    return true;
+}
+
+void QuickSlotStrip::mouseMove (const juce::MouseEvent& e)
+{
+    const auto h = slotAt (e.position);
+    if (h != hover)
+    {
+        hover = h;
+        const auto* entry = h >= 0 ? lib.find (lib.getQuickSlots()[h]) : nullptr;
+        setTooltip (h < 0 ? juce::String()
+                    : entry != nullptr ? "slot " + juce::String (h + 1) + ": click to load, right-click to change"
+                                       : "slot " + juce::String (h + 1) + ": click, then click a room to put it here");
+        repaint();
+    }
+}
+
+void QuickSlotStrip::mouseUp (const juce::MouseEvent& e)
+{
+    const auto slot = slotAt (e.position);
+    if (slot < 0 || ! e.mouseWasClicked())
+        return;
+    const auto key = lib.getQuickSlots()[slot];
+    const auto* entry = lib.find (key);
+
+    if (e.mods.isPopupMenu())
+    {
+        const auto sel = selectedKey ? selectedKey() : juce::String();
+        const auto* selEntry = lib.find (sel);
+        juce::PopupMenu m;
+        m.addSectionHeader ("slot " + juce::String (slot + 1));
+        if (entry != nullptr)
+            m.addItem ("load " + entry->meta.name.toLowerCase(), [this, key] { if (onLoad) onLoad (key); });
+        m.addItem (selEntry != nullptr ? "put " + selEntry->meta.name.toLowerCase() + " here" : juce::String ("put the selected room here"),
+                   selEntry != nullptr && sel != key, false, [this, slot, sel]
+                   {
+                       lib.setQuickSlot (slot, sel);
+                       repaint();
+                       if (onChange) onChange();
+                   });
+        m.addItem ("choose a room for this slot", [this, slot] { armed = slot; repaint(); });
+        m.addSeparator();
+        m.addItem ("clear this slot", entry != nullptr, false, [this, slot]
+        {
+            lib.setQuickSlot (slot, {});
+            repaint();
+            if (onChange) onChange();
+        });
+        EvilleLookAndFeel::showMenu (m, *this);
+        return;
+    }
+
+    if (entry != nullptr && armed != slot)
+    {
+        armed = -1;
+        if (onLoad) onLoad (key);
+    }
+    else
+        armed = armed == slot ? -1 : slot;   // empty: wait for a room from the list
+    repaint();
+}
+
+void QuickSlotStrip::paint (juce::Graphics& g)
+{
+    const auto keys = lib.getQuickSlots();
+    for (int i = 0; i < PresetLibrary::numQuickSlots; ++i)
+    {
+        const auto r = slotBounds (i).reduced (0.5f);
+        const auto* entry = lib.find (keys[i]);
+        const auto isArmed = armed == i;
+        g.setColour (entry != nullptr ? juce::Colour (0xff1c1818) : juce::Colour (0xff121010));
+        g.fillRoundedRectangle (r, 7.0f);
+        if (hover == i)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.04f));
+            g.fillRoundedRectangle (r, 7.0f);
+        }
+        g.setColour (isArmed ? Colours::crimson.brighter (0.2f) : Colours::moduleEdge);
+        if (entry == nullptr && ! isArmed)
+        {
+            // an empty slot: a dashed edge
+            juce::Path edge, dashed;
+            edge.addRoundedRectangle (r, 7.0f);
+            const float dash[] = { 3.0f, 3.0f };
+            juce::PathStrokeType (1.0f).createDashedStroke (dashed, edge, dash, 2);
+            g.fillPath (dashed);
+        }
+        else
+            g.drawRoundedRectangle (r, 7.0f, isArmed ? 1.5f : 1.0f);
+
+        auto inner = r.reduced (10.0f, 8.0f);
+        EvilleLookAndFeel::drawCaps (g, "slot " + juce::String (i + 1), inner.removeFromTop (13.0f), 9.0f,
+                                     isArmed ? Colours::redLight : Colours::textDim, juce::Justification::centredLeft);
+        g.setFont (Fonts::sans (13.0f, Fonts::bold));
+        g.setColour (entry != nullptr ? Colours::dustWhite : Colours::textDim.withAlpha (0.8f));
+        const auto name = isArmed ? juce::String ("pick a room")
+                        : entry != nullptr ? entry->meta.name.toLowerCase() : juce::String ("empty");
+        g.drawFittedText (name, inner.removeFromTop (20.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
+        if (entry != nullptr)
+        {
+            g.setFont (Fonts::sans (10.5f));
+            g.setColour (Colours::textDim);
+            const auto sub = juce::StringArray { entry->pack.toLowerCase(), entry->tags.decay.toLowerCase() }
+                                 .joinIntoString (juce::String::fromUTF8 ("  \xc2\xb7  "));
+            g.drawFittedText (sub, inner.toNearestInt(), juce::Justification::topLeft, 1, 0.85f);
+        }
+    }
 }
 
 //==============================================================================
@@ -1179,15 +1334,13 @@ void PresetBar::setPreset (const juce::String& n, bool mod, bool fav, bool canFa
 
 juce::Rectangle<int> PresetBar::nameArea() const
 {
-    auto r = getLocalBounds();
-    r.removeFromRight (getHeight() + 8);
-    return r;
+    return getLocalBounds();
 }
 
 void PresetBar::paint (juce::Graphics& g)
 {
-    // WARP's preset box: one dark box with the name in caps, then the heart, a
-    // divider and the arrows; save sits outside it as a bare icon.
+    // One dark box: the name in caps, then save and the heart side by side, a
+    // divider and the arrows.
     const auto box = nameArea().toFloat().reduced (0.5f);
     g.setColour (juce::Colour (0xff141212));
     g.fillRoundedRectangle (box, 6.0f);
@@ -1200,7 +1353,7 @@ void PresetBar::paint (juce::Graphics& g)
     }
 
     const auto title = (name.isEmpty() ? juce::String ("no preset") : name) + (modified && name.isNotEmpty() ? " *" : "");
-    auto text = box.withRight ((float) heart.getX() - 6.0f).withTrimmedLeft (12.0f);
+    auto text = box.withRight ((float) save.getX() - 4.0f).withTrimmedLeft (12.0f);
     g.setFont (Fonts::sans (13.5f, Fonts::bold).withExtraKerningFactor (0.18f));
     g.setColour (Colours::dustWhite.withAlpha (name.isEmpty() ? 0.6f : 1.0f));
     g.drawFittedText (title.toUpperCase(), text.toNearestInt(), juce::Justification::centred, 1, 0.8f);
@@ -1228,24 +1381,22 @@ void PresetBar::paint (juce::Graphics& g)
 
 void PresetBar::paintOverChildren (juce::Graphics& g)
 {
-    // The save icon: a floppy, drawn bare
-    const auto sb = save.getBounds().toFloat().withSizeKeepingCentre (20.0f, 20.0f).translated (0.0f, save.isDown() ? 0.6f : 0.0f);
-    g.setColour (Colours::dustWhite.withAlpha (save.isMouseOver() ? 1.0f : 0.85f));
-    g.drawRoundedRectangle (sb, 2.5f, 1.6f);
+    // The save icon: a small floppy beside the heart
+    const auto sb = save.getBounds().toFloat().withSizeKeepingCentre (14.0f, 14.0f).translated (0.0f, save.isDown() ? 0.6f : 0.0f);
+    g.setColour (Colours::dustWhite.withAlpha (save.isMouseOver() ? 1.0f : 0.75f));
+    g.drawRoundedRectangle (sb, 2.0f, 1.3f);
     g.fillRect (sb.getX() + sb.getWidth() * 0.27f, sb.getY(), sb.getWidth() * 0.46f, sb.getHeight() * 0.32f);
-    g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.56f, sb.getWidth() * 0.56f, sb.getHeight() * 0.44f, 1.3f);
+    g.drawRect (sb.getX() + sb.getWidth() * 0.22f, sb.getY() + sb.getHeight() * 0.56f, sb.getWidth() * 0.56f, sb.getHeight() * 0.44f, 1.1f);
 }
 
 void PresetBar::resized()
 {
-    auto r = getLocalBounds();
-    save.setBounds (r.removeFromRight (getHeight()));
-    r.removeFromRight (8);
-    auto inner = r.reduced (6, 6);
+    auto inner = getLocalBounds().reduced (6, 6);
     next.setBounds (inner.removeFromRight (24));
     prev.setBounds (inner.removeFromRight (24));
     inner.removeFromRight (8);
-    heart.setBounds (inner.removeFromRight (26));
+    heart.setBounds (inner.removeFromRight (24));
+    save.setBounds (inner.removeFromRight (24));
 }
 
 void PresetBar::mouseUp (const juce::MouseEvent& e)
