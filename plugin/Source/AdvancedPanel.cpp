@@ -16,15 +16,6 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     setupKnob (autoEq, ParamIDs::autoEq, "auto eq", "0", "", "100");
     tape.slider.setTooltip ("warm tape saturation on the way out.");
     autoEq.slider.setTooltip ("gently evens out the tone so the room sits in the mix.");
-    const char* bandNames[] = { "low", "lo mid", "mid", "hi mid", "high" };
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-    {
-        setupKnob (eqGain[b], ParamIDs::eqGain (b), bandNames[b], "", "", "", 13.0f);
-        eqGain[b].slider.getProperties().set ("bipolar", true);
-        eqGain[b].slider.setDoubleClickReturnValue (true, 0.0);
-        eqGain[b].label.setFont (Fonts::sans (11.0f));
-        eqGain[b].slider.setTooltip (juce::String ("eq: ") + bandNames[b] + " band, -12 to +12 db (double-click: 0)");
-    }
     damping.slider.setTooltip ("darker or brighter: how fast the highs die away in the room.");
     duck.slider.setTooltip ("turns the room down while you play and lets it bloom in the gaps.");
     duckRelease.slider.setTooltip ("how fast the room comes back after ducking.");
@@ -47,10 +38,7 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
 
 std::vector<AdvancedPanel::Knob*> AdvancedPanel::allKnobs()
 {
-    std::vector<Knob*> v { &preDelay, &space, &damping, &duck, &duckRelease, &tape, &autoEq };
-    for (auto& k : eqGain)
-        v.push_back (&k);
-    return v;
+    return { &preDelay, &space, &damping, &duck, &duckRelease, &tape, &autoEq };
 }
 
 void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::String& name,
@@ -110,9 +98,6 @@ void AdvancedPanel::paint (juce::Graphics& g)
         g.setColour (Colours::dustWhite);
         g.drawText ("freeze", juce::Rectangle<int> (80, 18).withCentre ({ freeze.getBounds().getCentreX(), duckRelease.label.getBounds().getCentreY() }),
                     juce::Justification::centred);
-        // The eq row
-        Hw::drawGroove (g, { 18.0f, (float) eqTop }, { (float) getWidth() - 18.0f, (float) eqTop }, true);
-        EvilleLookAndFeel::drawCaps (g, "eq", { 22.0f, (float) eqTop + 10.0f, 60.0f, 14.0f }, 10.5f, Colours::dustWhite.withAlpha (0.85f));
         Hw::drawGroove (g, { 18.0f, (float) lfoTop - 14.0f }, { (float) getWidth() - 18.0f, (float) lfoTop - 14.0f }, true);
     }
 }
@@ -120,7 +105,7 @@ void AdvancedPanel::paint (juce::Graphics& g)
 void AdvancedPanel::resized()
 {
     // Three columns: the room (pre-delay, damping, width), the dynamics (ducking,
-    // release, freeze), the finish (tape, auto eq); then the eq bands, then the lfos.
+    // release, freeze), the finish (tape, auto eq); then the lfos.
     const auto w = getWidth();
     const int cols[3] = { w / 6, w / 2, w * 5 / 6 };
     const int rows[3] = { 112, 196, 280 };
@@ -140,19 +125,9 @@ void AdvancedPanel::resized()
     place (tape, 0, 2);
     place (autoEq, 1, 2);
 
-    // The eq: five small bipolar knobs in a row
-    eqTop = 336;
-    const auto eqY = eqTop + 50;
-    const auto step = (w - 36) / room::tone::numEqBands;
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-    {
-        const auto x = 18 + step * b + step / 2;
-        eqGain[b].slider.setBounds (juce::Rectangle<int> (step + 8, 36).withCentre ({ x, eqY }));
-        eqGain[b].label.setBounds (juce::Rectangle<int> (step + 4, 14).withCentre ({ x, eqY + 26 }));
-    }
+    lfoTop = rows[2] + 76;
 
     // The two LFO cards fill the rest, down to the bottom of the unit.
-    lfoTop = eqY + 54;
     const int bottom = getHeight() - 30, gap = 14;
     const int h = (bottom - lfoTop - gap) / 2;
     card1.setBounds (18, lfoTop, w - 36, h);

@@ -3,6 +3,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cmath>
 #include <vector>
+#include "Biquad.h"
 
 #if ROOM_HAS_NOISE_FILES
  #include "NoiseFiles.h"
@@ -353,36 +354,101 @@ private:
     float fade = 1.0f;
 };
 
-/** RATE: sample-rate reduction like Edison's resample / a crusher: a hard
-    sample-and-hold at the chosen rate, no anti-alias filter, so it aliases and
-    grits. At the top of the knob (44.1 kHz) it's off (bit-identical). */
+/** RATE: clean sample-rate reduction, like Decimort with its approximation and
+    images filters on: an anti-alias low-pass at the new rate's Nyquist, the
+    sample-and-hold at the new rate, then a low-pass that removes the images. What's
+    left sounds like the sound at a lower sample rate (darker, a touch of the hold's
+    character), with no crunchy aliasing. Both filters are 8th-order Butterworth
+    (four biquads) at 0.45 x the new rate. At the top of the knob (44.1 kHz) it's off
+    and nothing runs (bit-identical). */
 class RateReducer
 {
 public:
     static constexpr float offHz = 44100.0f;
 
-    void prepare (double sr) { sampleRate = sr; reset(); }
-    void reset() { phase = 1.0; held[0] = held[1] = 0.0f; }
+    void prepare (double sr) { sampleRate = sr; hzNow = offHz; setGlideFor (sr); reset(); }
+
+    void reset()
+    {
+        phase = 1.0;
+        held[0] = held[1] = 0.0f;
+        for (auto& ch : pre) for (auto& f : ch) f.reset();
+        for (auto& ch : post) for (auto& f : ch) f.reset();
+        countdown = 0;
+    }
 
     static bool isOff (float hz) { return hz >= offHz - 1.0f; }
 
-    /** One sample, `x` holds one value per channel and is changed in place. */
-    void processSample (float* x, int chans, float hz)
+    /** True once the knob is at the top and the glide has arrived there: nothing to do. */
+    bool settledOff (float targetHz)
     {
-        phase += (double) hz / sampleRate;
-        if (phase >= 1.0)
+        if (! isOff (targetHz) || hzNow < offHz - 30.0f)
+            return false;
+        if (hzNow != offHz)
         {
-            phase -= std::floor (phase);
-            for (int ch = 0; ch < std::min (chans, 2); ++ch)
-                held[ch] = x[ch];
+            hzNow = offHz;
+            reset();
         }
-        for (int ch = 0; ch < std::min (chans, 2); ++ch)
-            x[ch] = held[ch];
+        return true;
     }
+
+    /** One sample: `x` holds one value per channel and is changed in place. */
+    void processSample (float* x, int chans, float targetHz)
+    {
+        // Glide to the knob (about 20 ms, in octaves) so turning it never zips.
+        hzNow += (targetHz - hzNow) * glide;
+        if (--countdown <= 0)
+        {
+            countdown = 16;
+            const auto cutoff = juce::jlimit (20.0, 0.45 * sampleRate, 0.45 * (double) hzNow);
+            static constexpr double qs[4] = { 0.50980, 0.60134, 0.89998, 2.56292 };   // 8th-order Butterworth
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto c = design::lowpass (cutoff, qs[k], sampleRate);
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    pre[ch][k].c = c;
+                    post[ch][k].c = c;
+                }
+            }
+        }
+        phase += (double) hzNow / sampleRate;
+        const auto take = phase >= 1.0;
+        if (take)
+            phase -= std::floor (phase);
+        for (int ch = 0; ch < std::min (chans, 2); ++ch)
+        {
+            double y = x[ch];
+            for (auto& f : pre[ch]) y = f.process (y);
+            if (take)
+                held[ch] = (float) y;
+            double z = held[ch];
+            for (auto& f : post[ch]) z = f.process (z);
+            x[ch] = (float) z;
+        }
+    }
+
+    /** A whole buffer (dry and wet together). */
+    void process (juce::AudioBuffer<float>& buffer, int numSamples, float targetHz)
+    {
+        const auto chans = std::min (2, buffer.getNumChannels());
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float x[2] {};
+            for (int ch = 0; ch < chans; ++ch) x[ch] = buffer.getSample (ch, i);
+            processSample (x, chans, targetHz);
+            for (int ch = 0; ch < chans; ++ch) buffer.setSample (ch, i, x[ch]);
+        }
+    }
+
+    void setGlideFor (double sr) { glide = (float) (1.0 - std::exp (-1.0 / (0.02 * sr))); }
 
 private:
     double sampleRate = 44100.0, phase = 1.0;
+    float hzNow = offHz, glide = 0.001f;
     float held[2] {};
+    Biquad pre[2][4], post[2][4];
+    int countdown = 0;
 };
 
 } // namespace room

@@ -17,7 +17,10 @@ namespace ParamIDs
     inline constexpr const char* intensity   = "intensity";
     inline constexpr const char* mix         = "mix";
     inline constexpr const char* balanceAuto = "balanceAuto";
-    inline constexpr const char* balance     = "balance";
+    inline constexpr const char* balance     = "balance";      // old projects only (now tone + space)
+    inline constexpr const char* toneAmount  = "toneAmount";   // how much of the room's tone (eq, rings)
+    inline constexpr const char* spaceAmount = "spaceAmount";  // how much of the room's space (decay, width)
+    inline constexpr const char* toneSpaceSync = "toneSpaceSync"; // on: tone and space move opposite
     inline constexpr const char* tail        = "tail";
     inline constexpr const char* output      = "output";
     inline constexpr const char* tape        = "tape";
@@ -32,6 +35,7 @@ namespace ParamIDs
     inline constexpr const char* freeze      = "freeze";
     inline constexpr const char* glitch      = "glitch";     // the stutter key (linked to Intensity)
     inline constexpr const char* glitchSync  = "glitchSync"; // stutter in time with the host
+    inline constexpr const char* glitchAmount = "glitchAmount"; // how much it stutters
     // Bottom module
     inline constexpr const char* noiseType   = "noiseType";
     inline constexpr const char* noiseLevel  = "noiseLevel";
@@ -46,11 +50,6 @@ namespace ParamIDs
     inline juce::String lfoDiv (int l)    { return "lfo" + juce::String (l + 1) + "Div"; }
     inline juce::String lfoShape (int l)  { return "lfo" + juce::String (l + 1) + "Shape"; }
     inline juce::String lfoRetrig (int l) { return "lfo" + juce::String (l + 1) + "Retrig"; }
-
-    // EQ band parameters: "eq1Freq", "eq1Gain", "eq1Q" ... "eq5Q"
-    inline juce::String eqFreq (int band) { return "eq" + juce::String (band + 1) + "Freq"; }
-    inline juce::String eqGain (int band) { return "eq" + juce::String (band + 1) + "Gain"; }
-    inline juce::String eqQ    (int band) { return "eq" + juce::String (band + 1) + "Q"; }
 }
 
 class RoomAudioProcessor : public juce::AudioProcessor,
@@ -119,8 +118,6 @@ public:
     /** Balance detected from the loaded room (used when Auto is on). */
     float getDetectedBalance() const { return detectedBalance.load(); }
 
-    /** Current EQ band settings from the parameters (any thread). */
-    void getEqBands (room::EqBand (&out)[room::tone::numEqBands]) const;
 
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioFormatManager formatManager;
@@ -170,22 +167,9 @@ public:
     /** True if any knob moved since the preset was loaded or saved. */
     bool isPresetModified() const;
 
-    /** What Randomize touches (right-click the Randomize button to choose). */
-    enum RandomizeGroup
-    {
-        randomRoom     = 1 << 0,   // Intensity, Tone / Space, Tail, Size
-        randomAdvanced = 1 << 1,   // Pre-delay, Width, Damping, Ducking, Release
-        randomEq       = 1 << 2,   // EQ band gains
-        randomFinish   = 1 << 3,   // Tape, Auto EQ (noise and rate are never randomized)
-        randomLfos     = 1 << 4,   // LFO shape / rate / sync / division (not what they're assigned to)
-        randomDefault  = randomRoom | randomAdvanced | randomEq | randomFinish,
-        randomAll      = randomDefault | randomLfos
-    };
-    int randomizeMask = randomDefault;   // saved with the project
-
-    /** Randomize the knobs in randomizeMask within musical ranges (message thread).
-        Never touches the room itself, Dry/Wet, Output, Bypass or Freeze. */
-    void randomizeKnobs (juce::Random&);
+    /** Randomize: what's ticked on its page and how wild (Randomizer.h). Saved with the
+        project, never in presets. */
+    juce::ValueTree randomizeSelection { "RandomizeSelection" };
 
     /** Remove every LFO assignment and put both LFOs back to their defaults. */
     void clearModulation();
@@ -250,6 +234,7 @@ private:
     room::StereoWidth stereoWidth;
     juce::SharedResourcePointer<room::NoiseBank> noiseBank;
     room::NoisePlayer noise;
+    room::RateReducer rateReducer;   // the whole output, dry and wet
     juce::SmoothedValue<float> outputGain;
 
     // Bypass: a latency-matched copy of the input, crossfaded in.
@@ -269,7 +254,8 @@ private:
     std::atomic<float>* intensityParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* balanceAutoParam = nullptr;
-    std::atomic<float>* balanceParam = nullptr;
+    std::atomic<float>* toneParam = nullptr;
+    std::atomic<float>* spaceAmountParam = nullptr;
     std::atomic<float>* tailParam = nullptr;
     std::atomic<float>* outputParam = nullptr;
     std::atomic<float>* tapeParam = nullptr;
@@ -283,14 +269,12 @@ private:
     std::atomic<float>* freezeParam = nullptr;
     std::atomic<float>* glitchParam = nullptr;
     std::atomic<float>* glitchSyncParam = nullptr;
+    std::atomic<float>* glitchAmountParam = nullptr;
     std::atomic<float>* noiseTypeParam = nullptr;
     std::atomic<float>* noiseLevelParam = nullptr;
     std::atomic<float>* noiseFollowParam = nullptr;
     std::atomic<float>* rateParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
-    std::atomic<float>* eqFreqParam[room::tone::numEqBands] {};
-    std::atomic<float>* eqGainParam[room::tone::numEqBands] {};
-    std::atomic<float>* eqQParam[room::tone::numEqBands] {};
 
     // LFOs
     void updateModulation (int samplesIntoBlock, int numSamples);

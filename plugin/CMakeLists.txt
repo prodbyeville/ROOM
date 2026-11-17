@@ -81,6 +81,7 @@ target_sources(ROOM PRIVATE
     Source/EvilleLookAndFeel.cpp
     Source/Screens.cpp
     Source/UpdateChecker.cpp
+    Source/Randomizer.cpp
     Source/presets/PresetBrowser.cpp)
 
 target_include_directories(ROOM PRIVATE Source)

@@ -5,23 +5,9 @@
              created="2026-10-15T19:28:29.840Z">
   <PARAMS>
     <PARAM id="autoEq" value="0.0"/>
-    <PARAM id="balance" value="0.4960379302501678"/>
+    <PARAM id="toneAmount" value="0.504"/>
+    <PARAM id="spaceAmount" value="0.496"/>
     <PARAM id="balanceAuto" value="0.0"/>
-    <PARAM id="eq1Freq" value="100.0"/>
-    <PARAM id="eq1Gain" value="0.0"/>
-    <PARAM id="eq1Q" value="0.7099999785423279"/>
-    <PARAM id="eq2Freq" value="300.0"/>
-    <PARAM id="eq2Gain" value="0.0"/>
-    <PARAM id="eq2Q" value="1.0"/>
-    <PARAM id="eq3Freq" value="1000.0"/>
-    <PARAM id="eq3Gain" value="0.0"/>
-    <PARAM id="eq3Q" value="1.0"/>
-    <PARAM id="eq4Freq" value="3500.0"/>
-    <PARAM id="eq4Gain" value="0.0"/>
-    <PARAM id="eq4Q" value="1.0"/>
-    <PARAM id="eq5Freq" value="8000.0"/>
-    <PARAM id="eq5Gain" value="0.0"/>
-    <PARAM id="eq5Q" value="0.7099999785423279"/>
     <PARAM id="intensity" value="1.299999952316284"/>
     <PARAM id="mix" value="0.449999988079071"/>
     <PARAM id="size" value="1.600000023841858"/>

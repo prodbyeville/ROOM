@@ -916,6 +916,18 @@ void PresetBrowser::showRowMenu (int row)
     const auto key = e.key;
     juce::PopupMenu m;
     m.addSectionHeader (e.meta.name.toLowerCase());
+    {
+        // What it is, under its name (info lines: dim, not clickable)
+        juce::String info = e.meta.type.isNotEmpty() ? e.meta.type : e.meta.madeFor.joinIntoString (", ");
+        if (kind == Kind::room && e.tags.decay.isNotEmpty())
+            info << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.decay << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.tone;
+        if (info.isNotEmpty())
+            m.addItem (info.toLowerCase(), false, false, nullptr);
+        if (e.meta.notes.isNotEmpty())
+            m.addItem (e.meta.notes.toLowerCase(), false, false, nullptr);
+        m.addItem (e.pack.toLowerCase() + (e.factory ? "  (built in)" : ""), false, false, nullptr);
+        m.addSeparator();
+    }
     m.addItem ("load", [this, key] { if (onLoad) onLoad (key); table.repaint(); });
     m.addItem (e.favorite ? "unfavourite" : "favourite", [this, key]
     {
@@ -951,15 +963,6 @@ void PresetBrowser::showRowMenu (int row)
         if (e.file.existsAsFile())
             m.addItem ("show in folder", [file = e.file] { file.revealToUser(); });
     }
-    m.addSeparator();
-    juce::String info = e.meta.type.isNotEmpty() ? e.meta.type : e.meta.madeFor.joinIntoString (", ");
-    if (kind == Kind::room && e.tags.decay.isNotEmpty())
-        info << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.decay << juce::String::fromUTF8 ("  \xc2\xb7  ") << e.tags.tone;
-    if (info.isNotEmpty())
-        m.addItem (info.toLowerCase(), false, false, nullptr);
-    if (e.meta.notes.isNotEmpty())
-        m.addItem (e.meta.notes.toLowerCase(), false, false, nullptr);
-    m.addItem (e.pack.toLowerCase() + (e.factory ? "  (built in)" : ""), false, false, nullptr);
     EvilleLookAndFeel::showMenu (m, table);
 }
 

@@ -391,7 +391,17 @@ void EvilleLookAndFeel::showDialog (juce::Component& parent, const juce::String&
 void EvilleLookAndFeel::showMenu (juce::PopupMenu& m, juce::Component& target)
 {
     m.setLookAndFeel (&target.getLookAndFeel());
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target).withStandardItemHeight (30));
+    auto options = juce::PopupMenu::Options().withStandardItemHeight (28).withMinimumWidth (180);
+    // Opened by a right-click (or any click inside a big area): at the mouse, like every
+    // other app. Opened from a key: just under it.
+    const auto mouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto pos = mouse.getScreenPosition().roundToInt();
+    const auto isKey = dynamic_cast<juce::Button*> (&target) != nullptr && ! mouse.getCurrentModifiers().isPopupMenu();
+    if (isKey || ! target.getScreenBounds().contains (pos))
+        options = options.withTargetComponent (&target);
+    else
+        options = options.withTargetScreenArea ({ pos.x, pos.y, 1, 1 });
+    m.showMenuAsync (options);
 }
 
 void EvilleLookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int w, int h, const juce::PopupMenu::Options&)
@@ -409,16 +419,18 @@ void EvilleLookAndFeel::getIdealPopupMenuItemSizeWithOptions (const juce::String
         idealHeight = 11;
         return;
     }
-    idealHeight = 26;
-    idealWidth = juce::GlyphArrangement::getStringWidthInt (getPopupMenuFont(), text) + 56;
+    idealHeight = 28;
+    idealWidth = juce::GlyphArrangement::getStringWidthInt (getPopupMenuFont(), text) + 2 * menuTextInset + 34;
 }
 
 void EvilleLookAndFeel::drawPopupMenuSectionHeaderWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area,
                                                                const juce::String& name, const juce::PopupMenu::Options&)
 {
-    g.setFont (Fonts::sans (11.0f, Fonts::bold).withExtraKerningFactor (0.12f));
-    g.setColour (Colours::screenDim);
-    g.drawText (name.toLowerCase(), area.toFloat().withTrimmedLeft (16.0f).withTrimmedTop (6.0f), juce::Justification::centredLeft);   // in line with the items
+    // Small caps, in line with the items' text, with a hairline under it.
+    auto r = area.toFloat().withTrimmedLeft ((float) menuTextInset).withTrimmedRight ((float) menuTextInset - 4.0f);
+    drawCaps (g, name, r.withTrimmedTop (4.0f), 9.5f, Colours::redLight.withAlpha (0.9f), juce::Justification::centredLeft, Fonts::bold);
+    g.setColour (juce::Colours::white.withAlpha (0.08f));
+    g.fillRect (r.getX(), r.getBottom() - 2.0f, r.getWidth(), 1.0f);
 }
 
 void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const juce::Rectangle<int>& area, bool highlighted,
@@ -435,20 +447,30 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
         return;
 
     const auto enabled = item.isEnabled;
+    // An info line (a disabled item with no action): smaller and dim, never "greyed out".
+    const auto isInfo = ! enabled && item.action == nullptr && item.subMenu == nullptr && item.itemID == 0;
+    if (isInfo)
+    {
+        g.setFont (Fonts::sans (12.0f));
+        g.setColour (Colours::textDim);
+        g.drawFittedText (item.text, r.withTrimmedLeft ((float) menuTextInset).withTrimmedRight ((float) menuTextInset).toNearestInt(),
+                          juce::Justification::centredLeft, 1);
+        return;
+    }
     if (highlighted && enabled)
     {
         g.setColour (juce::Colour (0xff262222));
-        g.fillRoundedRectangle (r.reduced (6.0f, 1.0f), 4.0f);
+        g.fillRoundedRectangle (r.reduced (2.0f, 1.0f), 4.0f);
     }
 
     // Ticked: a small red dot at the right (WARP's menus keep the text flush left).
-    const auto dot = juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getRight() - 16.0f, r.getCentreY() });
+    const auto dot = juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getRight() - (float) menuTextInset, r.getCentreY() });
     if (item.isTicked)
     {
         g.setColour (Colours::crimson.brighter (0.2f));
         g.fillEllipse (dot);
     }
-    auto text = r.withTrimmedLeft (16.0f).withTrimmedRight (item.isTicked ? 26.0f : 14.0f);
+    auto text = r.withTrimmedLeft ((float) menuTextInset).withTrimmedRight (item.isTicked ? (float) menuTextInset + 12.0f : (float) menuTextInset);
     if (item.subMenu != nullptr)
     {
         const auto c = juce::Point<float> (text.getRight() - 4.0f, r.getCentreY());
@@ -576,6 +598,23 @@ void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, 
 
 void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool down)
 {
+    if (b.getProperties()["style"].toString() == "switch")
+    {
+        // WARP's tick switch, in ROOM's colours: a small pill (crimson while on) and a caps label.
+        auto r = b.getLocalBounds().toFloat();
+        const auto pill = r.removeFromLeft (32.0f).withSizeKeepingCentre (30.0f, 16.0f).translated (0.0f, down ? 0.5f : 0.0f);
+        const auto on = b.getToggleState();
+        g.setColour (on ? Colours::crimson : juce::Colour (0xff1e1b1b));
+        g.fillRoundedRectangle (pill, 8.0f);
+        g.setColour (on ? Colours::redLight.withAlpha (0.6f) : Colours::moduleEdge.brighter (over ? 0.4f : 0.0f));
+        g.drawRoundedRectangle (pill.reduced (0.5f), 8.0f, 1.0f);
+        const auto knob = juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ on ? pill.getRight() - 8.0f : pill.getX() + 8.0f, pill.getCentreY() });
+        g.setColour (on ? Colours::dustWhite : Colours::dustWhite.withAlpha (0.45f));
+        g.fillEllipse (knob);
+        drawCaps (g, b.getButtonText(), r.withTrimmedLeft (10.0f), 10.5f,
+                  Colours::dustWhite.withAlpha (on || over ? 1.0f : 0.6f), juce::Justification::centredLeft, Fonts::bold);
+        return;
+    }
     if (b.getProperties()["style"].toString() == "lightkey" || b.getProperties()["style"].toString() == "chip")
     {
         // A chip that turns red while on (auto).

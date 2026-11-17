@@ -11,7 +11,7 @@
 //   input
 //     -> tone-match EQ -> resonators          (tonal path)
 //     -> pre-delay -> synthetic IR            (spatial path, fed by tonal)
-//     -> blend tonal / spatial by balance     (= the "wet" room sound)
+//     -> tone x tonal + space x spatial       (= the "wet" room sound)
 //     -> freeze (loop the wet sound)          (Advanced)
 //     -> ducking (wet dips while you play)    (Advanced)
 //     -> wet/dry mix
@@ -36,7 +36,6 @@ struct RoomFx
     bool glitchSync = false;       // stutter in time with the host
     bool hasPpq = false;           // the host's position at the start of this block (for sync)
     double ppq = 0.0, bpm = 120.0;
-    float rateHz = RateReducer::offHz;   // the rate knob: sample-rate reduction on the room
 };
 
 class RoomEngine
@@ -53,8 +52,9 @@ public:
     /** Forget the current room: the engine passes audio through untouched. */
     void clearRoom();
 
-    /** Audio thread. balance: 0 tonal .. 1 spatial, mix: 0 dry .. 1 wet. */
-    void process (juce::AudioBuffer<float>& buffer, float balance, float mix, float outputGainDb,
+    /** Audio thread. tone / space: how much of the tonal and the spatial path (0..1 each;
+        tone = 1 - b, space = b is the old single balance b). mix: 0 dry .. 1 wet. */
+    void process (juce::AudioBuffer<float>& buffer, float tone, float space, float mix, float outputGainDb,
                   const RoomFx& fx = {});
 
     static constexpr double maxPreDelayS = 0.5;
@@ -77,7 +77,7 @@ private:
     Biquad res[maxChannels][ToneSettings::maxResonators];
 
     juce::AudioBuffer<float> tonalBuf, spatialBuf;
-    juce::SmoothedValue<float> balanceSm, mixSm, gainSm, roomFade;
+    juce::SmoothedValue<float> toneSm, spaceSm, mixSm, gainSm, roomFade;
 
     // Pre-delay: a delay line in front of the convolution
     juce::AudioBuffer<float> preDelayBuf;
@@ -86,7 +86,6 @@ private:
 
     // Extreme intensity and the stutter glitch, on the wet sound
     WetFx wetFx;
-    RateReducer rate;
 
     // Ducking: envelope of the dry input
     float duckEnv = 0.0f;

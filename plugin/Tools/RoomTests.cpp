@@ -36,7 +36,7 @@ namespace
     float paramValue (RoomAudioProcessor& p, const juce::String& id)
     {
         auto* rp = p.apvts.getParameter (id);
-        return rp->convertFrom0to1 (rp->getValue());
+        return rp != nullptr ? rp->convertFrom0to1 (rp->getValue()) : std::numeric_limits<float>::quiet_NaN();   // NaN fails any check
     }
 
     void setParam (RoomAudioProcessor& p, const juce::String& id, float v)
@@ -409,7 +409,7 @@ namespace
             proc.applyPreset (lib.loadPreset (*lib.find ("Factory/Big Hall")), "Factory/Big Hall");
             // Hear only the reverb, untouched by the finishing section.
             for (auto [id, v] : std::initializer_list<std::pair<const char*, float>> {
-                     { ParamIDs::mix, 1.0f }, { ParamIDs::balanceAuto, 0.0f }, { ParamIDs::balance, 1.0f },
+                     { ParamIDs::mix, 1.0f }, { ParamIDs::balanceAuto, 0.0f }, { ParamIDs::toneAmount, 0.0f }, { ParamIDs::spaceAmount, 1.0f },
                      { ParamIDs::tape, 0.0f }, { ParamIDs::autoEq, 0.0f }, { ParamIDs::space, 1.0f },
                      { ParamIDs::tail, 6.0f } })
                 setParam (proc, id, v);
@@ -661,7 +661,7 @@ namespace
             const auto before = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                               + paramValue (rig.proc, ParamIDs::size);
             juce::Random r (11);
-            rig.proc.randomizeKnobs (r);
+            room::Randomizer::randomizeSelected (rig.proc, r);
             const auto after = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                              + paramValue (rig.proc, ParamIDs::size);
             check (std::abs (after - before) > 0.01f, "Randomize changes the knobs");
@@ -672,7 +672,7 @@ namespace
             check (analysisXml (rig.proc) == room, "Randomize keeps the room");
             for (int k = 0; k < 50; ++k)
             {
-                rig.proc.randomizeKnobs (r);
+                room::Randomizer::randomizeSelected (rig.proc, r);
                 check (paramValue (rig.proc, ParamIDs::tail) <= 4.01f && paramValue (rig.proc, ParamIDs::intensity) <= 1.61f,
                        "Randomize stays in musical ranges");
             }
@@ -1021,15 +1021,18 @@ namespace
 
         // Project state remembers the ROOM key and the randomize choices.
         proc.setCurrentRoomKey ("User/Test Clap Room");
-        proc.randomizeMask = RoomAudioProcessor::randomLfos | RoomAudioProcessor::randomEq;
+        room::Randomizer::setSelected (proc, "lfo1", true);
+        room::Randomizer::setSelected (proc, "tail", false);
+        room::Randomizer::setIntensity (proc, 0.9);
         juce::MemoryBlock state;
         proc.getStateInformation (state);
         RoomAudioProcessor proc2;
         proc2.setPresetRoot (root);
         proc2.setStateInformation (state.getData(), (int) state.getSize());
         check (proc2.getCurrentRoomKey() == "User/Test Clap Room", "project remembers the ROOM");
-        check (proc2.randomizeMask == (RoomAudioProcessor::randomLfos | RoomAudioProcessor::randomEq),
-               "project remembers what Randomize touches");
+        check (room::Randomizer::isSelected (proc2, "lfo1") && ! room::Randomizer::isSelected (proc2, "tail")
+                   && std::abs (room::Randomizer::getIntensity (proc2) - 0.9) < 1e-6,
+               "project remembers what Randomize touches and how wild");
 
         rooms.remove ("User/Test Clap Room");
         studios.remove (key);
@@ -1843,25 +1846,45 @@ namespace
             setParam (rig.proc, ParamIDs::noiseLevel, 0.0f);
         }
 
-        // --- Rate: off at 44.1 kHz, a hard sample-and-hold below ---
+        // --- Rate: off at 44.1 kHz; below, clean (filtered) sample-rate reduction ---
         {
             RoomAudioProcessor pp;
             pp.setPresetRoot (root);
             auto* p = pp.apvts.getParameter (ParamIDs::rate);
             check (p->getDefaultValue() == 0.0f && p->getText (0.0f, 16) == "44.1 kHz", "rate starts at 44.1 kHz with the knob all the way left (off)");
-            check (p->convertFrom0to1 (1.0f) < 600.0f && p->convertFrom0to1 (0.5f) < 6000.0f, "turning rate right crushes (down to 500 Hz, log scale)");
-            room::RateReducer rr;
-            rr.prepare (48000.0);
-            int changes = 0;
-            float last = 0.0f;
-            for (int i = 0; i < 48000; ++i)
+            check (p->convertFrom0to1 (1.0f) < 600.0f && p->convertFrom0to1 (0.5f) < 6000.0f, "turning rate right lowers it (down to 500 Hz, log scale)");
+            // At 4 kHz: a 500 Hz tone passes, a 6 kHz tone (above the new Nyquist) is gone,
+            // and the 500 Hz tone gains no aliases (nothing between 2.2 and 20 kHz).
+            auto run = [] (float freq, float rateHz, std::vector<float>& out)
             {
-                float x[2] = { std::sin ((float) i * 0.07f), 0.0f };
-                rr.processSample (x, 2, 2000.0f);
-                if (x[0] != last) ++changes;
-                last = x[0];
+                room::RateReducer rr;
+                rr.prepare (48000.0);
+                out.clear();
+                for (int i = 0; i < 48000 * 2; ++i)
+                {
+                    float x[2] = { 0.5f * std::sin (juce::MathConstants<float>::twoPi * freq * (float) i / 48000.0f), 0.0f };
+                    rr.processSample (x, 2, rateHz);
+                    if (i >= 48000) out.push_back (x[0]);   // after the glide has settled
+                }
+            };
+            auto rms = [] (const std::vector<float>& v) { double e = 0; for (auto x : v) e += x * x; return std::sqrt (e / (double) v.size()); };
+            std::vector<float> low, high;
+            run (500.0f, 4000.0f, low);
+            run (6000.0f, 4000.0f, high);
+            const auto lowDb = juce::Decibels::gainToDecibels ((float) rms (low) / 0.3536f);
+            const auto highDb = juce::Decibels::gainToDecibels ((float) rms (high) / 0.3536f);
+            check (std::abs (lowDb) < 1.5f, "rate at 4 kHz keeps a 500 Hz tone (" + juce::String (lowDb, 2) + " dB)");
+            check (highDb < -40.0f, "rate at 4 kHz removes a 6 kHz tone cleanly (" + juce::String (highDb, 1) + " dB)");
+            {
+                // aliases / images of the 500 Hz tone: remove the tone with a narrow notch, measure what's left
+                juce::dsp::IIR::Filter<float> notch;
+                notch.coefficients = juce::dsp::IIR::Coefficients<float>::makeNotch (48000.0, 500.0f, 2.0f);
+                std::vector<float> rest;
+                for (auto x : low) rest.push_back (notch.processSample (x));
+                rest.erase (rest.begin(), rest.begin() + 4800);
+                const auto restDb = juce::Decibels::gainToDecibels ((float) rms (rest) / 0.3536f);
+                check (restDb < -45.0f, "rate at 4 kHz adds no crunch (everything but the tone at " + juce::String (restDb, 1) + " dB)");
             }
-            check (std::abs (changes - 2000) <= 2, "rate at 2 kHz holds each value for 1/2000 s (" + juce::String (changes) + " steps a second)");
             check (room::RateReducer::isOff (44100.0f) && ! room::RateReducer::isOff (44000.0f), "only the top of rate is off");
         }
 
@@ -1887,32 +1910,94 @@ namespace
             };
             int f = 0;
             const auto low = run (0.1f, false, f), high = run (1.0f, false, f);
-            check (high > low * 1.3, "glitch stutters more as intensity goes up (" + juce::String (low) + " -> " + juce::String (high) + " samples)");
+            check (high > low * 1.3, "glitch stutters more as its amount goes up (" + juce::String (low) + " -> " + juce::String (high) + " samples)");
             run (0.6f, true, f);
             const auto sixteenths = (double) f / 48000.0 * 2.0 * 4.0;   // 120 bpm: 2 beats a second, 4 sixteenths a beat
             check (f > 0 && std::abs (sixteenths - std::round (sixteenths)) < 0.01, "synced glitch starts on a 1/16 (at " + juce::String (sixteenths, 3) + ")");
         }
 
-        // --- Tone and space are one balance; the editor's new pieces ---
+        // --- Tone and space: separate, synced if asked; the editor's new pieces ---
         {
             RoomAudioProcessor p;
             p.setPresetRoot (root);
             RoomAudioProcessorEditor ed (p);
             ed.setSize (RoomAudioProcessorEditor::closedWidth, RoomAudioProcessorEditor::baseHeight);
-            ModSlider* toneKnob = nullptr;
-            std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+            ed.turnByHand (true, 0.3);
+            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.3f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.5f) < 0.011f,
+                   "tone moves on its own (space stays)");
+            SyncDot* toneSync = nullptr;
+            std::function<void (juce::Component&)> findSync = [&] (juce::Component& c)
             {
-                if (auto* m = dynamic_cast<ModSlider*> (&c); m != nullptr && m->getTooltip().startsWith ("how much of the room's tone"))
-                    toneKnob = m;
-                for (auto* child : c.getChildren()) find (*child);
+                if (auto* d = dynamic_cast<SyncDot*> (&c); d != nullptr && d->getTooltip().startsWith ("sync: tone"))
+                    toneSync = d;
+                for (auto* child : c.getChildren()) findSync (*child);
             };
-            find (ed);
-            check (toneKnob != nullptr, "the tone knob is on the front panel");
-            if (toneKnob != nullptr)
+            findSync (ed);
+            check (toneSync != nullptr, "tone and space have a sync button");
+            if (toneSync != nullptr)
+                toneSync->setToggleState (true, juce::sendNotificationSync);
+            check (paramValue (p, ParamIDs::toneSpaceSync) > 0.5f, "the sync button sets tone/space sync");
+            ed.turnByHand (true, 0.5);
+            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.5f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.3f) < 0.011f,
+                   "with sync on, turning tone up turns space down by as much");
+            ed.turnByHand (false, 0.6);
+            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.2f) < 0.011f, "and the other way round");
+            if (toneSync != nullptr)
+                toneSync->setToggleState (false, juce::sendNotificationSync);
+
+            // Old presets and projects had one balance b: they load as tone 1 - b, space b.
             {
-                toneKnob->setValue (0.3, juce::sendNotificationSync);
-                check (std::abs (paramValue (p, ParamIDs::balance) - 0.7f) < 0.011f, "turning tone to 30 sets space to 70 (one balance)");
+                auto& studios = p.getLibrary();
+                auto tree = studios.loadPreset (*studios.find ("Factory/Dark Hall"));
+                auto params = tree.getChildWithName ("PARAMS");
+                for (int i = params.getNumChildren(); --i >= 0;)
+                    if (params.getChild (i)["id"].toString().startsWith ("tone") || params.getChild (i)["id"].toString() == "spaceAmount"
+                        || params.getChild (i)["id"].toString() == "balance")
+                        params.removeChild (i, nullptr);
+                juce::ValueTree old ("PARAM");
+                old.setProperty ("id", "balance", nullptr);
+                old.setProperty ("value", 0.74f, nullptr);
+                params.appendChild (old, nullptr);
+                p.applyPreset (tree, "Factory/Dark Hall");
+                check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.26f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.74f) < 0.011f,
+                       "an old preset's balance 0.74 loads as tone 26 / space 74");
             }
+            {
+                juce::MemoryBlock state;
+                p.getStateInformation (state);
+                auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+                auto* params = xml->getChildByName ("PARAMS");
+                for (auto* e = params->getFirstChildElement(); e != nullptr;)
+                {
+                    auto* next = e->getNextElement();
+                    if (e->getStringAttribute ("id") == "toneAmount" || e->getStringAttribute ("id") == "spaceAmount")
+                        params->removeChildElement (e, true);
+                    e = next;
+                }
+                auto* old = params->createNewChildElement ("PARAM");
+                old->setAttribute ("id", "balance");
+                old->setAttribute ("value", 0.2);
+                juce::MemoryBlock oldState;
+                juce::AudioProcessor::copyXmlToBinary (*xml, oldState);
+                RoomAudioProcessor q;
+                q.setPresetRoot (root);
+                q.setStateInformation (oldState.getData(), (int) oldState.getSize());
+                check (std::abs (paramValue (q, ParamIDs::toneAmount) - 0.8f) < 0.011f && std::abs (paramValue (q, ParamIDs::spaceAmount) - 0.2f) < 0.011f,
+                       "an old project's balance 0.2 loads as tone 80 / space 20");
+            }
+            {
+                room::Modulation m;
+                juce::ValueTree t ("MODULATION"), e ("MOD");
+                e.setProperty ("lfo", 0, nullptr);
+                e.setProperty ("target", "balance", nullptr);
+                e.setProperty ("depth", 0.3f, nullptr);
+                t.appendChild (e, nullptr);
+                m.fromValueTree (t);
+                check (m.isAssigned (0, room::Modulation::targetIndex ("spaceAmount")), "an lfo on the old balance now moves space");
+            }
+            check (p.apvts.getParameter ("balance") == nullptr && p.apvts.getParameter ("eq1Gain") == nullptr,
+                   "balance and the eq are gone from the parameters");
+
             check (findChild<NoiseScreen> (ed) != nullptr, "the noise screen is in the bottom module");
             check (findChild<SyncDot> (ed) != nullptr, "the glitch has its sync button");
             auto* noiseType = dynamic_cast<juce::AudioParameterChoice*> (p.apvts.getParameter (ParamIDs::noiseType));
@@ -2141,7 +2226,7 @@ namespace
         check (lfoDefaults, "Clear resets both LFOs to default");
         check (std::abs (paramValue (p, ParamIDs::tail) - 3.3f) < 0.02f, "Clear leaves the room knobs alone");
 
-        // Randomize groups: each only touches its own knobs.
+        // Randomize: each ticked item only moves its own parameters.
         auto snapshot = [&p]
         {
             std::map<juce::String, float> m;
@@ -2150,42 +2235,58 @@ namespace
                     m[rp->paramID] = rp->getValue();
             return m;
         };
-        const std::map<int, juce::StringArray> owns {
-            { RoomAudioProcessor::randomRoom, { "intensity", "balanceAuto", "balance", "tail", "size" } },
-            { RoomAudioProcessor::randomAdvanced, { "preDelay", "space", "damping", "duck", "duckRelease" } },
-            { RoomAudioProcessor::randomEq, { "eq1Gain", "eq2Gain", "eq3Gain", "eq4Gain", "eq5Gain" } },
-            { RoomAudioProcessor::randomFinish, { "tape", "autoEq" } },
-            { RoomAudioProcessor::randomLfos, { "lfo1Shape", "lfo1Sync", "lfo1Div", "lfo1Rate", "lfo2Shape", "lfo2Sync", "lfo2Div", "lfo2Rate" } },
+        namespace R = room::Randomizer;
+        auto tickOnly = [&p] (const char* key)
+        {
+            for (const auto& t : R::targets())
+                R::setSelected (p, t.key, juce::String (t.key) == key);
         };
         juce::Random r (5);
-        for (auto& [bit, ids] : owns)
+        R::setIntensity (p, 1.0);
+        bool allOwn = true, allMove = true;
+        for (const auto& t : R::targets())
         {
-            p.randomizeMask = bit;
-            bool onlyOwn = true, movedAny = false;
-            for (int k = 0; k < 6; ++k)
+            tickOnly (t.key);
+            bool moved = false;
+            for (int k = 0; k < 8; ++k)
             {
                 const auto before = snapshot();
-                p.randomizeKnobs (r);
+                R::randomizeSelected (p, r);
                 for (auto& [id, v] : snapshot())
-                {
-                    const auto moved = std::abs (v - before.at (id)) > 1e-6f;
-                    if (moved && ! ids.contains (id))
+                    if (std::abs (v - before.at (id)) > 1e-6f)
                     {
-                        onlyOwn = false;
-                        std::cout << "    group " << bit << " moved " << id << "\n";
+                        moved = true;
+                        if (std::find (t.params.begin(), t.params.end(), id) == t.params.end())
+                        {
+                            allOwn = false;
+                            std::cout << "    " << t.key << " moved " << id << "\n";
+                        }
                     }
-                    movedAny = movedAny || moved;
-                }
             }
-            check (onlyOwn && movedAny, "Randomize group " + juce::String (bit) + " only moves its own knobs");
+            if (! moved) { allMove = false; std::cout << "    " << t.key << " never moved\n"; }
         }
-        p.randomizeMask = 0;
+        check (allOwn, "every randomize item only moves its own parameters");
+        check (allMove, "every randomize item moves something");
+        tickOnly ("");
         const auto before = snapshot();
-        p.randomizeKnobs (r);
+        R::randomizeSelected (p, r);
         check (snapshot() == before, "Randomize with nothing ticked does nothing");
-        check (RoomAudioProcessor().randomizeMask == RoomAudioProcessor::randomDefault
-                   && (RoomAudioProcessor::randomDefault & RoomAudioProcessor::randomLfos) == 0,
-               "by default Randomize leaves the LFOs alone");
+        RoomAudioProcessor fresh;
+        check (! R::isSelected (fresh, "lfo1") && ! R::isSelected (fresh, "glitchOn") && ! R::isSelected (fresh, "rate")
+                   && R::isSelected (fresh, "intensity") && std::abs (R::getIntensity (fresh) - 0.5) < 1e-9,
+               "by default Randomize leaves the LFOs, switches and rate alone (moderate)");
+        // Basic stays narrower than extreme
+        {
+            auto* tail = p.apvts.getParameter (ParamIDs::tail);
+            float basicLo = 99.0f, basicHi = 0.0f, exLo = 99.0f, exHi = 0.0f;
+            for (int k = 0; k < 400; ++k)
+            {
+                const auto b = R::randomFor (*tail, ParamIDs::tail, 0.0, r), e = R::randomFor (*tail, ParamIDs::tail, 1.0, r);
+                basicLo = std::min (basicLo, b); basicHi = std::max (basicHi, b);
+                exLo = std::min (exLo, e); exHi = std::max (exHi, e);
+            }
+            check (basicHi - basicLo < 0.5f * (exHi - exLo) && exHi > 5.0f && exLo < 0.5f, "basic stays musical, extreme uses the whole knob");
+        }
     }
 
     //==========================================================================
@@ -2284,6 +2385,8 @@ namespace
             ed.showRoomInfo (true);
         if (mode == "about")
             ed.openAbout();
+        if (mode == "randomize")
+            if (auto* page = findChild<RandomizePage> (ed)) { page->setVisible (true); page->toFront (false); }
         if (mode.startsWith ("tour"))
             ed.showTour (mode.getTrailingIntValue() - 1);
         if (mode == "longname")
@@ -2306,7 +2409,7 @@ namespace
             const juce::PopupMenu::Options opts;
             auto drawMenu = [&] (juce::Point<int> at, std::vector<std::tuple<juce::String, int, bool, bool>> rows)
             {
-                // rows: text, kind (0 item, 1 header, 2 separator, 3 submenu), ticked, highlighted
+                // rows: text, kind (0 item, 1 header, 2 separator, 3 submenu, 4 info line), ticked, highlighted
                 const auto border = lf.getPopupMenuBorderSizeWithOptions (opts);
                 int w = 0, h = 0;
                 for (auto& [text, kind, ticked, hi] : rows)
@@ -2337,6 +2440,7 @@ namespace
                         item.isTicked = ticked;
                         if (kind == 3)
                             item.subMenu = std::make_unique<juce::PopupMenu>();
+                        item.isEnabled = kind != 4;   // 4: an info line
                         lf.drawPopupMenuItemWithOptions (g, { border, y, w, ih }, hi, item, opts);
                         y += ih;
                     }
@@ -2355,13 +2459,10 @@ namespace
             }
             else
             {
-            drawMenu ({ 600, 100 }, { { "randomize", 1, false, false }, { "randomize now", 0, false, false }, { "", 2, false, false },
-                                      { "what moves", 1, false, false },
-                                      { "room knobs  (intensity, tone / space, tail, size)", 0, true, true },
-                                      { "advanced  (pre-delay, width, damping, ducking)", 0, true, false },
-                                      { "eq bands", 0, false, false }, { "tape and auto eq", 0, false, false },
-                                      { "lfo settings  (shape, rate)", 0, true, false }, { "", 2, false, false },
-                                      { "all", 0, false, false }, { "none", 0, false, false }, { "back to default", 0, false, false } });
+            drawMenu ({ 600, 100 }, { { "basement show", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("room  \xc2\xb7  medium  \xc2\xb7  neutral")), 4, false, false },
+                                      { "a packed basement: low, loud and wide.", 4, false, false }, { "factory  (built in)", 4, false, false },
+                                      { "", 2, false, false }, { "load", 0, false, false }, { "favourite", 0, false, false },
+                                      { "add to quick select", 0, false, true }, { "quick select slot", 3, false, false } });
             drawMenu ({ 560, 470 }, { { "modulation", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), 3, false, true },
                                       { "move with lfo 2", 0, false, false } });
             drawMenu ({ 790, 500 }, { { "10%", 0, false, false }, { "25%", 0, true, true }, { "50%", 0, false, false },

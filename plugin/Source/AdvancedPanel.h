@@ -9,7 +9,6 @@
 //   (pre-delay) (damping) (width)
 //   (ducking)   (release) [freeze]
 //   (tape)      (auto eq)
-//   eq   (low) (lo mid) (mid) (hi mid) (high)
 //   [ lfo 1 card ]
 //   [ lfo 2 card ]   (down to the bottom of the unit)
 // Clicking an LFO card swaps the knobs and cards for that LFO's full controls
@@ -43,12 +42,11 @@ private:
 
     RoomAudioProcessor& proc;
     Knob preDelay, space, damping, duck, duckRelease, tape, autoEq;   // "space" shows as width
-    Knob eqGain[room::tone::numEqBands];
     std::vector<Knob*> allKnobs();
     juce::TextButton freeze { {} };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 
     LfoCard card1 { proc, 0 }, card2 { proc, 1 };
-    int eqTop = 336, lfoTop = 440;
+    int lfoTop = 340;
     LfoPanel lfoPanel;
 };

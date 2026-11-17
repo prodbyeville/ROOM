@@ -103,7 +103,8 @@ RoomAudioProcessor::RoomAudioProcessor()
     intensityParam   = apvts.getRawParameterValue (ParamIDs::intensity);
     mixParam         = apvts.getRawParameterValue (ParamIDs::mix);
     balanceAutoParam = apvts.getRawParameterValue (ParamIDs::balanceAuto);
-    balanceParam     = apvts.getRawParameterValue (ParamIDs::balance);
+    toneParam        = apvts.getRawParameterValue (ParamIDs::toneAmount);
+    spaceAmountParam = apvts.getRawParameterValue (ParamIDs::spaceAmount);
     tailParam        = apvts.getRawParameterValue (ParamIDs::tail);
     outputParam      = apvts.getRawParameterValue (ParamIDs::output);
     tapeParam        = apvts.getRawParameterValue (ParamIDs::tape);
@@ -117,18 +118,13 @@ RoomAudioProcessor::RoomAudioProcessor()
     freezeParam      = apvts.getRawParameterValue (ParamIDs::freeze);
     glitchParam      = apvts.getRawParameterValue (ParamIDs::glitch);
     glitchSyncParam  = apvts.getRawParameterValue (ParamIDs::glitchSync);
+    glitchAmountParam = apvts.getRawParameterValue (ParamIDs::glitchAmount);
     noiseTypeParam   = apvts.getRawParameterValue (ParamIDs::noiseType);
     noiseLevelParam  = apvts.getRawParameterValue (ParamIDs::noiseLevel);
     noiseFollowParam = apvts.getRawParameterValue (ParamIDs::noiseFollow);
     rateParam        = apvts.getRawParameterValue (ParamIDs::rate);
     noise.setBank (&noiseBank.get());
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-    {
-        eqFreqParam[b] = apvts.getRawParameterValue (ParamIDs::eqFreq (b));
-        eqGainParam[b] = apvts.getRawParameterValue (ParamIDs::eqGain (b));
-        eqQParam[b]    = apvts.getRawParameterValue (ParamIDs::eqQ (b));
-    }
 
     for (int t = 0; t < room::Modulation::numTargets(); ++t)
     {
@@ -204,16 +200,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, pct));
 
     layout.add (std::make_unique<AudioParameterBool> (
-        ParameterID { ParamIDs::balanceAuto, 1 }, "Balance Auto", false));   // off: the knob is where you set it
+        ParameterID { ParamIDs::balanceAuto, 1 }, "Tone/Space Auto", false));   // off: the knobs are where you set them
 
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::balance, 1 }, "Balance",
-        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-        {
-            return String (juce::roundToInt ((1.0f - v) * 100.0f)) + " tone / "
-                 + String (juce::roundToInt (v * 100.0f)) + " space";
-        })));
+    // Tone and Space: how much of each path of the room. They used to be one "balance"
+    // b (tone = 1 - b, space = b); old projects and presets are converted on load.
+    {
+        auto whole = AudioParameterFloatAttributes().withStringFromValueFunction (
+            [] (float v, int) { return String (juce::roundToInt (v * 100.0f)); });
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::toneAmount, 1 }, "Tone", NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, whole));
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::spaceAmount, 1 }, "Space", NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, whole));
+        layout.add (std::make_unique<AudioParameterBool> (
+            ParameterID { ParamIDs::toneSpaceSync, 1 }, "Tone/Space Sync", false));
+    }
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::tail, 1 }, "Tail",
@@ -267,6 +267,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         ParameterID { ParamIDs::glitch, 1 }, "Glitch", false));   // stutters the room now and then
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::glitchSync, 1 }, "Glitch Sync", false));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::glitchAmount, 1 }, "Glitch Amount",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.5f, pct));
 
     // --- Bottom module: noise and rate -------------------------------------
     layout.add (std::make_unique<AudioParameterChoice> (
@@ -332,37 +335,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
         ParameterID { ParamIDs::autoEq, 1 }, "Auto EQ",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
 
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-    {
-        const auto name = "EQ " + String (b + 1);
-        NormalisableRange<float> freqRange (20.0f, 20000.0f);
-        freqRange.setSkewForCentre (630.0f);
-        layout.add (std::make_unique<AudioParameterFloat> (
-            ParameterID { ParamIDs::eqFreq (b), 1 }, name + " Freq", freqRange, room::tone::kBandFreqs[b],
-            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-            {
-                return v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (juce::roundToInt (v)) + " Hz";
-            })));
-        layout.add (std::make_unique<AudioParameterFloat> (
-            ParameterID { ParamIDs::eqGain (b), 1 }, name + " Gain",
-            NormalisableRange<float> (-12.0f, 12.0f, 0.1f), 0.0f,
-            AudioParameterFloatAttributes().withStringFromValueFunction (
-                [] (float v, int) { return (v > 0.0f ? "+" : "") + String (v, 1) + " dB"; })));
-        NormalisableRange<float> qRange (0.3f, 8.0f);
-        qRange.setSkewForCentre (1.0f);
-        layout.add (std::make_unique<AudioParameterFloat> (
-            ParameterID { ParamIDs::eqQ (b), 1 }, name + " Q", qRange, room::tone::kBandQs[b],
-            AudioParameterFloatAttributes().withStringFromValueFunction (
-                [] (float v, int) { return "Q " + String (v, 2); })));
-    }
-
     return layout;
-}
-
-void RoomAudioProcessor::getEqBands (room::EqBand (&out)[room::tone::numEqBands]) const
-{
-    for (int b = 0; b < room::tone::numEqBands; ++b)
-        out[b] = { room::tone::kBandTypes[b], eqFreqParam[b]->load(), eqGainParam[b]->load(), eqQParam[b]->load() };
 }
 
 //==============================================================================
@@ -384,6 +357,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
     stereoWidth.prepare (sampleRate);
     noise.prepare (sampleRate, std::max (1, samplesPerBlock));
+    rateReducer.prepare (sampleRate);
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -507,16 +481,16 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fx.extreme = juce::jlimit (0.0f, 1.0f, (eff (ParamIDs::intensity, intensityParam) - maxRoomIntensity)
                                                    / (4.0f - maxRoomIntensity));
         fx.stutter = glitchParam->load() > 0.5f;
-        // Glitch follows Intensity: 0..200 % on the knob -> 0..1
-        fx.glitchAmount = juce::jlimit (0.0f, 1.0f, eff (ParamIDs::intensity, intensityParam) / 4.0f);
+        fx.glitchAmount = eff (ParamIDs::glitchAmount, glitchAmountParam);
         fx.glitchSync = glitchSyncParam->load() > 0.5f;
         fx.hasPpq = blockHasPpq && blockPlaying;
         fx.ppq = blockPpq + start / std::max (1.0, currentSampleRate.load()) * blockBpm / 60.0;
         fx.bpm = blockBpm;
-        fx.rateHz = eff (ParamIDs::rate, rateParam);
 
-        const auto baseBalance = balanceAutoParam->load() > 0.5f ? detectedBalance.load() : balanceParam->load();
-        const auto balanceNow = juce::jlimit (0.0f, 1.0f, baseBalance + modOffset[(size_t) M::targetIndex (ParamIDs::balance)]);
+        // Tone and space (auto: from what ROOM detected in the sound)
+        const auto isAuto = balanceAutoParam->load() > 0.5f;
+        const auto toneNow = isAuto ? 1.0f - detectedBalance.load() : eff (ParamIDs::toneAmount, toneParam);
+        const auto spaceNow = isAuto ? detectedBalance.load() : eff (ParamIDs::spaceAmount, spaceAmountParam);
 
         // Noise follows what comes in, so look at the input before the room.
         noise.setTargets (juce::roundToInt (noiseTypeParam->load()), eff (ParamIDs::noiseLevel, noiseLevelParam),
@@ -525,16 +499,17 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         if (noiseOn)
             noise.trackInput (part, len);
 
-        // Room (with rate) -> Noise -> Tape -> EQ -> Auto EQ -> Width -> output gain
-        engine.process (part, balanceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
+        // Room -> Noise -> Tape -> Auto EQ -> Width -> Rate -> output gain
+        engine.process (part, toneNow, spaceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
         if (noiseOn)
             noise.addTo (part, len);
 
-        room::EqBand bands[room::tone::numEqBands];
-        getEqBands (bands);
-        toneShaper.process (part, eff (ParamIDs::tape, tapeParam), bands);
+        static const room::EqBand flat[room::tone::numEqBands] = {};   // the eq is gone: tape only
+        toneShaper.process (part, eff (ParamIDs::tape, tapeParam), flat);
         suppressor.process (part, eff (ParamIDs::autoEq, autoEqParam));
         stereoWidth.process (part, eff (ParamIDs::space, spaceParam));
+        if (const auto hz = eff (ParamIDs::rate, rateParam); ! rateReducer.settledOff (hz))
+            rateReducer.process (part, len, hz);
 
         outputGain.setTargetValue (juce::Decibels::decibelsToGain (eff (ParamIDs::output, outputParam)));
         const auto outChans = std::min (part.getNumChannels(), 2);
@@ -665,63 +640,6 @@ bool RoomAudioProcessor::rebuildTargetsMoved() const
             return true;
     }
     return false;
-}
-
-void RoomAudioProcessor::randomizeKnobs (juce::Random& r)
-{
-    auto set = [this] (const juce::String& id, float value)
-    {
-        if (auto* p = apvts.getParameter (id))
-        {
-            p->beginChangeGesture();
-            p->setValueNotifyingHost (p->convertTo0to1 (value));
-            p->endChangeGesture();
-        }
-    };
-    auto between = [&r] (float lo, float hi) { return lo + r.nextFloat() * (hi - lo); };
-    auto maybe = [&r] (float chance) { return r.nextFloat() < chance; };
-
-    // Musical ranges, not the full extremes.
-    const auto mask = randomizeMask;
-    if (mask & randomRoom)
-    {
-        set (ParamIDs::intensity, between (0.5f, 1.6f));
-        set (ParamIDs::balanceAuto, maybe (0.5f) ? 1.0f : 0.0f);
-        set (ParamIDs::balance, between (0.1f, 0.9f));
-        set (ParamIDs::tail, between (0.6f, 4.0f));
-        set (ParamIDs::size, between (0.7f, 1.5f));
-    }
-    if (mask & randomFinish)
-    {
-        set (ParamIDs::tape, maybe (0.5f) ? between (0.1f, 0.8f) : 0.0f);
-        set (ParamIDs::autoEq, maybe (0.5f) ? between (0.1f, 0.6f) : 0.0f);
-    }
-    if (mask & randomEq)
-        for (int b = 0; b < room::tone::numEqBands; ++b)
-            set (ParamIDs::eqGain (b), maybe (0.4f) ? between (-4.0f, 4.0f) : 0.0f);
-    if (mask & randomAdvanced)
-    {
-        set (ParamIDs::preDelay, maybe (0.5f) ? between (5.0f, 120.0f) : 0.0f);
-        set (ParamIDs::space, between (0.7f, 1.6f));
-        set (ParamIDs::damping, between (-0.5f, 0.7f));
-        set (ParamIDs::duck, maybe (0.3f) ? between (0.2f, 0.7f) : 0.0f);
-        set (ParamIDs::duckRelease, between (120.0f, 600.0f));
-    }
-    if (mask & randomLfos)
-    {
-        const auto numShapes = room::Lfo::shapeNames().size();
-        const auto numDivs = room::Lfo::divisionNames().size();
-        for (int l = 0; l < room::Modulation::numLfos; ++l)
-        {
-            set (ParamIDs::lfoShape (l), (float) r.nextInt (numShapes));
-            const auto synced = maybe (0.5f);
-            set (ParamIDs::lfoSync (l), synced ? 1.0f : 0.0f);
-            if (synced)
-                set (ParamIDs::lfoDiv (l), (float) r.nextInt (numDivs));
-            else
-                set (ParamIDs::lfoRate (l), std::exp (between (std::log (0.05f), std::log (6.0f))));
-        }
-    }
 }
 
 void RoomAudioProcessor::resetToInit (bool keepPresetName)
@@ -974,11 +892,11 @@ void RoomAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
     state.setProperty ("editorScale", editorScale, nullptr);
     state.setProperty ("advancedOpen", advancedOpen, nullptr);
     state.setProperty ("tipsEnabled", tipsEnabled, nullptr);
-    state.setProperty ("randomizeMask", randomizeMask, nullptr);
     state.setProperty ("roomKey", currentRoomKey, nullptr);
     state.appendChild (apvts.copyState(), nullptr);
     state.appendChild (getAnalysis().toValueTree(), nullptr);
     state.appendChild (modulation.toValueTree(), nullptr);
+    state.appendChild (randomizeSelection.createCopy(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -993,9 +911,25 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
     if (! state.hasType ("ROOM_STATE"))
         return;
 
-    const auto params = state.getChildWithName (apvts.state.getType());
+    auto params = state.getChildWithName (apvts.state.getType());
     if (params.isValid())
+    {
+        // Projects from before tone and space were separate have one balance b: tone 1 - b, space b.
+        params = params.createCopy();
+        const auto old = params.getChildWithProperty ("id", ParamIDs::balance);
+        if (old.isValid() && ! params.getChildWithProperty ("id", ParamIDs::toneAmount).isValid())
+        {
+            const auto b = juce::jlimit (0.0f, 1.0f, (float) (double) old["value"]);
+            for (auto [id, v] : { std::pair { ParamIDs::toneAmount, 1.0f - b }, { ParamIDs::spaceAmount, b } })
+            {
+                juce::ValueTree e ("PARAM");
+                e.setProperty ("id", id, nullptr);
+                e.setProperty ("value", v, nullptr);
+                params.appendChild (e, nullptr);
+            }
+        }
         apvts.replaceState (params);
+    }
 
     auto restored = room::RoomAnalysis::fromValueTree (state.getChildWithName ("ROOM_ANALYSIS"));
     if (restored.valid)
@@ -1011,7 +945,8 @@ void RoomAudioProcessor::setStateInformation (const void* data, int size)
     modulation.fromValueTree (state.getChildWithName ("MODULATION"));
     editorScale = juce::jlimit (0.75f, 1.75f, (float) state.getProperty ("editorScale", 1.0f));
     advancedOpen = (bool) state.getProperty ("advancedOpen", false);
-    randomizeMask = (int) state.getProperty ("randomizeMask", (int) randomDefault) & randomAll;
+    if (const auto sel = state.getChildWithName ("RandomizeSelection"); sel.isValid())
+        randomizeSelection.copyPropertiesFrom (sel, nullptr);
     tipsEnabled = (bool) state.getProperty ("tipsEnabled", true);
     currentRoomKey = state["roomKey"].toString();
     currentPresetKey = state["presetKey"].toString();
@@ -1110,7 +1045,14 @@ juce::ValueTree RoomAudioProcessor::capturePreset (const room::presets::PresetMe
 
 void RoomAudioProcessor::applyPreset (const juce::ValueTree& preset, const juce::String& key)
 {
-    const auto values = room::presets::readParams (preset);
+    auto values = room::presets::readParams (preset);
+    // Presets from before tone and space were separate have one balance b: tone 1 - b, space b.
+    if (values.count (ParamIDs::balance) != 0 && values.count (ParamIDs::toneAmount) == 0)
+    {
+        const auto b = juce::jlimit (0.0f, 1.0f, values[ParamIDs::balance]);
+        values[ParamIDs::toneAmount] = 1.0f - b;
+        values[ParamIDs::spaceAmount] = b;
+    }
 
     for (auto* p : getParameters())
     {

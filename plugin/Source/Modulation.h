@@ -25,9 +25,9 @@ struct Modulation
     /** Knobs an LFO can move. Index = target id. */
     static const juce::StringArray& targetIds()
     {
-        static const juce::StringArray t { "intensity", "balance", "tail", "space", "mix", "output",
+        static const juce::StringArray t { "intensity", "spaceAmount", "tail", "space", "mix", "output",
                                            "tape", "autoEq", "preDelay", "size", "damping", "duck", "duckRelease",
-                                           "rate", "noiseLevel", "noiseFollow" };   // append only (saved by name)
+                                           "rate", "noiseLevel", "noiseFollow", "toneAmount", "glitchAmount" };   // saved by name
         return t;
     }
     static int numTargets() { return targetIds().size(); }
@@ -143,7 +143,9 @@ struct Modulation
         for (const auto& m : t)
         {
             const auto l = (int) m["lfo"];
-            const auto target = targetIndex (m["target"].toString());
+            auto name = m["target"].toString();
+            if (name == "balance") name = "spaceAmount";   // before tone and space were separate
+            const auto target = targetIndex (name);
             if (m.hasType ("MOD") && l >= 0 && l < numLfos && target >= 0)
                 assign (l, target, juce::jlimit (-1.0f, 1.0f, (float) (double) m["depth"]));
         }

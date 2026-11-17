@@ -23,7 +23,7 @@ namespace
     float liveBalance (RoomAudioProcessor& p)
     {
         return p.apvts.getRawParameterValue (ParamIDs::balanceAuto)->load() > 0.5f ? p.getDetectedBalance()
-                                                                                  : liveParam (p, ParamIDs::balance).value;
+                                                                                  : liveParam (p, ParamIDs::spaceAmount).value;
     }
 
     juce::String lower (const juce::String& s) { return s.toLowerCase(); }
@@ -130,9 +130,13 @@ void LoadScreen::timerCallback()
 {
     if (++libraryStamp % 30 == 0 || cards.empty())
         refreshCards();
-    // One lap a minute; it holds still while the mouse is over the stage.
+    // One lap a minute; it holds still while the mouse is over the stage. Moved by the
+    // time that really passed, so an uneven timer can't make it stutter.
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto dt = lastTick > 0.0 ? juce::jlimit (0.0, 0.2, (now - lastTick) * 0.001) : 0.0;
+    lastTick = now;
     if (! isMouseOverOrDragging (true) && ! hovering)
-        orbitPhase += juce::MathConstants<float>::twoPi / (60.0f * 30.0f);
+        orbitPhase += (float) (juce::MathConstants<double>::twoPi / 60.0 * dt);
     repaint();
 }
 
@@ -200,9 +204,11 @@ void LoadScreen::paintCard (juce::Graphics& g, const Card& c, float scale, float
         {
             const auto seed = (int) (c.key.hashCode() & 0xffff);
             const auto cw = tex.getWidth() / 2, ch = tex.getHeight() / 2;
+            const auto crop = tex.getClippedImage ({ seed % (tex.getWidth() - cw), (seed / 7) % (tex.getHeight() - ch), cw, ch });
             g.setOpacity (alpha);
-            g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(),
-                         seed % (tex.getWidth() - cw), (seed / 7) % (tex.getHeight() - ch), cw, ch);
+            // Drawn at the card's exact (fractional) place: whole-pixel snapping made the cards jitter.
+            g.drawImageTransformed (crop, juce::AffineTransform::scale (r.getWidth() / (float) cw, r.getHeight() / (float) ch)
+                                              .translated (r.getX(), r.getY()));
         }
     }
     if (loaded || hot)
@@ -247,8 +253,29 @@ void LoadScreen::paintCard (juce::Graphics& g, const Card& c, float scale, float
                                  juce::Justification::centred);
 }
 
+void LoadScreen::paintCards (juce::Graphics& g, bool front)
+{
+    const auto n = (int) cards.size();
+    const auto current = proc.getCurrentRoomKey();
+    std::vector<int> order;
+    for (int i = 0; i < n; ++i)
+        if ((cards[(size_t) i].depth >= 0.0f) == front)
+            order.push_back (i);
+    std::sort (order.begin(), order.end(), [this] (int x, int y) { return cards[(size_t) x].depth < cards[(size_t) y].depth; });
+    for (auto i : order)
+    {
+        const auto& c = cards[(size_t) i];
+        const auto near = c.depth * 0.5f + 0.5f;
+        const auto scale = 0.62f + 0.38f * near;
+        const auto angle = 0.10f * std::sin ((float) i * 2.3f + orbitPhase * 0.5f) * (1.0f - 0.5f * near);
+        const auto alpha = front ? 1.0f : 0.45f + 0.55f * near;
+        paintCard (g, c, scale, angle, alpha, c.key == current, c.key == hoverKey);
+    }
+}
+
 void LoadScreen::paintOverChildren (juce::Graphics& g)
 {
+    paintCards (g, true);
     if (! hovering)
         return;
     // A file over the stage: a dark veil, a red dashed outline, what happens on drop.
@@ -296,8 +323,7 @@ void LoadScreen::paint (juce::Graphics& g)
     const auto rx = bounds.getWidth() * 0.34f, ry = bounds.getHeight() * 0.25f;
     const auto cardScale = juce::jlimit (0.8f, 1.0f, bounds.getHeight() / 400.0f);   // the stage was 400 tall
     const auto n = (int) cards.size();
-    const auto current = proc.getCurrentRoomKey();
-    const auto t = (float) (juce::Time::getMillisecondCounter() % 1000000) * 0.001f;
+    const auto t = (float) (juce::Time::getMillisecondCounterHiRes() * 0.001);
     for (int i = 0; i < n; ++i)
     {
         auto& c = cards[(size_t) i];
@@ -308,17 +334,9 @@ void LoadScreen::paint (juce::Graphics& g)
         const auto w = 132.0f * scale * cardScale, h = 84.0f * scale * cardScale;
         c.bounds = juce::Rectangle<float> (w, h).withCentre ({ centre.x + rx * std::sin (a), centre.y + ry * c.depth + bob - 8.0f });
     }
-    std::vector<int> order ((size_t) n);
-    for (int i = 0; i < n; ++i) order[(size_t) i] = i;
-    std::sort (order.begin(), order.end(), [this] (int x, int y) { return cards[(size_t) x].depth < cards[(size_t) y].depth; });
-    for (auto i : order)
-    {
-        const auto& c = cards[(size_t) i];
-        const auto scale = 0.62f + 0.38f * (c.depth * 0.5f + 0.5f);
-        const auto angle = 0.10f * std::sin ((float) i * 2.3f + orbitPhase * 0.5f) * (1.0f - 0.5f * (c.depth * 0.5f + 0.5f));
-        const auto alpha = 0.45f + 0.55f * (c.depth * 0.5f + 0.5f);
-        paintCard (g, c, scale, angle, alpha, c.key == current, c.key == hoverKey);
-    }
+    // The far half of the ring goes behind the room box; the near half is drawn over it
+    // (paintOverChildren), solid, so the box disappears behind the cards.
+    paintCards (g, false);
 
     // A standing hint: the whole stage takes audio.
     if (status != RoomAudioProcessor::Status::empty)
@@ -356,7 +374,7 @@ void LoadScreen::paint (juce::Graphics& g)
         {
             const auto& a = proc.getAnalysis();
             juce::String name = proc.getStatusMessage();
-            if (auto* e = proc.getRoomLibrary().find (current))
+            if (auto* e = proc.getRoomLibrary().find (proc.getCurrentRoomKey()))
                 name = e->meta.name + dot + e->tags.decay + dot + e->tags.tone;
             else if (a.valid)
                 name = name + dot + juce::String (a.medianT60, 1) + " s";
@@ -475,7 +493,8 @@ void RoomScreen::paint (juce::Graphics& g)
         e.startNewSubPath (a.xy);
         e.lineTo (b.xy);
         g.setColour (Colours::dustWhite.withAlpha (juce::jlimit (0.0f, 1.0f, (wallAlpha + 0.25f) * (0.45f + 0.55f * near))));
-        g.strokePath (e, juce::PathStrokeType (1.1f));
+        // rounded ends, so the edges meet cleanly at every corner
+        g.strokePath (e, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     };
     for (int i = 0; i < 2; ++i)
         for (int j = 0; j < 2; ++j)
@@ -1464,8 +1483,13 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     // --- Top bar ---
     content.addAndMakeVisible (presetBar);
     content.addAndMakeVisible (randomButton);
-    randomButton.onClick = [this] { proc.randomizeKnobs (random); };
-    randomButton.onRightClick = [this] { showRandomizeMenu(); };
+    randomButton.onClick = [this] { room::Randomizer::randomizeSelected (proc, random); };
+    randomButton.onRightClick = [this]
+    {
+        randomizePage.setVisible (! randomizePage.isVisible());
+        if (randomizePage.isVisible())
+            randomizePage.toFront (true);
+    };
     content.addAndMakeVisible (menuButton);
     menuButton.onClick = [this] { showMainMenu(); };
     updates.onResult = [this] { menuButton.setBadge (updates.isUpdateAvailable()); };
@@ -1506,56 +1530,64 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     loadScreen.addAndMakeVisible (roomScreen);   // on the stage, so drops over it still reach the stage
     content.addAndMakeVisible (toneScreen);
 
-    // --- Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size ---
+    // --- Shape the room: intensity -> glitch (sync, amount) | tone -> space (sync, auto) | tail -> size ---
     setupKnob (intensity, ParamIDs::intensity, "intensity", 30.0f, "0", "100", "200", false,
               "how much of the room you hear: its decay, tone and resonances. 50 is the room as measured, 100 twice as strong, "
-              "and past 100 it turns extreme: shimmer and smear, then breaking up. glitch follows it: the higher, the more it stutters.");
-    setupKnob (space, ParamIDs::balance, "space", 30.0f, "", "", "", false,
-              "how much of the room's space you keep: its decay and width. tone and space are one balance: turn one and the other follows.");
+              "and past 100 it turns extreme: shimmer and smear, then breaking up.");
+    setupKnob (glitchAmount, ParamIDs::glitchAmount, "glitch", 15.0f, "", "", "", false,
+              "how much it glitches: how often, how many repeats, how chopped.");
+    setupKnob (tone, ParamIDs::toneAmount, "tone", 30.0f, "", "", "", false,
+              "how much of the room's tone you keep: its eq and the notes that ring. sync makes tone and space move against each other.");
+    setupKnob (space, ParamIDs::spaceAmount, "space", 30.0f, "", "", "", false,
+              "how much of the room's space you keep: its decay and width. sync makes tone and space move against each other.");
     setupKnob (tail, ParamIDs::tail, "tail", 30.0f, "0.3", "", "6 s", false,
               "how long the room rings out.");
     setupKnob (size, ParamIDs::size, "size", 30.0f, "small", "", "big", false,
               "how big the room is: shorter or longer decays, like a smaller or larger version of the same room.");
 
-    // Tone is the other end of the same balance: tone = 1 - balance. It isn't attached
-    // to a parameter of its own; it drives balance (with gestures, so hosts record it).
+    // Tone and space are separate knobs; with sync on, turning one turns the other the opposite way.
+    lastTone = tone.slider.getValue();
+    lastSpace = space.slider.getValue();
+    tone.slider.onValueChange = [this] { syncToneSpace (true, tone.slider.isMouseButtonDown()); };
+    space.slider.onValueChange = [this] { syncToneSpace (false, space.slider.isMouseButtonDown()); };
+    for (auto* k : { &tone, &space })
     {
-        setupKnob (tone, {}, "tone", 30.0f, "", "", "", false,
-                  "how much of the room's tone you keep: its eq and the notes that ring. tone and space are one balance: turn one and the other follows.");
-        tone.slider.setRange (0.0, 1.0, 0.01);
-        tone.slider.setDoubleClickReturnValue (true, 0.5);
-        tone.slider.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " tone"; };
-        auto* balanceParam = proc.apvts.getParameter (ParamIDs::balance);
-        tone.slider.setValue (1.0 - balanceParam->convertFrom0to1 (balanceParam->getValue()), juce::dontSendNotification);
-        tone.slider.onDragStart = [balanceParam] { balanceParam->beginChangeGesture(); };
-        tone.slider.onDragEnd = [balanceParam] { balanceParam->endChangeGesture(); };
-        tone.slider.onValueChange = [this, balanceParam]
+        k->slider.onDragStart = [this, k]
         {
-            const auto b = 1.0f - (float) tone.slider.getValue();
-            if (std::abs (balanceParam->convertFrom0to1 (balanceParam->getValue()) - b) > 0.001f)
-                balanceParam->setValueNotifyingHost (balanceParam->convertTo0to1 (b));
+            if (toneSync.getToggleState())
+                proc.apvts.getParameter (k == &tone ? ParamIDs::spaceAmount : ParamIDs::toneAmount)->beginChangeGesture();
+        };
+        k->slider.onDragEnd = [this, k]
+        {
+            if (toneSync.getToggleState())
+                proc.apvts.getParameter (k == &tone ? ParamIDs::spaceAmount : ParamIDs::toneAmount)->endChangeGesture();
         };
     }
-    auto balanceText = [this] (bool asTone)
+    auto autoText = [this] (bool asTone)
     {
         return [this, asTone] (double v)
         {
-            const auto isAuto = autoBalance.getToggleState();
-            auto b = isAuto ? proc.getDetectedBalance() : (float) (asTone ? 1.0 - v : v);
-            const auto shown = asTone ? 1.0f - b : b;
-            return juce::String (isAuto ? "auto: " : "") + juce::String (juce::roundToInt (shown * 100.0f)) + (asTone ? " tone" : " space");
+            if (autoBalance.getToggleState())
+            {
+                const auto d = proc.getDetectedBalance();
+                return "auto: " + juce::String (juce::roundToInt ((asTone ? 1.0f - d : d) * 100.0f)) + (asTone ? " tone" : " space");
+            }
+            return juce::String (juce::roundToInt (v * 100.0)) + (asTone ? " tone" : " space");
         };
     };
-    tone.slider.textFromValueFunction = balanceText (true);
-    space.slider.textFromValueFunction = balanceText (false);
+    tone.slider.textFromValueFunction = autoText (true);
+    space.slider.textFromValueFunction = autoText (false);
 
     glitchKey.getProperties().set ("style", "lightkey");
-    glitchKey.setTooltip ("glitch: stutters the room now and then, repeating short slices of it. how much follows intensity.");
+    glitchKey.setTooltip ("glitch: stutters the room now and then, repeating short slices of it. the small knob sets how much.");
     content.addAndMakeVisible (glitchKey);
     glitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::glitch, glitchKey);
     syncDot.setTooltip ("sync: glitch in time with your song (1/32 to 1/8 slices, on the 1/16s)");
     content.addAndMakeVisible (syncDot);
     syncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::glitchSync, syncDot);
+    toneSync.setTooltip ("sync: tone and space move together, against each other (more tone, less space)");
+    content.addAndMakeVisible (toneSync);
+    toneSyncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::toneSpaceSync, toneSync);
     autoBalance.getProperties().set ("style", "lightkey");
     autoBalance.setTooltip ("auto: set tone and space from what ROOM detected in the sound");
     content.addAndMakeVisible (autoBalance);
@@ -1580,8 +1612,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
               "how loud the noise is. all the way down, it's off.");
     setupKnob (noiseFollow, ParamIDs::noiseFollow, "follow", 20.0f, "always", "", "input", false,
               "down: the noise plays all the time. up: it follows your sound, only playing while audio comes in.");
-    setupKnob (rate, ParamIDs::rate, "rate", 40.0f, "clean", "", "crushed", false,
-              "sample-rate reduction on the room, like resampling in edison: hard steps and aliasing, no smoothing. "
+    setupKnob (rate, ParamIDs::rate, "rate", 40.0f, "full", "", "low", false,
+              "clean sample-rate reduction on the whole sound, like resampling with the filters on: darker and lower, never crunchy. "
               "all the way left (44.1 khz) it's off.");
 
     // --- STUDIOS ---
@@ -1634,6 +1666,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addChildComponent (licensePage);
     licensePage.onChange = [this] { repaint(); };
 
+    content.addChildComponent (randomizePage);
     content.addChildComponent (about);
     about.onTour = [this] { showTour(); };
     content.addChildComponent (tour);
@@ -1656,6 +1689,34 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 RoomAudioProcessorEditor::~RoomAudioProcessorEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void RoomAudioProcessorEditor::turnByHand (bool toneKnob, double value)
+{
+    auto& s = (toneKnob ? tone : space).slider;
+    const auto before = s.onValueChange;
+    s.onValueChange = nullptr;
+    s.setValue (value, juce::sendNotificationSync);
+    s.onValueChange = before;
+    syncToneSpace (toneKnob, true);
+}
+
+void RoomAudioProcessorEditor::syncToneSpace (bool fromTone, bool byHand)
+{
+    auto& moved = fromTone ? tone.slider : space.slider;
+    auto& last = fromTone ? lastTone : lastSpace;
+    const auto v = moved.getValue();
+    const auto delta = v - last;
+    last = v;
+    // Only a hand on the knob drags the other one along (host automation and the other
+    // knob catching up don't bounce back).
+    if (! toneSync.getToggleState() || ! byHand || delta == 0.0)
+        return;
+    auto& other = fromTone ? space.slider : tone.slider;
+    auto* otherParam = proc.apvts.getParameter (fromTone ? ParamIDs::spaceAmount : ParamIDs::toneAmount);
+    const auto target = juce::jlimit (0.0, 1.0, other.getValue() - delta);
+    (fromTone ? lastSpace : lastTone) = target;
+    otherParam->setValueNotifyingHost (otherParam->convertTo0to1 ((float) target));
 }
 
 void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const juce::String& name, float radius,
@@ -1697,7 +1758,7 @@ void RoomAudioProcessorEditor::setTipsEnabled (bool on)
 void RoomAudioProcessorEditor::newPreset (bool keepName)
 {
     proc.resetToInit (keepName);
-    for (auto* k : { &intensity, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
+    for (auto* k : { &intensity, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
     content.repaint();
@@ -1858,7 +1919,7 @@ void RoomAudioProcessorEditor::timerCallback()
     }
 
     // LFO assignments can change from presets or the right-click menu.
-    for (auto* k : { &intensity, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
+    for (auto* k : { &intensity, &glitchAmount, &tone, &space, &tail, &size, &mix, &output, &noiseLevel, &noiseFollow, &rate })
         k->slider.refreshModulation();
     advancedPanel.refreshModulation();
 
@@ -1874,16 +1935,12 @@ void RoomAudioProcessorEditor::timerCallback()
         b->setAlpha (valid ? 1.0f : 0.45f);
     }
 
-    // Tone and space are one balance: keep tone where balance is (or what auto found).
+    // Auto sets tone and space from the sound: the knobs rest meanwhile.
     const auto isAuto = autoBalance.getToggleState();
     for (auto* k : { &tone, &space })
         if (k->slider.isEnabled() == isAuto)
             k->slider.setEnabled (! isAuto);
-    if (! tone.slider.isMouseButtonDown())
-    {
-        const auto b = proc.apvts.getRawParameterValue (ParamIDs::balance)->load();
-        tone.slider.setValue (1.0 - b, juce::dontSendNotification);
-    }
+    glitchAmount.slider.setAlpha (glitchKey.getToggleState() ? 1.0f : 0.5f);
 
     // The live values
     content.repaint (controlsArea.toNearestInt());
@@ -1967,9 +2024,13 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     // Controls module: dividers, titles and the signal lines (the values are drawn live)
     const auto y0 = controlsArea.getY();
     g.setColour (Colours::moduleEdge);
-    for (auto x : { 312.0f, 612.0f })
+    for (auto x : { 301.0f, 590.0f })
         g.drawLine (x, y0 + 18.0f, x, controlsArea.getBottom() - 18.0f, 1.0f);
-    EvilleLookAndFeel::drawCaps (g, "intensity", { 36.0f, y0 + 20.0f, 140.0f, 16.0f }, 12.5f, Colours::dustWhite);
+    EvilleLookAndFeel::drawCaps (g, "intensity", { 40.0f, y0 + 18.0f, 140.0f, 16.0f }, 12.5f, Colours::dustWhite);
+    EvilleLookAndFeel::drawCaps (g, "amount", juce::Rectangle<float> (60.0f, 12.0f).withCentre (knobCentre (glitchAmount).translated (0.0f, -knobRadius (glitchAmount) - 11.0f)),
+                                 9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
+    EvilleLookAndFeel::drawCaps (g, "sync", juce::Rectangle<float> (40.0f, 12.0f).withCentre (toneSync.getBounds().toFloat().getCentre().translated (0.0f, 17.0f)),
+                                 9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
     for (auto* k : { &tone, &space, &tail, &size })
         EvilleLookAndFeel::drawCaps (g, k->label.getText().toLowerCase(),
                                      juce::Rectangle<float> (120.0f, 16.0f).withCentre ({ knobCentre (*k).x, y0 + 24.0f }),
@@ -1980,9 +2041,9 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     // Bottom module: divider, titles, the rate knob's ends
     const auto y1 = finishArea.getY();
     g.setColour (Colours::moduleEdge);
-    g.drawLine (560.0f, y1 + 18.0f, 560.0f, finishArea.getBottom() - 18.0f, 1.0f);
-    EvilleLookAndFeel::drawCaps (g, "noise", { 36.0f, y1 + 18.0f, 100.0f, 16.0f }, 12.5f, Colours::dustWhite);
-    EvilleLookAndFeel::drawCaps (g, "rate", { 584.0f, y1 + 18.0f, 100.0f, 16.0f }, 12.5f, Colours::dustWhite);
+    g.drawLine (590.0f, y1 + 18.0f, 590.0f, finishArea.getBottom() - 18.0f, 1.0f);   // in line with the controls above
+    EvilleLookAndFeel::drawCaps (g, "noise", { 40.0f, y1 + 18.0f, 100.0f, 16.0f }, 12.5f, Colours::dustWhite);
+    EvilleLookAndFeel::drawCaps (g, "rate", { 618.0f, y1 + 18.0f, 100.0f, 16.0f }, 12.5f, Colours::dustWhite);
     for (auto* k : { &noiseLevel, &noiseFollow })
         EvilleLookAndFeel::drawCaps (g, k->label.getText().toLowerCase(),
                                      juce::Rectangle<float> (90.0f, 12.0f).withCentre (knobCentre (*k).translated (0.0f, -knobRadius (*k) - 12.0f)),
@@ -1992,7 +2053,7 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
         const auto r = knobRadius (rate);
         g.setFont (Fonts::sans (11.5f));
         g.setColour (Colours::dustWhite.withAlpha (0.7f));
-        for (auto [text, side] : { std::pair { "clean", -1.0f }, { "crushed", 1.0f } })
+        for (auto [text, side] : { std::pair { "full", -1.0f }, { "low", 1.0f } })
             g.drawText (text, juce::Rectangle<float> (70.0f, 14.0f).withCentre ({ c.x + side * (r * 0.72f + 6.0f), c.y + r * 0.72f + 14.0f }),
                         juce::Justification::centred);
     }
@@ -2064,13 +2125,19 @@ void RoomAudioProcessorEditor::paintSignalLines (juce::Graphics& g)
         drawNode (g, { c.x, c.y + ring (intensity) });
         strokeRoute (g, { { c.x, c.y + ring (intensity) }, { c.x, dot.y }, { dot.x - dotR - 1.0f, dot.y } }, false);
         strokeRoute (g, { { dot.x + dotR + 1.0f, dot.y }, { key.getX() - 1.0f, dot.y } }, true);
+        // the amount knob sits on top of the key it sets
+        const auto ga = knobCentre (glitchAmount);
+        strokeRoute (g, { { ga.x, ga.y + ring (glitchAmount) - 2.0f }, { ga.x, key.getY() - 1.0f } }, false);
     }
     // tone -> space: an arch from the top of tone into the top of space; auto under both
     {
         const auto a = knobCentre (tone), b = knobCentre (space);
-        const auto archY = std::min (a.y, b.y) - ring (tone) - 8.0f;
+        const auto archY = toneSync.getBounds().toFloat().getCentreY();
+        const auto dot = toneSync.getBounds().toFloat().getCentre();
+        const auto dotR = (float) toneSync.getWidth() * 0.5f;
         drawNode (g, { a.x, a.y - ring (tone) });
-        strokeRoute (g, { { a.x, a.y - ring (tone) }, { a.x, archY }, { b.x, archY }, { b.x, b.y - ring (space) } }, true);
+        strokeRoute (g, { { a.x, a.y - ring (tone) }, { a.x, archY }, { dot.x - dotR - 1.0f, archY } }, false);
+        strokeRoute (g, { { dot.x + dotR + 1.0f, archY }, { b.x, archY }, { b.x, b.y - ring (space) } }, true);
         const auto key = autoBalance.getBounds().toFloat();
         strokeRoute (g, { { a.x, a.y + ring (tone) }, { a.x, key.getCentreY() }, { key.getX() - 4.0f, key.getCentreY() } }, false, true);
         strokeRoute (g, { { b.x, b.y + ring (space) }, { b.x, key.getCentreY() }, { key.getRight() + 4.0f, key.getCentreY() } }, false, true);
@@ -2105,13 +2172,15 @@ void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
         g.drawFittedText (text, r.toNearestInt(), j, 1, 0.8f);
     };
     value (juce::String (juce::roundToInt (intensity.slider.getValue() * 50.0)) + "%",
-           { 36.0f, knobCentre (intensity).y - 22.0f, 100.0f, 44.0f }, 34.0f, juce::Justification::centredLeft);
+           { 40.0f, knobCentre (intensity).y - 22.0f, 86.0f, 44.0f }, 34.0f, juce::Justification::centredLeft);
 
     const auto isAuto = autoBalance.getToggleState();
-    const auto b = isAuto ? proc.getDetectedBalance() : (float) space.slider.getValue();
-    value (juce::String (juce::roundToInt ((1.0f - b) * 100.0f)), juce::Rectangle<float> (110.0f, 32.0f).withCentre ({ knobCentre (tone).x, y0 + 50.0f }),
+    const auto d = proc.getDetectedBalance();
+    const auto toneV = isAuto ? 1.0f - d : (float) tone.slider.getValue();
+    const auto spaceV = isAuto ? d : (float) space.slider.getValue();
+    value (juce::String (juce::roundToInt (toneV * 100.0f)), juce::Rectangle<float> (100.0f, 32.0f).withCentre ({ knobCentre (tone).x, y0 + 50.0f }),
            30.0f, juce::Justification::centred);
-    value (juce::String (juce::roundToInt (b * 100.0f)), juce::Rectangle<float> (110.0f, 32.0f).withCentre ({ knobCentre (space).x, y0 + 50.0f }),
+    value (juce::String (juce::roundToInt (spaceV * 100.0f)), juce::Rectangle<float> (100.0f, 32.0f).withCentre ({ knobCentre (space).x, y0 + 50.0f }),
            30.0f, juce::Justification::centred);
     const auto t = tail.slider.getValue();
     value (juce::String (t, t < 10.0 ? 1 : 0) + " s", juce::Rectangle<float> (120.0f, 32.0f).withCentre ({ knobCentre (tail).x, y0 + 50.0f }),
@@ -2163,6 +2232,7 @@ void RoomAudioProcessorEditor::layoutContent()
     browser.setBounds (full);
     tour.setBounds (full);
     about.setBounds (full);
+    randomizePage.setBounds (full);
     licensePage.setBounds (full);
     licensePage.update();
     roomBrowser.setBounds (full);
@@ -2205,59 +2275,30 @@ void RoomAudioProcessorEditor::layoutContent()
         k.slider.setBounds (juce::Rectangle<int> (2 * (r + 26), 2 * r + 12).withCentre (c));
         k.label.setVisible (false);   // titled in the module's print
     };
-    placeKnob (intensity, { 172, y0 + 68 });
-    syncDot.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 206, y0 + 136 }));
-    glitchKey.setBounds (236, y0 + 124, 66, 24);
-    placeKnob (tone, { 392, y0 + 108 });
-    placeKnob (space, { 532, y0 + 108 });
-    autoBalance.setBounds (juce::Rectangle<int> (58, 20).withCentre ({ 462, y0 + 152 }));
-    placeKnob (tail, { 680, y0 + 108 });
-    placeKnob (size, { 812, y0 + 108 });
+    // three equal sections: 12..301 | 301..590 | 590..880
+    placeKnob (intensity, { 166, y0 + 70 });
+    syncDot.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 198, y0 + 138 }));
+    glitchKey.setBounds (226, y0 + 126, 60, 24);
+    placeKnob (glitchAmount, { 256, y0 + 92 });
+    placeKnob (tone, { 375, y0 + 108 });
+    placeKnob (space, { 515, y0 + 108 });
+    toneSync.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 445, y0 + 65 }));
+    autoBalance.setBounds (juce::Rectangle<int> (58, 20).withCentre ({ 445, y0 + 152 }));
+    placeKnob (tail, { 665, y0 + 108 });
+    placeKnob (size, { 805, y0 + 108 });
 
     // --- Advanced (the right side, full height) ---
     advancedPanel.setBounds (advancedArea.reduced (0.0f, 12.0f).withTrimmedRight (12.0f).toNearestInt().reduced (4));
 
     // --- Bottom: noise [screen] -> level / follow | rate ---
     const auto y1 = (int) finishArea.getY();
-    noiseScreen.setBounds (64, y1 + 39, 270, 92);
+    noiseScreen.setBounds (86, y1 + 39, 300, 92);   // the noise group, centred in its half
     noiseNameArea = juce::Rectangle<int> (130, 18).withCentre ({ noiseScreen.getBounds().getCentreX(), y1 + 22 });
     noiseScreen.prev.setBounds (juce::Rectangle<int> (26, 20).withCentre ({ noiseNameArea.getX() - 14, y1 + 22 }));
     noiseScreen.next.setBounds (juce::Rectangle<int> (26, 20).withCentre ({ noiseNameArea.getRight() + 14, y1 + 22 }));
-    placeKnob (noiseLevel, { 424, y1 + 52 });
-    placeKnob (noiseFollow, { 424, y1 + 118 });
-    placeKnob (rate, { 660, y1 + 78 });
-}
-
-//==============================================================================
-// Randomize menu (right-click the Randomize button)
-
-void RoomAudioProcessorEditor::showRandomizeMenu()
-{
-    using P = RoomAudioProcessor;
-    const std::pair<int, const char*> groups[] = {
-        { P::randomRoom,     "room knobs  (intensity, tone / space, tail, size)" },
-        { P::randomAdvanced, "advanced  (pre-delay, width, damping, ducking)" },
-        { P::randomEq,       "eq bands" },
-        { P::randomFinish,   "tape and auto eq" },
-        { P::randomLfos,     "lfo settings  (shape, rate)" },
-    };
-
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("randomize");
-    menu.addItem ("randomize now", proc.randomizeMask != 0, false, [this] { proc.randomizeKnobs (random); });
-    menu.addSeparator();
-    menu.addSectionHeader ("what moves");
-    for (auto& [bit, name] : groups)
-        menu.addItem (name, true, (proc.randomizeMask & bit) != 0, [this, bit = bit]
-        {
-            proc.randomizeMask ^= bit;
-            showRandomizeMenu();   // stay open so several can be ticked in one go
-        });
-    menu.addSeparator();
-    menu.addItem ("all", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomAll; showRandomizeMenu(); });
-    menu.addItem ("none", true, false, [this] { proc.randomizeMask = 0; showRandomizeMenu(); });
-    menu.addItem ("back to default", true, false, [this] { proc.randomizeMask = RoomAudioProcessor::randomDefault; showRandomizeMenu(); });
-    EvilleLookAndFeel::showMenu (menu, randomButton);
+    placeKnob (noiseLevel, { 476, y1 + 52 });
+    placeKnob (noiseFollow, { 476, y1 + 118 });
+    placeKnob (rate, { 690, y1 + 80 });
 }
 
 //==============================================================================

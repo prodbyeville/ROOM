@@ -5,6 +5,7 @@
 #include "EvilleLookAndFeel.h"
 #include "presets/PresetBrowser.h"
 #include "UpdateChecker.h"
+#include "RandomizePage.h"
 
 // The ROOM unit (eville): one piece of hardware filling the window. The
 // advanced section (right) opens from its key; the window grows to fit it.
@@ -66,6 +67,8 @@ private:
     void timerCallback() override;
     struct Card { juce::String key, name, decay, tone; juce::Rectangle<float> bounds; float depth = 0.0f; };
     void paintCard (juce::Graphics&, const Card&, float scale, float angle, float alpha, bool loaded, bool hot);
+    void paintCards (juce::Graphics&, bool front);
+    double lastTick = 0.0;
 
     RoomAudioProcessor& proc;
     std::unique_ptr<juce::FileChooser> chooser;
@@ -354,13 +357,13 @@ private:
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
-    IconButton randomButton { IconButton::Icon::randomize, "randomize the knobs (right-click to choose what moves)" };
+    IconButton randomButton { IconButton::Icon::randomize, "randomize (right-click: choose what moves and how wild)" };
     IconButton advancedButton { IconButton::Icon::advanced, "advanced: pre-delay, size, damping, ducking, freeze and the lfos" };
-    void showRandomizeMenu();
     BypassSwitch bypassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     Knob mix, output;
     juce::Random random;
+    RandomizePage randomizePage { proc, random };
 
     // Load / room / tone
     LoadScreen loadScreen;
@@ -372,13 +375,19 @@ private:
     ToneScreen toneScreen { proc };
 
     // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
-    Knob intensity, tone, space, tail, size;   // tone and space are one parameter (balance), seen from both ends
+    Knob intensity, glitchAmount, tone, space, tail, size;
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
     juce::ToggleButton glitchKey { "glitch" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> glitchAttachment;
-    SyncDot syncDot;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
+    SyncDot syncDot, toneSync;   // glitch in time; tone and space move opposite
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment, toneSyncAttachment;
+    double lastTone = 0.5, lastSpace = 0.5;   // for moving the other one while synced
+    void syncToneSpace (bool fromTone, bool byHand);
+public:
+    /** Turn tone (or space) as a hand on the knob would (tests). */
+    void turnByHand (bool toneKnob, double value);
+private:
     void paintSignalLines (juce::Graphics&);
     /** The knob's centre in base coordinates (what the signal lines join). */
     static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }

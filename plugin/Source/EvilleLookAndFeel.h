@@ -92,6 +92,7 @@ public:
     /** Show a menu in the room style, wherever the host puts it. */
     static void showMenu (juce::PopupMenu&, juce::Component& target);
     static constexpr int menuMargin = 10;   // room for the menu's shadow
+    static constexpr int menuTextInset = 12; // headers, items and info lines all start here
 
     juce::Font getComboBoxFont (juce::ComboBox&) override { return Fonts::sans (13.0f); }
     juce::Font getTextButtonFont (juce::TextButton&, int height) override;
