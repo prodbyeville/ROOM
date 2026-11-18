@@ -1492,7 +1492,11 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     };
     content.addAndMakeVisible (menuButton);
     menuButton.onClick = [this] { showMainMenu(); };
-    updates.onResult = [this] { menuButton.setBadge (updates.isUpdateAvailable()); };
+    updates.onResult = [this]
+    {
+        menuButton.setBadge (updates.isUpdateAvailable());
+        announcePending = true;   // a check found something: say so (if it's news)
+    };
     menuButton.setBadge (updates.isUpdateAvailable());
     content.addAndMakeVisible (advancedButton);
     advancedButton.onClick = [this] { setAdvancedOpen (! proc.advancedOpen); };
@@ -1845,6 +1849,59 @@ void RoomAudioProcessorEditor::showMainMenu()
     EvilleLookAndFeel::showMenu (m, menuButton);
 }
 
+bool RoomAudioProcessorEditor::overlayShowing() const
+{
+    const juce::Component* overlays[] = { &tour, &about, &licensePage, &browser, &roomBrowser,
+                                          &saveDialog, &roomSaveDialog, &randomizePage };
+    for (auto* c : overlays)
+        if (c->isVisible())
+            return true;
+    return false;
+}
+
+bool RoomAudioProcessorEditor::wouldAnnounceUpdate() const
+{
+    if (updateAnnounced || ! updates.isUpdateAvailable())
+        return false;
+    if (auto s = UpdateChecker::openSettings())
+    {
+        // "later" holds that version off for a day; a newer one shows straight away
+        const auto snoozed = s->getValue ("updateSnoozed");
+        const auto at = s->getValue ("updateSnoozedAt").getLargeIntValue();
+        if (snoozed == updates.getLatestVersion() && juce::Time::currentTimeMillis() - at < (juce::int64) 24 * 60 * 60 * 1000)
+            return false;
+    }
+    return true;
+}
+
+void RoomAudioProcessorEditor::snoozeUpdate()
+{
+    updateAnnounced = true;
+    if (auto s = UpdateChecker::openSettings())
+    {
+        s->setValue ("updateSnoozed", updates.getLatestVersion());
+        s->setValue ("updateSnoozedAt", juce::String (juce::Time::currentTimeMillis()));
+        s->saveIfNeeded();
+    }
+}
+
+void RoomAudioProcessorEditor::maybeAnnounceUpdate()
+{
+    if (! wouldAnnounceUpdate())
+    {
+        announcePending = false;
+        return;
+    }
+    if (overlayShowing() || ! isShowing())
+        return;   // try again on the next tick, once nothing else is up
+    announcePending = false;
+    snoozeUpdate();   // shown once; "later" (or closing it) keeps it away for a day
+    EvilleLookAndFeel::showDialog (content, "update available",
+                                   "room v" + updates.getLatestVersion() + " is out (you have v" + UpdateChecker::currentVersion() + ").",
+                                   { "download", "later" }, {},
+                                   [this] (int r, const juce::String&) { if (r == 1) juce::URL (updates.getDownloadUrl()).launchInDefaultBrowser(); });
+}
+
 void RoomAudioProcessorEditor::showAbout()
 {
     about.setVisible (true);
@@ -1918,6 +1975,12 @@ void RoomAudioProcessorEditor::timerCallback()
         updates.checkIfDue();                  // does nothing if the last check is under 30 min old
         ticksUntilUpdateCheck = 30 * 60 * 5;   // look again in 5 minutes while the window stays open
     }
+    // Tell about a new version by itself (not just the menu's dot).
+    if (ticksUntilAnnounce > 0 && --ticksUntilAnnounce == 0)
+        announcePending = true;
+    if (announcePending)
+        maybeAnnounceUpdate();
+
     // The tour waits for sign-in: while ROOM is locked it holds, then starts once the
     // sign-in page has gone (it used to give up if ROOM opened locked).
     if (proc.isLicenseLocked() && ticksUntilTour > 0)

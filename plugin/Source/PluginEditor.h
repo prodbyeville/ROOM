@@ -297,6 +297,11 @@ public:
     static inline bool autoShowTour = true;
     void openAbout() { showAbout(); }
 
+    /** An update is known, not snoozed and not shown yet in this window (tests). */
+    bool wouldAnnounceUpdate() const;
+    /** "later": don't announce this version again for a day. */
+    void snoozeUpdate();
+
     /** Show the full room info on the room screen. */
     void showRoomInfo (bool show) { roomScreen.setShowInfo (show); }
 
@@ -343,6 +348,10 @@ private:
     LicensePage licensePage { proc };
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled
+    int ticksUntilAnnounce = 45;      // say "update available" a few seconds after opening
+    bool announcePending = false, updateAnnounced = false;
+    void maybeAnnounceUpdate();
+    bool overlayShowing() const;
 
     // Fixed geometry (base coordinates): the top bar, then the stage, the
     // controls module and the bottom module; advanced pops out on the right.

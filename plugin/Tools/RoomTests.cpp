@@ -2194,6 +2194,45 @@ namespace
                                                + juce::String (lossDb, 2) + " dB), no crunch");
         }
 
+        // --- A known newer version is announced by itself; "later" holds it off a day ---
+        if (auto settings = UpdateChecker::openSettings())
+        {
+            const auto oldLatest = settings->getValue ("latestVersion");
+            const auto oldSnooze = settings->getValue ("updateSnoozed"), oldAt = settings->getValue ("updateSnoozedAt");
+            settings->setValue ("latestVersion", "99.0.0");
+            settings->removeValue ("updateSnoozed");
+            settings->removeValue ("updateSnoozedAt");
+            settings->saveIfNeeded();
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (ed.wouldAnnounceUpdate(), "a newer version is announced without asking");
+                ed.snoozeUpdate();
+                check (! ed.wouldAnnounceUpdate(), "and only once");
+            }
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (! ed.wouldAnnounceUpdate(), "after later, that version waits a day");
+            }
+            if (auto s2 = UpdateChecker::openSettings()) { s2->setValue ("latestVersion", "99.1.0"); s2->saveIfNeeded(); }
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (ed.wouldAnnounceUpdate(), "an even newer version is announced straight away");
+            }
+            if (auto s3 = UpdateChecker::openSettings())
+            {
+                s3->setValue ("latestVersion", oldLatest);
+                s3->setValue ("updateSnoozed", oldSnooze);
+                s3->setValue ("updateSnoozedAt", oldAt);
+                s3->saveIfNeeded();
+            }
+        }
+
         // --- Size reads 0..100 %, 50 % = the room as measured (1x) ---
         {
             RoomAudioProcessor pp;
