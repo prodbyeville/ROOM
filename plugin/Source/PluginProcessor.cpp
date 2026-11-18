@@ -122,6 +122,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     noiseTypeParam   = apvts.getRawParameterValue (ParamIDs::noiseType);
     noiseLevelParam  = apvts.getRawParameterValue (ParamIDs::noiseLevel);
     noiseFollowParam = apvts.getRawParameterValue (ParamIDs::noiseFollow);
+    noiseStopParam   = apvts.getRawParameterValue (ParamIDs::noiseStop);
     rateParam        = apvts.getRawParameterValue (ParamIDs::rate);
     rateDryParam     = apvts.getRawParameterValue (ParamIDs::rateDry);
     rateReverbParam  = apvts.getRawParameterValue (ParamIDs::rateReverb);
@@ -284,6 +285,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::noiseFollow, 1 }, "Noise Follow",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::noiseStop, 1 }, "Noise Stop", true));
     {
         // Hz, but the knob runs the other way: left = 44.1 kHz (clean, off), right = 500 Hz
         // (crushed), on a log scale so the musical part isn't squeezed into the end.
@@ -405,6 +408,8 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         for (int ch = 0; ch < std::min (numIn, buffer.getNumChannels()); ++ch)
             peak = std::max (peak, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
         inputLevel = std::max (peak, inputLevel.load() * 0.9f);
+        // For the noise's stop: how long nothing has come in (-70 dBFS)
+        silentSamples = peak < 3.2e-4f ? std::min (silentSamples + buffer.getNumSamples(), 1 << 28) : 0;
     }
 
     // Record into ROOM: copy the incoming audio before any processing.
@@ -510,6 +515,8 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         noise.setTargets (juce::roundToInt (noiseTypeParam->load()), eff (ParamIDs::noiseLevel, noiseLevelParam),
                           eff (ParamIDs::noiseFollow, noiseFollowParam));
         const auto noiseOn = ! noise.isIdle();
+        noise.setIdle (noiseStopParam->load() > 0.5f && ! blockPlaying
+                       && silentSamples > (int) (0.25 * std::max (1.0, currentSampleRate.load())));
         if (noiseOn)
             noise.trackInput (part, len);
 

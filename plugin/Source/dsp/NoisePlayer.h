@@ -244,6 +244,8 @@ public:
         gateUp = (float) (1.0 - std::exp (-1.0 / (0.02 * sr)));
         gateDown = (float) (1.0 - std::exp (-1.0 / (0.3 * sr)));
         fadeStep = (float) (1.0 / std::max (1.0, 0.05 * sr));
+        idleDown = (float) (1.0 - std::exp (-1.0 / (0.03 * sr / 4.0)));
+        idleUp = (float) (1.0 - std::exp (-1.0 / (0.01 * sr / 4.0)));
         reset();
     }
 
@@ -280,6 +282,10 @@ public:
 
     bool isIdle() const { return level.getTargetValue() <= 0.0f && ! level.isSmoothing(); }
 
+    /** Stop: nothing is playing (transport stopped, nothing coming in), so the noise
+        fades out (30 ms) until something plays again (back in 10 ms). */
+    void setIdle (bool nothingPlaying) { idle = nothingPlaying; }
+
     /** Before the room: follow the input's level (per sample, for Follow). */
     void trackInput (const juce::AudioBuffer<float>& in, int numSamples)
     {
@@ -309,7 +315,8 @@ public:
         const auto chans = std::min (2, out.getNumChannels());
         for (int i = 0; i < n; ++i)
         {
-            const auto g = level.getNextValue() * ((1.0f - follow) + follow * gate[(size_t) i]);
+            idleGain += (idle ? idleDown : idleUp) * ((idle ? 0.0f : 1.0f) - idleGain);
+            const auto g = level.getNextValue() * idleGain * ((1.0f - follow) + follow * gate[(size_t) i]);
             float s[2] {};
             read (heads[0], s, fade < 1.0f ? std::sin (fade * juce::MathConstants<float>::halfPi) : 1.0f);
             if (fade < 1.0f)
@@ -349,6 +356,8 @@ private:
     std::vector<float> gate;
     juce::SmoothedValue<float> level;
     float follow = 0.0f, env = 0.0f, gateNow = 0.0f;
+    bool idle = false;
+    float idleGain = 1.0f, idleDown = 0.01f, idleUp = 0.01f;
     float envAttack = 0.0f, envRelease = 0.0f, gateUp = 0.0f, gateDown = 0.0f, fadeStep = 0.01f;
     Head heads[2];
     float fade = 1.0f;

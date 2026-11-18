@@ -1825,6 +1825,7 @@ namespace
             }
             setParam (rig.proc, ParamIDs::noiseLevel, 0.8f);
             setParam (rig.proc, ParamIDs::noiseFollow, 0.0f);
+            setParam (rig.proc, ParamIDs::noiseStop, 0.0f);   // these hear the noise with nothing playing
             rig.proc.reset();
             std::vector<float> silence ((size_t) (0.5 * Rig::sr), 0.0f);
             const auto always = rig.run (silence, 1.0);
@@ -1842,6 +1843,20 @@ namespace
             for (size_t i = (size_t) (0.3 * Rig::sr); i < (size_t) (0.9 * Rig::sr); ++i)
                 noiseOnTop = std::max (noiseOnTop, std::abs (playing[i] - loud[i]));
             check (noiseOnTop > 0.003f, "noise at follow 1 plays while sound comes in");
+
+            // Stop (on by default): with the transport stopped and nothing coming in, the noise goes quiet
+            check (rig.proc.apvts.getParameter (ParamIDs::noiseStop)->getDefaultValue() > 0.5f, "the noise's stop is on by default");
+            setParam (rig.proc, ParamIDs::noiseStop, 1.0f);
+            setParam (rig.proc, ParamIDs::noiseFollow, 0.0f);
+            rig.proc.reset();
+            const auto stopped = rig.run (silence, 1.0);
+            check (rmsDb (stopped, 0.5, 1.4) < -90.0, "stop: no hiss while nothing plays (" + juce::String (rmsDb (stopped, 0.5, 1.4), 1) + " dB)");
+            rig.proc.reset();
+            const auto stillPlaying = rig.run (loud, 0.2);
+            float onTop = 0.0f;
+            for (size_t i = (size_t) (0.3 * Rig::sr); i < (size_t) (0.9 * Rig::sr); ++i)
+                onTop = std::max (onTop, std::abs (stillPlaying[i] - loud[i]));
+            check (onTop > 0.003f, "stop: the noise plays while sound comes in");
             setParam (rig.proc, ParamIDs::mix, 1.0f);
             setParam (rig.proc, ParamIDs::noiseLevel, 0.0f);
         }
@@ -2169,6 +2184,7 @@ namespace
             setParam (rig.proc, ParamIDs::rateReverb, 0.0f);
             setParam (rig.proc, ParamIDs::noiseType, 1.0f);   // tape hiss: bright
             setParam (rig.proc, ParamIDs::noiseLevel, 0.8f);
+            setParam (rig.proc, ParamIDs::noiseStop, 0.0f);
             std::vector<float> silence ((size_t) (0.6 * Rig::sr), 0.0f);
             setParam (rig.proc, ParamIDs::rateNoise, 1.0f);
             rig.proc.reset();

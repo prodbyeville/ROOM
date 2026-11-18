@@ -1614,6 +1614,9 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
               "how loud the noise is. all the way down, it's off.");
     setupKnob (noiseFollow, ParamIDs::noiseFollow, "follow", 20.0f, "always", "", "input", false,
               "down: the noise plays all the time. up: it follows your sound, only playing while audio comes in.");
+    noiseStop.setTooltip ("stop: the noise goes quiet whenever nothing is playing (transport stopped, nothing coming in)");
+    content.addAndMakeVisible (noiseStop);
+    noiseStopAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::noiseStop, noiseStop);
     setupKnob (rate, ParamIDs::rate, "rate", 40.0f, "full", "", "low", false,
               "clean sample-rate reduction on the whole sound, like resampling with the filters on: darker and lower, never crunchy. "
               "all the way left (44.1 khz) it's off. the d, r and n keys choose what it reaches: the dry sound, the reverb, the noise.");
@@ -2042,6 +2045,8 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     EvilleLookAndFeel::drawCaps (g, "intensity", { 40.0f, y0 + 18.0f, 140.0f, 16.0f }, 12.5f, Colours::dustWhite);
     EvilleLookAndFeel::drawCaps (g, "amount", juce::Rectangle<float> (60.0f, 12.0f).withCentre (knobCentre (glitchAmount).translated (0.0f, -knobRadius (glitchAmount) - 11.0f)),
                                  9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
+    EvilleLookAndFeel::drawCaps (g, "stop", juce::Rectangle<float> (40.0f, 12.0f).withCentre (noiseStop.getBounds().toFloat().getCentre().translated (0.0f, -17.0f)),
+                                 9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centred);
     EvilleLookAndFeel::drawCaps (g, "smooth", { knobCentre (smooth).x + knobRadius (smooth) + 9.0f, knobCentre (smooth).y - 6.0f, 70.0f, 12.0f },
                                  9.0f, Colours::dustWhite.withAlpha (0.8f), juce::Justification::centredLeft);
     EvilleLookAndFeel::drawCaps (g, "sync", juce::Rectangle<float> (40.0f, 12.0f).withCentre (toneSync.getBounds().toFloat().getCentre().translated (0.0f, 17.0f)),
@@ -2314,6 +2319,7 @@ void RoomAudioProcessorEditor::layoutContent()
     noiseScreen.next.setBounds (juce::Rectangle<int> (26, 20).withCentre ({ noiseNameArea.getRight() + 14, y1 + 22 }));
     placeKnob (noiseLevel, { 476, y1 + 52 });
     placeKnob (noiseFollow, { 476, y1 + 118 });
+    noiseStop.setBounds (juce::Rectangle<int> (18, 18).withCentre ({ 536, y1 + 118 }));
     placeKnob (rate, { 690, y1 + 80 });
     for (int k = 0; k < 3; ++k)
         rateKeys[k].setBounds (758 + k * 34, y1 + 104, 28, 20);

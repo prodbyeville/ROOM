@@ -399,6 +399,8 @@ private:
     // The bottom module: noise -> level / follow | rate
     NoiseScreen noiseScreen { proc };
     Knob noiseLevel, noiseFollow, rate;
+    SyncDot noiseStop;   // the noise goes quiet while nothing plays
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> noiseStopAttachment;
     juce::ToggleButton rateKeys[3] { juce::ToggleButton ("d"), juce::ToggleButton ("r"), juce::ToggleButton ("n") };   // Rate on dry / reverb / noise
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> rateKeyAttachments[3];
     juce::Rectangle<int> noiseNameArea;

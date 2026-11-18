@@ -41,6 +41,7 @@ namespace ParamIDs
     inline constexpr const char* noiseType   = "noiseType";
     inline constexpr const char* noiseLevel  = "noiseLevel";
     inline constexpr const char* noiseFollow = "noiseFollow";
+    inline constexpr const char* noiseStop   = "noiseStop";   // the noise goes quiet while nothing plays
     inline constexpr const char* rate        = "rate";       // clean sample-rate reduction, Hz
     inline constexpr const char* rateDry     = "rateDry";    // the D / R / N keys: which paths Rate reaches
     inline constexpr const char* rateReverb  = "rateReverb";
@@ -280,6 +281,8 @@ private:
     std::atomic<float>* noiseTypeParam = nullptr;
     std::atomic<float>* noiseLevelParam = nullptr;
     std::atomic<float>* noiseFollowParam = nullptr;
+    std::atomic<float>* noiseStopParam = nullptr;
+    int silentSamples = 0;   // how long nothing has come in (for the noise's stop)
     std::atomic<float>* rateParam = nullptr;
     std::atomic<float>* rateDryParam = nullptr;
     std::atomic<float>* rateReverbParam = nullptr;
