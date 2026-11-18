@@ -954,10 +954,21 @@ void NoiseScreen::showMenu()
     auto* c = dynamic_cast<juce::AudioParameterChoice*> (type);
     if (c == nullptr)
         return;
+    // Grouped by section (classics, nature, places, machines, tonal), each in list order.
     juce::PopupMenu m;
-    m.addSectionHeader ("noise");
-    for (int i = 0; i < c->choices.size(); ++i)
-        m.addItem (c->choices[i].toLowerCase(), true, i == c->getIndex(), [this, i] { step (i - dynamic_cast<juce::AudioParameterChoice*> (type)->getIndex()); });
+    const auto& infos = room::NoiseBank::infos();
+    juce::StringArray sections;
+    for (const auto& info : infos)
+        if (info.name != "unused")
+            sections.addIfNotAlreadyThere (info.section);
+    for (const auto& section : sections)
+    {
+        m.addSectionHeader (section);
+        for (int i = 0; i < juce::jmin ((int) infos.size(), c->choices.size()); ++i)
+            if (infos[(size_t) i].section == section && infos[(size_t) i].name != "unused")
+                m.addItem (c->choices[i].toLowerCase(), true, i == c->getIndex(),
+                           [this, i] { step (i - dynamic_cast<juce::AudioParameterChoice*> (type)->getIndex()); });
+    }
     EvilleLookAndFeel::showMenu (m, *this);
 }
 
@@ -989,14 +1000,9 @@ void NoiseScreen::paint (juce::Graphics& g)
 
     // The texture per profile: how many particles, how thick the band, how fast it moves,
     // how sparse and sparkly (vinyl), how wide the swell (air).
-    struct Look { int count; float thickness, speed, waves, sparkle; };
-    static constexpr Look looks[] = {
-        { 420, 0.22f, 0.10f, 1.5f, 0.10f },   // vinyl: sparse, with bright specks
-        { 1500, 0.20f, 0.28f, 2.0f, 0.0f },   // tape hiss: dense, quick
-        { 900, 0.42f, 0.07f, 1.0f, 0.0f },    // air: wide, slow swells
-        { 1100, 0.14f, 0.05f, 0.7f, 0.0f },   // room tone: low and still
-    };
-    const auto& look = looks[(size_t) (index % 4)];
+    // (made from each recording's sound by Tools/noise/make_noise_loops.py; see noise.txt)
+    const auto& infos = room::NoiseBank::infos();
+    const auto look = infos[(size_t) juce::jlimit (0, (int) infos.size() - 1, index)].look;
     juce::Random rng (0x524f4f + index * 7919);
     const auto w = r.getWidth(), h = r.getHeight();
     const auto twoPi = juce::MathConstants<float>::twoPi;

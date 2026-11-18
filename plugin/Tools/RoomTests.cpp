@@ -1773,24 +1773,47 @@ namespace
         // --- Noise loops are seamless ---
         {
             room::NoiseBank bank;
-            check (bank.size() == room::NoiseBank::names().size() && bank.size() >= 1, "every noise profile has a loop");
-            float worstJump = 0.0f, typical = 0.0f;
+            check (bank.size() == room::NoiseBank::names().size() && bank.size() >= 4, "every noise profile has a slot");
+            check (room::NoiseBank::names()[0] == "vinyl" && room::NoiseBank::names()[3] == "room tone",
+                   "the four 1.0.2 noises keep their places (projects saved the index)");
+           #if ROOM_HAS_NOISE_FILES
+            check (bank.size() >= 50, "the recorded noises are listed (" + juce::String (bank.size()) + ")");
+           #endif
+            // Unpacked only when asked for: a recording isn't in memory until it's chosen.
+            if (bank.size() > 4)
+            {
+                const auto* before = bank.tryGet (bank.size() - 1);
+                juce::Thread::sleep (400);
+                const auto* after = bank.tryGet (bank.size() - 1);
+                check (before == nullptr && after != nullptr, "a recording is unpacked on the bank's thread when it's asked for");
+            }
+            float worstJump = 0.0f;
+            int loaded = 0;
+            juce::String worstName;
             for (int i = 0; i < bank.size(); ++i)
             {
-                const auto& a = bank.get (i).audio;
-                const auto n = a.getNumSamples();
+                const auto* l = bank.getNow (i);
+                if (l == nullptr)
+                    continue;
+                ++loaded;
+                const auto n = l->length;
                 for (int ch = 0; ch < 2; ++ch)
                 {
-                    double sum = 0.0;
+                    // the wrap (last sample -> first) should look like any other step: compare
+                    // it with the loop's own 99.9th percentile step
+                    std::vector<float> steps;
+                    steps.reserve ((size_t) n);
                     for (int k = 1; k < n; ++k)
-                        sum += std::abs (a.getSample (ch, k) - a.getSample (ch, k - 1));
-                    const auto mean = (float) (sum / (n - 1));
-                    typical = std::max (typical, mean);
-                    // the wrap (last sample -> first) should look like any other step
-                    worstJump = std::max (worstJump, std::abs (a.getSample (ch, 0) - a.getSample (ch, n - 1)) / std::max (1.0e-6f, mean));
+                        steps.push_back (std::abs (l->sample (ch, k) - l->sample (ch, k - 1)));
+                    std::nth_element (steps.begin(), steps.begin() + (long) (steps.size() * 999 / 1000), steps.end());
+                    const auto p999 = std::max (1.0e-5f, steps[steps.size() * 999 / 1000]);
+                    const auto jump = std::abs (l->sample (ch, 0) - l->sample (ch, n - 1)) / p999;
+                    if (jump > worstJump) { worstJump = jump; worstName = room::NoiseBank::names()[i]; }
                 }
             }
-            check (worstJump < 8.0f, "noise loops wrap without a click (" + juce::String (worstJump, 1) + "x a normal step)");
+            check (loaded == bank.size(), "every noise unpacks (" + juce::String (loaded) + " of " + juce::String (bank.size()) + ")");
+            check (worstJump <= 1.0f, "noise loops wrap without a click (worst: " + worstName + ", "
+                                          + juce::String (worstJump, 2) + "x its own biggest steps)");
 
             // A sine with a non-whole number of cycles: the crossfade hides the seam.
             juce::AudioBuffer<float> sine (2, 44100);

@@ -384,6 +384,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
     stereoWidth.prepare (sampleRate);
     noise.prepare (sampleRate, std::max (1, samplesPerBlock));
+    noiseBank->getNow (juce::roundToInt (noiseTypeParam->load()));   // unpacked now, so a bounce starts with it
     noiseRate.prepare (sampleRate);
     noiseBuf.setSize (2, std::max (1, samplesPerBlock));
     roomMic.prepare (sampleRate);

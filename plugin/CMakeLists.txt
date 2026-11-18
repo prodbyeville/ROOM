@@ -82,6 +82,7 @@ target_sources(ROOM PRIVATE
     Source/Screens.cpp
     Source/UpdateChecker.cpp
     Source/Randomizer.cpp
+    Source/dsp/NoiseBank.cpp
     Source/presets/PresetBrowser.cpp)
 
 target_include_directories(ROOM PRIVATE Source)
@@ -107,12 +108,12 @@ juce_add_binary_data(ROOM_UiAssets
     NAMESPACE UiAssets
     SOURCES ${ROOM_UI_ASSETS})
 
-# Noise profiles (the bottom module): every WAV / AIFF in Resources/Noise, compiled in and
-# listed by file name ("01 vinyl.wav" -> "vinyl"). Empty folder: built-in placeholders.
+# Noise profiles (the bottom module): the loops in Resources/Noise ("NN name.ogg") and their
+# list, noise.txt, all made by Tools/noise/make_noise_loops.py. Compiled in compressed; the
+# four built-ins (vinyl, tape hiss, air, room tone) are made in NoiseBank.cpp.
 file(GLOB ROOM_NOISE_FILES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.wav"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aif"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aiff")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/noise.txt")
 if (ROOM_NOISE_FILES)
     juce_add_binary_data(ROOM_NoiseFiles
         HEADER_NAME NoiseFiles.h
