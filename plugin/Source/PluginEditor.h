@@ -357,8 +357,8 @@ private:
 
     // Top bar
     room::presets::PresetBar presetBar { "studios" };
-    IconButton randomButton { IconButton::Icon::randomize, "randomize (right-click: choose what moves and how wild)" };
-    IconButton advancedButton { IconButton::Icon::advanced, "advanced: pre-delay, size, damping, ducking, freeze and the lfos" };
+    IconButton randomButton { IconButton::Icon::randomize, "randomize (right-click for options)" };
+    IconButton advancedButton { IconButton::Icon::advanced, "advanced controls" };
     BypassSwitch bypassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     Knob mix, output;
@@ -367,10 +367,10 @@ private:
 
     // Load / room / tone
     LoadScreen loadScreen;
-    IconButton recordButton { IconButton::Icon::record, "record a room: play, clap or sing into this track, press again to stop (max 30 s)" };
-    IconButton roomSaveButton { IconButton::Icon::save, "Save this room as a ROOM (decay, tone, resonances; no knobs)" };
-    IconButton allRoomsButton { IconButton::Icon::save, "every ROOM: search, favourites, packs" };
-    IconButton clearRoomButton { IconButton::Icon::save, "clear the room (the knobs stay)" };
+    IconButton recordButton { IconButton::Icon::record, "record a room (up to 30 s)" };
+    IconButton roomSaveButton { IconButton::Icon::save, "Save this room" };
+    IconButton allRoomsButton { IconButton::Icon::save, "browse every room" };
+    IconButton clearRoomButton { IconButton::Icon::save, "clear the room" };
     RoomScreen roomScreen { proc };
     ToneScreen toneScreen { proc };
 

@@ -2162,6 +2162,50 @@ namespace
             check (hfRatio (run (1.0f, noise), 4800, 48000) < 0.5 * hfRatio (run (0.0f, noise), 4800, 48000), "smooth rolls off the top");
         }
 
+        // --- Rate stays clean near the top: nothing added below the cutoff (no crunch) ---
+        for (auto hz : { 43300.0f, 30000.0f, 20800.0f })
+        {
+            room::RateReducer rr;
+            rr.prepare (48000.0);
+            juce::Random r (6);
+            std::vector<float> in, out;
+            for (int i = 0; i < 48000 * 2; ++i)
+            {
+                float x[2] = { (r.nextFloat() - 0.5f) * 0.5f, 0.0f };
+                in.push_back (x[0]);
+                rr.processSample (x, 2, hz);
+                out.push_back (x[0]);
+            }
+            // What rate takes away, kept below 0.6 x the cutoff: a clean low-pass leaves almost
+            // nothing there (only its phase shift); any crunch would show up here.
+            juce::dsp::IIR::Filter<float> lp1, lp2, lpIn1, lpIn2;
+            const auto band = std::min (0.6f * 0.45f * hz, 9000.0f);
+            lp1.coefficients = lp2.coefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass (48000.0, band);
+            lpIn1.coefficients = lpIn2.coefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass (48000.0, band);
+            double inE = 1e-20, outE = 1e-20;
+            for (size_t i = 0; i < in.size(); ++i)
+            {
+                const auto a = lpIn2.processSample (lpIn1.processSample (in[i]));
+                const auto b = lp2.processSample (lp1.processSample (out[i]));
+                if (i > 24000) { inE += (double) a * a; outE += (double) b * b; }
+            }
+            const auto lossDb = 10.0 * std::log10 (outE / inE);
+            check (std::abs (lossDb) < 0.5, "rate at " + juce::String (hz / 1000.0f, 1) + " kHz keeps the band below it untouched ("
+                                               + juce::String (lossDb, 2) + " dB), no crunch");
+        }
+
+        // --- Size reads 0..100 %, 50 % = the room as measured (1x) ---
+        {
+            RoomAudioProcessor pp;
+            pp.setPresetRoot (root);
+            auto* sz = pp.apvts.getParameter (ParamIDs::size);
+            check (sz->getText (sz->getDefaultValue(), 16) == "50%" && sz->getText (0.0f, 16) == "0%" && sz->getText (1.0f, 16) == "100%",
+                   "size shows 0 .. 100 % with 50 % in the middle");
+            check (std::abs (sz->convertFrom0to1 (0.0f) - 0.5f) < 1e-4f && std::abs (sz->convertFrom0to1 (0.5f) - 1.0f) < 1e-4f
+                       && std::abs (sz->convertFrom0to1 (1.0f) - 2.0f) < 1e-4f,
+                   "size 0 / 50 / 100 % is the room at 0.5x / 1x / 2x (same sound as before)");
+        }
+
         // --- Rate keys: D / R / N choose what Rate reaches ---
         {
             Rig rig (root);

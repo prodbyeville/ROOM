@@ -369,7 +369,7 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (closeButton);
     styleButton (soundButton);
-    soundButton.setTooltip ("analyze any sound file and make it the room");
+    soundButton.setTooltip ("make a room from a file");
     soundButton.onClick = [this] { if (onOpenSoundFile) onOpenSoundFile(); };
     if (kind == Kind::room)
         addAndMakeVisible (soundButton);
@@ -1312,7 +1312,7 @@ PresetBar::PresetBar (const juce::String& l) : label (l)
     save.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     save.setButtonText ({});
     addAndMakeVisible (save);
-    save.setTooltip ("save this sound as a STUDIO (room + every knob + lfos)");
+    save.setTooltip ("save this sound");
     heart.setTooltip ("favorite");
     prev.setTooltip ("previous studio");
     next.setTooltip ("next studio");

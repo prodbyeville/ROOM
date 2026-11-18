@@ -34,7 +34,7 @@ namespace
 
 LoadScreen::LoadScreen (RoomAudioProcessor& p) : proc (p)
 {
-    setTooltip ("drop any sound here to build a room from it. click a card to load that room, right-click for more.");
+    setTooltip ("drop a sound to make a room");
     startTimerHz (30);
 }
 
@@ -390,7 +390,7 @@ void LoadScreen::paint (juce::Graphics& g)
 RoomScreen::RoomScreen (RoomAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTooltip ("the room in 3d: space sets its width, size its depth, and the floor shows how each band dies away. click for its numbers.");
+    setTooltip ("your room. click for its numbers");
     startTimerHz (30);
 }
 
@@ -626,7 +626,7 @@ void RoomScreen::paintInfo (juce::Graphics& g, juce::Rectangle<float> glass)
 
 ToneScreen::ToneScreen (RoomAudioProcessor& p) : proc (p)
 {
-    setTooltip ("the tone this room puts on a sound. the red dot is the note it rings at most.");
+    setTooltip ("the tone this room adds");
     startTimerHz (15);
 }
 
@@ -924,7 +924,7 @@ void SyncDot::paintButton (juce::Graphics& g, bool over, bool down)
 NoiseScreen::NoiseScreen (RoomAudioProcessor& p) : proc (p)
 {
     type = proc.apvts.getParameter (ParamIDs::noiseType);
-    setTooltip ("noise: click for the list, or use the arrows");
+    setTooltip ("click to pick a noise");
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     startTimerHz (30);
 }
@@ -1499,9 +1499,9 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::bypass, bypassButton);
     setupKnob (mix, ParamIDs::mix, "wet", 15.0f, "", "", "", false,
-              "how much of the room you hear against your dry sound.");
+              "room against your dry sound");
     setupKnob (output, ParamIDs::output, "out", 15.0f, "", "", "", false,
-              "the final level, after everything.");
+              "final level");
     for (auto* k : { &mix, &output })
         k->slider.getProperties().set ("popupBelow", true);   // the value bubble would be cut off above the window
 
@@ -1532,20 +1532,19 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
 
     // --- Shape the room: intensity -> glitch (sync, amount) | tone -> space (sync, auto) | tail -> size ---
     setupKnob (intensity, ParamIDs::intensity, "intensity", 30.0f, "0", "100", "200", false,
-              "how much of the room you hear: its decay, tone and resonances. 50 is the room as measured, 100 twice as strong, "
-              "and past 100 it turns extreme: shimmer and smear, then breaking up.");
+              "how much room. past 100 it gets wild");
     setupKnob (smooth, ParamIDs::smooth, "smooth", 15.0f, "", "", "", false,
-              "smooth: the sound as a mic across the room hears it. softens and tucks the attack, rolls off the top. on everything, dry and room.");
+              "softens the attack, like a room mic");
     setupKnob (glitchAmount, ParamIDs::glitchAmount, "glitch", 15.0f, "", "", "", false,
-              "how much it glitches: how often, how many repeats, how chopped.");
+              "how much it glitches");
     setupKnob (tone, ParamIDs::toneAmount, "tone", 30.0f, "", "", "", false,
-              "how much of the room's tone you keep: its eq and the notes that ring. sync makes tone and space move against each other.");
+              "the room's colour and ringing notes");
     setupKnob (space, ParamIDs::spaceAmount, "space", 30.0f, "", "", "", false,
-              "how much of the room's space you keep: its decay and width. sync makes tone and space move against each other.");
+              "the room's decay and width");
     setupKnob (tail, ParamIDs::tail, "tail", 30.0f, "0.3", "", "6 s", false,
-              "how long the room rings out.");
+              "how long it rings");
     setupKnob (size, ParamIDs::size, "size", 30.0f, "small", "", "big", false,
-              "how big the room is: shorter or longer decays, like a smaller or larger version of the same room.");
+              "smaller or bigger room");
 
     // Tone and space are separate knobs; with sync on, turning one turns the other the opposite way.
     lastTone = tone.slider.getValue();
@@ -1581,17 +1580,17 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     space.slider.textFromValueFunction = autoText (false);
 
     glitchKey.getProperties().set ("style", "lightkey");
-    glitchKey.setTooltip ("glitch: stutters the room now and then, repeating short slices of it. the small knob sets how much.");
+    glitchKey.setTooltip ("stutters the room");
     content.addAndMakeVisible (glitchKey);
     glitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::glitch, glitchKey);
-    syncDot.setTooltip ("sync: glitch in time with your song (1/32 to 1/8 slices, on the 1/16s)");
+    syncDot.setTooltip ("glitch in time with your song");
     content.addAndMakeVisible (syncDot);
     syncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::glitchSync, syncDot);
-    toneSync.setTooltip ("sync: tone and space move together, against each other (more tone, less space)");
+    toneSync.setTooltip ("sync: tone and space move opposite");
     content.addAndMakeVisible (toneSync);
     toneSyncAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::toneSpaceSync, toneSync);
     autoBalance.getProperties().set ("style", "lightkey");
-    autoBalance.setTooltip ("auto: set tone and space from what ROOM detected in the sound");
+    autoBalance.setTooltip ("tone and space from the sound");
     content.addAndMakeVisible (autoBalance);
     autoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::balanceAuto, autoBalance);
 
@@ -1611,18 +1610,17 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     noiseScreen.prev.onClick = [this] { noiseScreen.step (-1); };
     noiseScreen.next.onClick = [this] { noiseScreen.step (1); };
     setupKnob (noiseLevel, ParamIDs::noiseLevel, "level", 20.0f, "", "", "", false,
-              "how loud the noise is. all the way down, it's off.");
+              "noise level");
     setupKnob (noiseFollow, ParamIDs::noiseFollow, "follow", 20.0f, "always", "", "input", false,
-              "down: the noise plays all the time. up: it follows your sound, only playing while audio comes in.");
-    noiseStop.setTooltip ("stop: the noise goes quiet whenever nothing is playing (transport stopped, nothing coming in)");
+              "noise only while you play");
+    noiseStop.setTooltip ("silence the noise when nothing plays");
     content.addAndMakeVisible (noiseStop);
     noiseStopAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::noiseStop, noiseStop);
     setupKnob (rate, ParamIDs::rate, "rate", 40.0f, "full", "", "low", false,
-              "clean sample-rate reduction on the whole sound, like resampling with the filters on: darker and lower, never crunchy. "
-              "all the way left (44.1 khz) it's off. the d, r and n keys choose what it reaches: the dry sound, the reverb, the noise.");
+              "lowers the sample rate, cleanly");
     {
         const char* ids[3] = { ParamIDs::rateDry, ParamIDs::rateReverb, ParamIDs::rateNoise };
-        const char* tips[3] = { "d: rate reaches the dry sound", "r: rate reaches the reverb", "n: rate reaches the noise" };
+        const char* tips[3] = { "rate on the dry sound", "rate on the reverb", "rate on the noise" };
         for (int k = 0; k < 3; ++k)
         {
             rateKeys[k].getProperties().set ("style", "lightkey");
@@ -2205,7 +2203,7 @@ void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
     const auto t = tail.slider.getValue();
     value (juce::String (t, t < 10.0 ? 1 : 0) + " s", juce::Rectangle<float> (120.0f, 32.0f).withCentre ({ knobCentre (tail).x, y0 + 50.0f }),
            30.0f, juce::Justification::centred);
-    value (juce::String (juce::roundToInt (size.slider.getValue() * 100.0)) + "%",
+    value (juce::String (juce::roundToInt (std::log (juce::jlimit (0.5, 2.0, size.slider.getValue()) / 0.5) / std::log (4.0) * 100.0)) + "%",
            juce::Rectangle<float> (120.0f, 32.0f).withCentre ({ knobCentre (size).x, y0 + 50.0f }), 30.0f, juce::Justification::centred);
 
     // Rate, in Hz

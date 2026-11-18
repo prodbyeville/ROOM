@@ -494,12 +494,29 @@ void EvilleLookAndFeel::drawPopupMenuItemWithOptions (juce::Graphics& g, const j
     g.drawFittedText (item.text, text.toNearestInt(), juce::Justification::centredLeft, 1);
 }
 
+namespace
+{
+    // Tooltips: one short line where possible, wrapped (never cut off) when not.
+    constexpr float tipFont = 14.0f, tipMaxText = 320.0f, tipPadX = 14.0f, tipPadY = 8.0f;
+
+    juce::TextLayout tipLayout (const juce::String& text, float width)
+    {
+        juce::AttributedString as;
+        as.append (text, Fonts::sans (tipFont), Colours::screenText);
+        as.setWordWrap (juce::AttributedString::byWord);
+        juce::TextLayout layout;
+        layout.createLayout (as, width);
+        return layout;
+    }
+}
+
 juce::Rectangle<int> EvilleLookAndFeel::getTooltipBounds (const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent)
 {
-    const auto font = Fonts::sans (13.0f);
-    const auto w = std::min (320, juce::GlyphArrangement::getStringWidthInt (font, text) + 26);
-    const auto lines = juce::GlyphArrangement::getStringWidthInt (font, text) + 26 > 320 ? 2 : 1;
-    const auto h = 14 + lines * 17;
+    const auto oneLine = (float) juce::GlyphArrangement::getStringWidthInt (Fonts::sans (tipFont), text) + 2.0f;
+    const auto textW = std::min (tipMaxText, oneLine);
+    const auto layout = tipLayout (text, textW);
+    const auto w = juce::roundToInt (textW + 2.0f * tipPadX);
+    const auto h = juce::roundToInt (layout.getHeight() + 2.0f * tipPadY);
     auto r = juce::Rectangle<int> (pos.x > parent.getCentreX() ? pos.x - (w + 12) : pos.x + 12,
                                    pos.y > parent.getCentreY() ? pos.y - (h + 8) : pos.y + 14, w, h);
     return r.constrainedWithin (parent);
@@ -509,9 +526,8 @@ void EvilleLookAndFeel::drawTooltip (juce::Graphics& g, const juce::String& text
 {
     g.fillAll (juce::Colour (0xff121212));
     glassPanel (g, juce::Rectangle<float> ((float) w, (float) h), 4.0f, false);
-    g.setFont (Fonts::sans (13.0f));
-    g.setColour (Colours::screenText);
-    g.drawFittedText (text, juce::Rectangle<int> (w, h).reduced (12, 5), juce::Justification::centredLeft, 2);
+    const auto area = juce::Rectangle<float> ((float) w, (float) h).reduced (tipPadX, tipPadY);
+    tipLayout (text, area.getWidth()).draw (g, area);
 }
 
 void EvilleLookAndFeel::drawBubble (juce::Graphics& g, juce::BubbleComponent&, const juce::Point<float>& tip,

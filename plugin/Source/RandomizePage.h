@@ -31,7 +31,7 @@ public:
         intensity.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         intensity.setRange (0.0, 1.0);
         intensity.setDoubleClickReturnValue (true, 0.5);
-        intensity.setTooltip ("how wild a randomize is: basic stays musical, moderate goes further, extreme uses every knob's whole range");
+        intensity.setTooltip ("how wild it gets");
         intensity.onValueChange = [this] { room::Randomizer::setIntensity (proc, intensity.getValue()); repaint (intensityLabels); };
         addAndMakeVisible (intensity);
     }

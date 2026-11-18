@@ -244,9 +244,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
             AudioParameterFloatAttributes().withStringFromValueFunction (
                 [] (float v, int) { return String (juce::roundToInt (v)) + " ms"; })));
     }
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::size, 1 }, "Size",
-        NormalisableRange<float> (0.5f, 2.0f, 0.01f, 0.5f), 1.0f, pct));
+    {
+        // Size: the room 0.5x .. 2x as big, shown as 0 .. 100 % with 50 % (1x) in the middle.
+        // Same values as before (projects and presets sound the same); 1 % steps.
+        NormalisableRange<float> r (0.5f, 2.0f,
+            [] (float, float, float x) { return 0.5f * std::pow (4.0f, juce::jlimit (0.0f, 1.0f, x)); },
+            [] (float, float, float v) { return std::log (juce::jlimit (0.5f, 2.0f, v) / 0.5f) / std::log (4.0f); },
+            [] (float, float, float v)
+            {
+                const auto x = std::round (std::log (juce::jlimit (0.5f, 2.0f, v) / 0.5f) / std::log (4.0f) * 100.0f) / 100.0f;
+                return 0.5f * std::pow (4.0f, x);
+            });
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::size, 1 }, "Size", r, 1.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            {
+                return String (juce::roundToInt (std::log (juce::jlimit (0.5f, 2.0f, v) / 0.5f) / std::log (4.0f) * 100.0f)) + "%";
+            })));
+    }
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::damping, 1 }, "Damping",
         NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f,

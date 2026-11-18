@@ -10,19 +10,19 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     setupKnob (damping, ParamIDs::damping, "damping", "-", "0", "+");
     setupKnob (duck, ParamIDs::duck, "ducking", "0", "", "100");
     setupKnob (duckRelease, ParamIDs::duckRelease, "release", "50", "", "1k");
-    preDelay.slider.setTooltip ("a gap before the room starts, so your dry sound stays clear.");
-    space.slider.setTooltip ("how wide the room sounds, from mono to wide.");
+    preDelay.slider.setTooltip ("a gap before the room");
+    space.slider.setTooltip ("mono to wide");
     setupKnob (tape, ParamIDs::tape, "tape", "0", "", "100");
     setupKnob (autoEq, ParamIDs::autoEq, "auto eq", "0", "", "100");
-    tape.slider.setTooltip ("warm tape saturation on the way out.");
-    autoEq.slider.setTooltip ("gently evens out the tone so the room sits in the mix.");
-    damping.slider.setTooltip ("darker or brighter: how fast the highs die away in the room.");
-    duck.slider.setTooltip ("turns the room down while you play and lets it bloom in the gaps.");
-    duckRelease.slider.setTooltip ("how fast the room comes back after ducking.");
+    tape.slider.setTooltip ("warm tape colour");
+    autoEq.slider.setTooltip ("evens out the tone");
+    damping.slider.setTooltip ("darker or brighter tail");
+    duck.slider.setTooltip ("room ducks while you play");
+    duckRelease.slider.setTooltip ("how fast it comes back");
 
     freeze.setClickingTogglesState (true);
     freeze.getProperties().set ("key", "dark");
-    freeze.setTooltip ("freeze: hold the room's tail forever");
+    freeze.setTooltip ("hold the tail forever");
     addAndMakeVisible (freeze);
     freezeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::freeze, freeze);
     freeze.onStateChange = [this] { repaint(); };

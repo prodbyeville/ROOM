@@ -301,7 +301,7 @@ LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     retrigAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoRetrig (lfo), retrig);
     sync.setTooltip ("lock the rate to the song tempo");
     retrig.setTooltip ("restart the lfo when you press play");
-    setTooltip ("lfo " + juce::String (lfo + 1) + ": click to open, drag onto a knob to assign");
+    setTooltip ("drag onto a knob");
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     trail.assign (90, 0.0f);
     startTimerHz (30);
