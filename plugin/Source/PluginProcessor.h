@@ -240,6 +240,11 @@ private:
     room::StereoWidth stereoWidth;
     juce::SharedResourcePointer<room::NoiseBank> noiseBank;
     room::NoisePlayer noise;
+public:
+    /** For the noise screen (read on the message thread): the follow gate (0..1) and the
+        stop's fade (0..1), as the audio last saw them. Display only. */
+    std::atomic<float> noiseGateShown { 0.0f }, noiseStopShown { 1.0f };
+private:
     room::RateReducer noiseRate;     // Rate on the noise (the N key); dry and room are in the engine
     juce::AudioBuffer<float> noiseBuf;
     room::RoomMic roomMic;           // Smooth

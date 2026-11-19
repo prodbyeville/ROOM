@@ -149,6 +149,10 @@ public:
     }
 
     bool isIdle() const { return level.getTargetValue() <= 0.0f && ! level.isSmoothing(); }
+    /** For the screen: how open the follow gate is now (0 nothing coming in .. 1 playing),
+        and how much the stop has faded the noise out (0 silenced .. 1 playing). */
+    float gateNowValue() const noexcept { return gateNow; }
+    float idleGainValue() const noexcept { return idleGain; }
 
     /** Stop: nothing is playing (transport stopped, nothing coming in), so the noise
         fades out (30 ms) until something plays again (back in 10 ms). */

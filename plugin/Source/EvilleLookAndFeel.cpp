@@ -1,4 +1,5 @@
 #include "EvilleLookAndFeel.h"
+#include "R5Parts.h"
 #include "Screens.h"
 #include "UiColours.h"
 #include "UiAssets.h"
@@ -26,6 +27,28 @@ juce::Image UiResources::image (const char* fileName)
             img = juce::ImageFileFormat::loadFrom (data, (size_t) size);
     }
     return img;
+}
+
+juce::Image UiResources::mip (const char* fileName, int minWidth)
+{
+    auto img = image (fileName);
+    if (! img.isValid())
+        return img;
+    const juce::ScopedLock sl (lock);
+    int level = 0;
+    for (auto w = img.getWidth(); w / 2 >= std::max (1, minWidth); w /= 2)
+        ++level;
+    if (level == 0)
+        return img;
+    const auto key = juce::String (fileName) + "@" + juce::String (level);
+    auto& m = images[key];
+    if (! m.isValid())
+    {
+        m = img;
+        for (int i = 0; i < level; ++i)
+            m = m.rescaled (std::max (1, m.getWidth() / 2), std::max (1, m.getHeight() / 2), juce::Graphics::highResamplingQuality);
+    }
+    return m;
 }
 
 juce::Typeface::Ptr UiResources::typeface (const char* fileName)
@@ -153,69 +176,13 @@ juce::Label* EvilleLookAndFeel::createSliderTextBox (juce::Slider& s)
 void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int, float pos,
                                           float startAngle, float endAngle, juce::Slider& s)
 {
+    // Every knob is the machined knob (R5Parts): tick ring, crimson value arc, white dot.
     const auto kb = knobBounds (s);
-    const auto c = kb.getCentre();
-    const auto r = kb.getWidth() * 0.5f;
-    const auto alpha = s.isEnabled() ? 1.0f : 0.45f;
-    const auto small = r < 20.0f;
-    auto pointAt = [&] (float angle, float radius)
-    {
-        return juce::Point<float> (c.x + radius * std::sin (angle), c.y - radius * std::cos (angle));
-    };
     const auto a = startAngle + pos * (endAngle - startAngle);
-    const auto ringR = r * 0.98f;
-
-    if (small)
-    {
-        // Small knobs (wet, out): just the ring and the arc, WARP's knob A.
-        juce::Path track;
-        track.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, startAngle, endAngle, true);
-        g.setColour (Colours::dustWhite.withAlpha (0.28f * alpha));
-        g.strokePath (track, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-    else
-    {
-        // The tick ring
-        const int ticks = 32;
-        for (int i = 0; i <= ticks; ++i)
-        {
-            const auto t = startAngle + (endAngle - startAngle) * (float) i / (float) ticks;
-            g.setColour (Colours::dustWhite.withAlpha ((i % 8 == 0 ? 0.42f : 0.24f) * alpha));
-            g.drawLine ({ pointAt (t, ringR - r * 0.10f), pointAt (t, ringR) }, i % 8 == 0 ? 1.1f : 0.8f);
-        }
-        // The body: a dark disc with a soft top light and a hairline rim
-        const auto body = juce::Rectangle<float> (r * 1.42f, r * 1.42f).withCentre (c);
-        juce::ColourGradient grad (juce::Colour (0xff2c2828).withMultipliedAlpha (alpha), body.getX(), body.getY(),
-                                   juce::Colour (0xff121010).withMultipliedAlpha (alpha), body.getRight(), body.getBottom(), false);
-        g.setGradientFill (grad);
-        g.fillEllipse (body);
-        g.setColour (juce::Colours::white.withAlpha (0.08f * alpha));
-        g.drawEllipse (body.reduced (0.5f), 1.0f);
-        if (s.isMouseOverOrDragging() && s.isEnabled())
-        {
-            g.setColour (juce::Colours::white.withAlpha (0.04f));
-            g.fillEllipse (body);
-        }
-        // The pointer
-        g.setColour (Colours::dustWhite.withAlpha (0.92f * alpha));
-        g.drawLine ({ pointAt (a, r * 0.08f), pointAt (a, r * 0.62f) }, std::max (1.6f, r * 0.045f));
-    }
-
-    // The value arc, from the start (or the centre, for bipolar knobs) to the value
     const auto bipolar = (bool) s.getProperties()["bipolar"];
-    const auto from = bipolar ? (startAngle + endAngle) * 0.5f : startAngle;
-    if (std::abs (a - from) > 0.01f)
-    {
-        juce::Path arc;
-        arc.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, std::min (from, a), std::max (from, a), true);
-        g.setColour ((small ? Colours::redLight : Colours::crimson.brighter (0.15f)).withAlpha (alpha));
-        g.strokePath (arc, juce::PathStrokeType (small ? 2.2f : std::max (2.2f, r * 0.055f),
-                                                 juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-    // The dot at the value
-    const auto dot = small ? 3.2f : std::max (3.0f, r * 0.075f);
-    g.setColour (Colours::dustWhite.withAlpha (alpha));
-    g.fillEllipse (juce::Rectangle<float> (dot * 2.0f, dot * 2.0f).withCentre (pointAt (a, ringR)));
+    R5::drawKnob (g, kb.getCentre(), kb.getWidth() * 0.5f, startAngle, endAngle, a,
+                  bipolar ? (startAngle + endAngle) * 0.5f : startAngle,
+                  s.isEnabled(), s.isMouseOverOrDragging());
 }
 
 void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
@@ -614,6 +581,11 @@ void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, 
 
 void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool down)
 {
+    if (b.getProperties().contains ("r5key"))
+    {
+        drawR5Key (g, b, over, down);
+        return;
+    }
     if (b.getProperties()["style"].toString() == "switch")
     {
         // WARP's tick switch, in ROOM's colours: a small pill (crimson while on) and a caps label.
@@ -662,6 +634,19 @@ void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
     g.setFont (Fonts::sans (12.5f));
     g.setColour ((dark ? Colours::dustWhite : Colours::ink).withAlpha (over ? 1.0f : 0.8f));
     g.drawText (b.getButtonText(), r.withTrimmedLeft (3.0f), juce::Justification::centredLeft);
+}
+
+void EvilleLookAndFeel::drawR5Key (juce::Graphics& g, juce::Button& b, bool over, bool down)
+{
+    // The photographed keys (R5Parts): "r5key" = cream / black / square, "r5led" for a
+    // light above the label; the label is the button's text.
+    const auto kind = b.getProperties()["r5key"].toString();
+    const auto k = kind == "cream" ? R5::KeyKind::cream : kind == "square" ? R5::KeyKind::square : R5::KeyKind::black;
+    auto r = b.getLocalBounds().toFloat();
+    if (k == R5::KeyKind::square)
+        r = r.withSizeKeepingCentre (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight()));
+    R5::drawKey (g, r.reduced (1.0f, 2.0f).withTrimmedBottom (1.0f), k, b.getButtonText(), b.getToggleState(),
+                 over && b.isEnabled(), down, (bool) b.getProperties()["r5led"]);
 }
 
 float EvilleLookAndFeel::capsWidth (const juce::String& text, float height, Fonts::Weight weight)

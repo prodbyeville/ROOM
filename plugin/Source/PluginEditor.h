@@ -187,6 +187,7 @@ private:
     RoomAudioProcessor& proc;
     juce::RangedAudioParameter* type = nullptr;
     float phase = 0.0f;
+    float activity = 1.0f;   // eased: how much the noise is playing now (follow and stop), 0..1
 };
 
 /** The first-run tour: dims the window, lights up one area at a time and
@@ -356,9 +357,28 @@ private:
     // Fixed geometry (base coordinates): the top bar, then the stage, the
     // controls module and the bottom module; advanced pops out on the right.
     const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 772.0f };
-    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 346.0f };
-    const juce::Rectangle<float> controlsArea { 12.0f, 430.0f, 868.0f, 170.0f };
-    const juce::Rectangle<float> finishArea { 12.0f, 612.0f, 868.0f, 148.0f };
+    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 312.0f };
+    const juce::Rectangle<float> controlsArea { 12.0f, 396.0f, 868.0f, 204.0f };   // the two rows of shape cells
+    const juce::Rectangle<float> finishArea { 12.0f, 616.0f, 868.0f, 144.0f };     // noise, level / follow, stop, rate
+
+    // The cells (round 5): each control sits in its own pocket in the case.
+    // Row 1: intensity | tone | space | tail | size
+    const juce::Rectangle<float> cellIntensity { 12.0f, 396.0f, 186.0f, 124.0f };
+    const juce::Rectangle<float> cellTone { 214.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellSpace { 384.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellTail { 554.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellSize { 724.0f, 396.0f, 156.0f, 124.0f };
+    // Row 2: smooth | glitch (glitch + sync) | amount, and the auto key on its own
+    const juce::Rectangle<float> cellSmooth { 12.0f, 540.0f, 80.0f, 60.0f };
+    const juce::Rectangle<float> cellGlitch { 112.0f, 540.0f, 144.0f, 60.0f };
+    const juce::Rectangle<float> cellAmount { 276.0f, 540.0f, 76.0f, 60.0f };
+    const juce::Rectangle<float> autoKeyArea { 392.0f, 556.0f, 64.0f, 28.0f };
+    // Row 3: noise | level over follow | the stop key on its own | rate
+    const juce::Rectangle<float> cellNoise { 12.0f, 616.0f, 346.0f, 144.0f };
+    const juce::Rectangle<float> cellLevel { 378.0f, 616.0f, 122.0f, 144.0f };
+    const juce::Rectangle<float> stopKeyArea { 516.0f, 672.0f, 56.0f, 32.0f };
+    const juce::Rectangle<float> cellRate { 592.0f, 616.0f, 288.0f, 144.0f };
+    static constexpr float knobRowY = 82.0f;   // row 1 knobs: their centre below the cell's top
     const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
     juce::Image staticLayer;   // the window, the modules and their titles, at the window's pixel size
     float staticScale = 0.0f;

@@ -83,6 +83,7 @@ target_sources(ROOM PRIVATE
     Source/UpdateChecker.cpp
     Source/Randomizer.cpp
     Source/dsp/NoiseBank.cpp
+    Source/R5Parts.cpp
     Source/presets/PresetBrowser.cpp)
 
 target_include_directories(ROOM PRIVATE Source)

@@ -534,7 +534,11 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         noise.setIdle (noiseStopParam->load() > 0.5f && ! blockPlaying
                        && silentSamples > (int) (0.25 * std::max (1.0, currentSampleRate.load())));
         if (noiseOn)
+        {
             noise.trackInput (part, len);
+            noiseGateShown.store (noise.gateNowValue(), std::memory_order_relaxed);
+            noiseStopShown.store (noise.idleGainValue(), std::memory_order_relaxed);
+        }
 
         // Room (Rate on dry / room) -> Noise (Rate on noise) -> Smooth -> Tape -> Auto EQ -> Width -> output gain
         engine.process (part, toneNow, spaceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);

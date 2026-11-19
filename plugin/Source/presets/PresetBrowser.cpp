@@ -1345,10 +1345,27 @@ void PresetBar::paint (juce::Graphics& g)
     // One dark box: the name in caps, then save and the heart side by side, a
     // divider and the arrows.
     const auto box = nameArea().toFloat().reduced (0.5f);
-    g.setColour (juce::Colour (0xff141212));
-    g.fillRoundedRectangle (box, 6.0f);
-    g.setColour (Colours::moduleEdge);
-    g.drawRoundedRectangle (box, 6.0f, 1.0f);
+    // a small black glass screen set into the case (round 5)
+    g.setColour (juce::Colour (0xff060606));
+    g.fillRoundedRectangle (box, 7.0f);
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        juce::Path clip;
+        clip.addRoundedRectangle (box, 7.0f);
+        g.reduceClipRegion (clip);
+        juce::ColourGradient inner (juce::Colours::black.withAlpha (0.7f), box.getX(), box.getY(),
+                                    juce::Colours::transparentBlack, box.getX(), box.getY() + 8.0f, false);
+        g.setGradientFill (inner);
+        g.fillRect (box.withHeight (8.0f));
+        juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.035f), box.getX(), box.getY(),
+                                    juce::Colours::transparentWhite, box.getX(), box.getCentreY(), false);
+        g.setGradientFill (sheen);
+        g.fillRect (box.withHeight (box.getHeight() * 0.5f));
+    }
+    juce::ColourGradient rim (juce::Colours::white.withAlpha (0.04f), box.getX(), box.getY(),
+                              juce::Colours::white.withAlpha (0.12f), box.getX(), box.getBottom(), false);
+    g.setGradientFill (rim);
+    g.drawRoundedRectangle (box, 7.0f, 1.0f);
     if (isMouseOver (true) && nameArea().contains (getMouseXYRelative()))
     {
         g.setColour (juce::Colours::white.withAlpha (0.03f));
