@@ -14,16 +14,16 @@ Nothing on the module moves. Only the camera and the focus do.
 |---|---|---|---|---|
 | 01 | knob_row_macro | Truck right + 5° arc around TONE, small push | INTENSITY → TONE | Done (v7b) |
 | 02 | tone_knob | Slow push in + slight arc left around the knob | TONE stays sharp, card edges soften | Done |
-| 04 | wireframe_box | Push in + slight arc right | Box sharp, room cards drift deeper into bokeh || Done |
-| 05 | cream_panel_edge | Slide right to left along the plate edge | SPACE → TAIL || Done |
-| 06 | drn_leds | Pull back + slight arc | D R N sharp, RATE knob soft in foreground || Done |
-| 07 | noise_screen | Slide left to right across the window | VINYL → across the waveform || Done |
-| 08 | top_bar | Slide right toward WET / OUT | "room" wordmark → DARK HALL || Done |
-| 09 | small_controls | Rise (pedestal up) + slight tilt down | SMOOTH → IMPRINT || Done |
-| 10 | stop_button | Push in + slight arc right | STOP sharp, background deepens || Done |
-| 11 | side_profile | Rise + slight arc toward the front | Front corner → cards behind || Retake needed |
-| 12 | wide_hero | Orbit about 5° left to right | Screen and cream panel sharp || Retake needed |
-| A | hero_card | Push past the card + slight arc | Hero card → box || Done |
-| B | ring | Orbit about 5° (ring stays still) | Across the ring || Done |
-| D | card_edge_macro | Slide along the card edge | Corner dot → next dots || Done |
-| I | box_alone | Orbit about 5° around the box | Box sharp || Done |
+| 04 | wireframe_box | Push in + slight arc right | Box sharp, room cards drift deeper into bokeh | Done |
+| 05 | cream_panel_edge | Slide right to left along the plate edge | SPACE → TAIL | Done |
+| 06 | drn_leds | Pull back + slight arc | D R N sharp, RATE knob soft in foreground | Done |
+| 07 | noise_screen | Slide left to right across the window | VINYL → across the waveform | Done |
+| 08 | top_bar | Slide right toward WET / OUT | "room" wordmark → DARK HALL | Done |
+| 09 | small_controls | Rise (pedestal up) + slight tilt down | SMOOTH → IMPRINT | Done |
+| 10 | stop_button | Push in + slight arc right | STOP sharp, background deepens | Done |
+| 11 | side_profile | Rise + slight arc toward the front | Front corner → cards behind | Retake needed |
+| 12 | wide_hero | Orbit about 5° left to right | Screen and cream panel sharp | Retake needed |
+| A | hero_card | Push past the card + slight arc | Hero card → box | Done |
+| B | ring | Orbit about 5° (ring stays still) | Across the ring | Done |
+| D | card_edge_macro | Slide along the card edge | Corner dot → next dots | Done |
+| I | box_alone | Orbit about 5° around the box | Box sharp | Done |
