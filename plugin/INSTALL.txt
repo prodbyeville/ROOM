@@ -131,8 +131,9 @@ UPDATES
 TIPS AND THE TOUR
   Rest the mouse on any knob or key for a moment to see what it does.
   Turn tips off (or back on) in the menu.
-  The first time ROOM opens, a three-step tour shows load, shape and
-  finish. See it again any time: menu > show the tour.
+  The first time ROOM opens, a six-step tour walks through the room,
+  intensity / tone / space, tail and size, glitch, noise and rate, and
+  advanced and randomize. See it again any time: menu > show the tour.
 
 FIRST RUN
   A new ROOM starts with "Init Room" loaded (a plain, short room), so you

@@ -2160,32 +2160,13 @@ void RoomAudioProcessorEditor::paintPaper (juce::Graphics& g, juce::Rectangle<fl
 
 void RoomAudioProcessorEditor::paintGlitchModule (juce::Graphics& g)
 {
-    // Glitch is something else entirely: a light module, with soft waves drifting out of it
-    // towards the room instead of signal lines.
+    // Glitch is something else entirely: a light module, no signal lines into it.
     const auto r = glitchModule;
     paintPaper (g, r, 8.0f);
     R5::drawLabel (g, "glitch", { r.getX() + 22.0f + 69.0f, r.getY() + 12.0f }, 9.0f, 0.9f, true);
     R5::drawLabel (g, "amount", { r.getRight() - 44.0f - 62.0f, r.getY() + 38.0f }, 9.0f, 0.9f, true);
     g.setColour (juce::Colour (0xff1b1a18).withAlpha (0.18f));
     g.drawLine (r.getX() + 172.0f, r.getY() + 14.0f, r.getX() + 172.0f, r.getBottom() - 14.0f, 1.0f);
-
-    // three waves out of its left edge, fading as they travel
-    const auto x1 = r.getX() - 6.0f, x0 = r.getX() - 52.0f;
-    for (int w = 0; w < 3; ++w)
-    {
-        const auto y = r.getY() + 16.0f + 14.0f * (float) w;
-        const auto amp = 2.2f + 0.8f * (float) w, wavelength = 11.0f + 3.0f * (float) w;
-        juce::Path p;
-        for (auto x = x1; x >= x0; x -= 1.0f)
-        {
-            const auto t = (x1 - x) / (x1 - x0);
-            const auto py = y + amp * (1.0f - 0.4f * t) * std::sin ((x1 - x) / wavelength * juce::MathConstants<float>::twoPi + (float) w);
-            if (x == x1) p.startNewSubPath (x, py); else p.lineTo (x, py);
-        }
-        juce::ColourGradient fade (juce::Colour (0xfff5f3ef).withAlpha (0.6f), x1, y, juce::Colour (0xfff5f3ef).withAlpha (0.0f), x0, y, false);
-        g.setGradientFill (fade);
-        g.strokePath (p, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
 }
 
 void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
