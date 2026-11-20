@@ -85,7 +85,7 @@ namespace
 
         check (lib.countInPack (PresetLibrary::factoryPack) >= 10, "factory presets are present");
         check (lib.getUnreadableCount() == 0, "all factory presets parse");
-        check (lib.getPacks()[0] == "Factory" && lib.getPacks()[1] == "User", "pack order: Factory, User, ...");
+        check (lib.getPacks()[0] == "Factory" && lib.getPacks()[1] == "Eville" && lib.getPacks()[2] == "User", "pack order: Factory, Eville, User, ...");
         const auto studios = root.getChildFile ("STUDIOS");
         check (studios.getChildFile ("User").isDirectory(), "User pack folder is created");
 
@@ -164,7 +164,7 @@ namespace
         // Pack names
         check (! PresetLibrary::isValidPackName ("Factory"), "can't create a pack called Factory");
         check (! PresetLibrary::isValidPackName ("a/b"), "pack names can't contain slashes");
-        check (PresetLibrary::isValidPackName ("Eville"), "normal pack names are fine");
+        check (PresetLibrary::isValidPackName ("MyPack"), "normal pack names are fine");
         check (toFileName ("  Big: Room?. ") == "Big Room", "file names are made safe");
     }
 
@@ -262,13 +262,13 @@ namespace
 
         // Edit tags + move to a new pack; favorite follows.
         lib.setFavorite (key, true);
-        check (lib.createPack ("Eville", err), "create pack");
+        check (lib.createPack ("MyPack", err), "create pack");
         meta.name = "Renamed Room";
         meta.type = "Hall";
         meta.styles = { "Dark" };
         juce::String newKey;
-        check (lib.updateMeta (key, meta, "Eville", newKey, err), "edit + move: " + err);
-        check (newKey == "Eville/Renamed Room" && lib.find (key) == nullptr, "moved to new pack");
+        check (lib.updateMeta (key, meta, "MyPack", newKey, err), "edit + move: " + err);
+        check (newKey == "MyPack/Renamed Room" && lib.find (key) == nullptr, "moved to new pack");
         check (lib.find (newKey) != nullptr && lib.find (newKey)->favorite, "favorite follows a rename");
         check (lib.find (newKey)->meta.type == "Hall" && lib.find (newKey)->meta.styles == juce::StringArray { "Dark" }, "edited tags");
         check (lib.loadPreset (*lib.find (newKey)).getChildWithName ("PARAMS").getNumChildren() > 10, "sound kept after edit");
@@ -276,12 +276,12 @@ namespace
         // Import (name clash gets a new name) and export
         const auto exportDir = root.getSiblingFile ("rooms_export");
         exportDir.deleteRecursively();
-        check (lib.exportPack ("Eville", exportDir), "export pack");
-        check (exportDir.getChildFile ("Eville/Renamed Room.studio").existsAsFile(), "exported file exists");
+        check (lib.exportPack ("MyPack", exportDir), "export pack");
+        check (exportDir.getChildFile ("MyPack/Renamed Room.studio").existsAsFile(), "exported file exists");
         check (lib.exportPack ("Factory", exportDir) && exportDir.getChildFile ("Factory/Big Hall.studio").existsAsFile(),
                "factory pack can be exported");
-        const auto imported = lib.importFiles ({ exportDir.getChildFile ("Eville/Renamed Room.studio") }, "Eville");
-        check (imported == 1 && lib.countInPack ("Eville") == 2, "import with a name clash keeps both");
+        const auto imported = lib.importFiles ({ exportDir.getChildFile ("MyPack/Renamed Room.studio") }, "MyPack");
+        check (imported == 1 && lib.countInPack ("MyPack") == 2, "import with a name clash keeps both");
         exportDir.deleteRecursively();
 
         // Delete
@@ -910,7 +910,7 @@ namespace
         check (rooms.countInPack (PresetLibrary::factoryPack) >= 6, "factory ROOMS are present");
         bool roomsKnown = true;
         for (auto& e : studios.getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
                 roomsKnown = roomsKnown && rooms.find ("Factory/" + e.meta.roomName) != nullptr && e.meta.madeFor.size() > 0;
         check (roomsKnown, "every factory STUDIO names a factory ROOM and has Made for tags");
         check (rooms.getUnreadableCount() == 0, "factory ROOMS parse");
@@ -920,7 +920,7 @@ namespace
         for (auto& e : rooms.getEntries())
         {
             allTagged = allTagged && allDecayTags().contains (e.tags.decay) && allToneTags().contains (e.tags.tone)
-                        && e.tags.source == "Factory";
+                        && (e.pack != "Factory" || e.tags.source == "Factory");   // Eville's own keep where they came from (e.g. recorded)
             std::cout << "    " << e.meta.name << ": " << e.tags.decay << " " << juce::String (e.tags.medianT60, 2)
                       << " s, " << e.tags.tone << " (" << juce::String (e.tags.toneTiltDb, 1) << " dB)\n";
         }
@@ -1053,7 +1053,7 @@ namespace
         noRoom.removeChild (noRoom.getChildWithName ("ROOM_ANALYSIS"), nullptr);
         lm.name = "Knobs Only";
         writeMeta (noRoom, lm);
-        save (noRoom, oldBase.getChildFile ("ROOMS/Eville/Knobs Only.room"));
+        save (noRoom, oldBase.getChildFile ("ROOMS/MyPack/Knobs Only.room"));
         oldBase.getChildFile ("ROOMS/favorites.xml").replaceWithText (
             "<ROOMS_FAVORITES><FAVORITE key=\"User/My Old Hall\"/></ROOMS_FAVORITES>");
 
@@ -1061,14 +1061,14 @@ namespace
         old.setPresetRoot (oldBase);
         auto& oldStudios = old.getLibrary();
         auto& oldRooms = old.getRoomLibrary();
-        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("Eville/Knobs Only") != nullptr,
+        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("MyPack/Knobs Only") != nullptr,
                "old presets became STUDIOS");
         check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("User/My Old Hall")->favorite,
                "favorites carried over to STUDIOS");
         check (oldRooms.find ("User/My Old Hall") != nullptr && oldRooms.find ("User/My Old Hall")->favorite
                    && oldRooms.find ("User/My Old Hall")->meta.type == readMeta (legacyPreset).type,
                "their rooms became ROOMS (same name, type, favorite)");
-        check (oldRooms.find ("Eville/Knobs Only") == nullptr && oldRooms.getUnreadableCount() == 0,
+        check (oldRooms.find ("MyPack/Knobs Only") == nullptr && oldRooms.getUnreadableCount() == 0,
                "a preset without a room only becomes a STUDIO");
         const auto studioCount = oldStudios.getEntries().size();
         check (PresetLibrary::migrateLegacy (oldBase.getChildFile ("ROOMS"), oldBase.getChildFile ("STUDIOS")) == 0,
@@ -1211,7 +1211,7 @@ namespace
         check (rooms >= 45 && studios >= 40, "the factory library has 45+ ROOMS and 40+ STUDIOS");
         for (auto& e : lib.getEntries())
         {
-            if (! e.factory) continue;
+            if (! e.factory || e.pack != "Factory") continue;
             const auto r = measurePreset (e.key);
             allFinite = allFinite && r.finite;
             if (r.peakDb > -0.1f) { allPeaks = false; bad.add (e.meta.name + " peak " + juce::String (r.peakDb, 1)); }
@@ -1241,7 +1241,7 @@ namespace
                 w->writeFromAudioSampleBuffer (dry, 0, dry.getNumSamples());
         }
         for (auto& e : p.getLibrary().getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
             {
                 juce::AudioBuffer<float> out;
                 measurePreset (e.key, &out);
@@ -1263,7 +1263,7 @@ namespace
         p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_level_presets"));
         std::printf ("%-20s %8s %10s %8s\n", "studio", "peak dB", "level dB", "tail dB");
         for (auto& e : p.getLibrary().getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
             {
                 const auto r = measurePreset (e.key);
                 std::printf ("%-20s %8.1f %10.1f %8.1f%s\n", e.meta.name.toRawUTF8(), r.peakDb, r.rmsDiffDb, r.tailDb, r.finite ? "" : "  NaN!");
@@ -2048,10 +2048,10 @@ namespace
             auto& rooms = p.getRoomLibrary();
             const auto factoryKey = rooms.getEntries().front().key;
             const auto tree = rooms.loadPreset (*rooms.find (factoryKey));
-            rooms.getRoot().getChildFile ("Eville").createDirectory();
-            room::presets::save (tree, rooms.getRoot().getChildFile ("Eville").getChildFile ("Stairwell" + juce::String (room::presets::extensionFor (Kind::room))));
+            rooms.getRoot().getChildFile ("MyPack").createDirectory();
+            room::presets::save (tree, rooms.getRoot().getChildFile ("MyPack").getChildFile ("Stairwell" + juce::String (room::presets::extensionFor (Kind::room))));
             rooms.rescan();
-            const auto* mine = rooms.find ("Eville/Stairwell");
+            const auto* mine = rooms.find ("MyPack/Stairwell");
             check (mine != nullptr, "a room in a user pack (Eville) is in the library");
             for (int s = 0; s < room::presets::PresetLibrary::numQuickSlots; ++s)
                 rooms.setQuickSlot (s, {});
@@ -2059,10 +2059,10 @@ namespace
             if (auto* stage = findChild<LoadScreen> (ed))
             {
                 stage->refreshCards();
-                check (stage->cardKeys().contains ("Eville/Stairwell"), "user-pack rooms show on the stage before factory ones");
-                rooms.setQuickSlot (3, "Eville/Stairwell");
+                check (stage->cardKeys().contains ("MyPack/Stairwell"), "user-pack rooms show on the stage before factory ones");
+                rooms.setQuickSlot (3, "MyPack/Stairwell");
                 stage->refreshCards();
-                check (stage->cardKeys()[0] == "Eville/Stairwell", "a user-pack room in a quick slot is on the stage");
+                check (stage->cardKeys()[0] == "MyPack/Stairwell", "a user-pack room in a quick slot is on the stage");
                 rooms.setQuickSlot (3, {});
             }
             auto* strip = findChild<room::presets::QuickSlotStrip> (ed);
@@ -2075,11 +2075,11 @@ namespace
                                         strip->slotBounds (1).getCentre(), juce::Time::getCurrentTime(), 1, false);
                 strip->mouseUp (click);
                 check (strip->getArmed() == 1, "clicking an empty slot waits for a room");
-                strip->fillArmed ("Eville/Stairwell");
-                check (rooms.getQuickSlots()[1] == "Eville/Stairwell" && strip->getArmed() < 0, "the next room clicked fills it");
+                strip->fillArmed ("MyPack/Stairwell");
+                check (rooms.getQuickSlots()[1] == "MyPack/Stairwell" && strip->getArmed() < 0, "the next room clicked fills it");
                 rooms.setQuickSlot (1, {});
             }
-            rooms.getRoot().getChildFile ("Eville").deleteRecursively();
+            rooms.getRoot().getChildFile ("MyPack").deleteRecursively();
             rooms.rescan();
         }
     }
@@ -2542,6 +2542,40 @@ namespace
             R::randomizeSelected (rig.proc, r);
             check (analysisXml (rig.proc) != before && rig.proc.getCurrentRoomKey() != keyBefore,
                    "randomize can pick a new room (" + rig.proc.getCurrentRoomKey() + ")");
+        }
+
+        // --- Eville's own pack: built in, read-only, with its cover, on both sides ---
+        {
+            Rig rig (root);
+            for (auto* libp : { &rig.proc.getLibrary(), &rig.proc.getRoomLibrary() })
+            {
+                auto& lib = *libp;
+                const auto packs = lib.getPacks();
+                int n = 0;
+                bool allBuiltIn = true;
+                for (const auto& e : lib.getEntries())
+                    if (e.pack == "Eville") { ++n; allBuiltIn = allBuiltIn && e.factory; }
+                const auto what = juce::String (lib.getKind() == room::presets::Kind::room ? "rooms" : "studios");
+                check (packs.indexOf ("Eville") == 1 && packs.indexOf ("Eville", false, 2) < 0, "the Eville pack comes right after Factory, once (" + what + ")");
+                check (n == (lib.getKind() == room::presets::Kind::room ? 10 : 14) && allBuiltIn, "the Eville " + what + " are all built in (" + juce::String (n) + ")");
+                check (lib.builtInCover ("Eville").isValid(), "the Eville pack has its cover (" + what + ")");
+                check (! room::presets::PresetLibrary::isEditablePack ("Eville"), "the Eville pack can't be deleted (" + what + ")");
+            }
+            // every Eville studio loads and plays
+            auto& studios = rig.proc.getLibrary();
+            bool allPlay = true;
+            const auto in = noiseOf ((int) (0.3 * sr), 2);
+            for (const auto& e : studios.getEntries())
+            {
+                if (e.pack != "Eville") continue;
+                rig.proc.applyPreset (studios.loadPreset (e), e.key);
+                rig.settle();
+                const auto out = rig.run (in, 0.5);
+                float peak = 0; bool finite = true;
+                for (auto x : out) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
+                if (! finite || peak < 1e-4f) { allPlay = false; std::cout << "    " << e.key << " doesn't play\n"; }
+            }
+            check (allPlay, "every Eville studio loads and plays");
         }
 
         // --- Pack cover and delete ---

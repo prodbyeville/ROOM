@@ -90,25 +90,32 @@ void PresetLibrary::rescan()
     loadFavorites();
     loadQuick();
 
-    // Built-in presets
-    for (auto& xml : factoryXml)
+    // Built-in presets: Factory, then the built-in packs (Eville's own)
+    juce::StringArray builtInKeys;
+    auto addBuiltIn = [&] (const juce::String& xml, const juce::String& pack)
     {
         const auto tree = parse (xml, kind);
         if (! tree.isValid())
         {
             ++unreadable;
-            continue;
+            return;
         }
         Entry e;
         e.meta = readMeta (tree);
         if (kind == Kind::room)
             e.tags = autoTags (tree.getChildWithName ("ROOM_ANALYSIS"), "Factory");
-        e.pack = factoryPack;
-        e.key = juce::String (factoryPack) + "/" + toFileName (e.meta.name);
+        e.pack = pack;
+        e.key = pack + "/" + toFileName (e.meta.name);
         e.factory = true;
         e.factoryXml = xml;
+        builtInKeys.add (e.key);
         entries.push_back (std::move (e));
-    }
+    };
+    for (auto& xml : factoryXml)
+        addBuiltIn (xml, factoryPack);
+    for (auto& [pack, list] : builtInPacks)
+        for (auto& xml : list)
+            addBuiltIn (xml, pack);
 
     // User packs: each sub-folder of the root
     for (const auto& dir : root.findChildFiles (juce::File::findDirectories, false))
@@ -129,6 +136,8 @@ void PresetLibrary::rescan()
                 e.tags = autoTags (tree.getChildWithName ("ROOM_ANALYSIS"), "File");
             e.pack = dir.getFileName();
             e.key = e.pack + "/" + f.getFileNameWithoutExtension();
+            if (builtInKeys.contains (e.key))
+                continue;   // a copy of a built-in one (Eville's own folder): the built-in one is shown
             e.file = f;
             entries.push_back (std::move (e));
         }
@@ -250,8 +259,12 @@ juce::StringArray PresetLibrary::getPacks() const
     juce::StringArray packs;
     if (! factoryXml.empty())
         packs.add (factoryPack);
-    packs.add (userPack);
-    packs.addArray (others);
+    for (auto& [pack, list] : builtInPacks)
+        if (! list.empty())
+            packs.addIfNotAlreadyThere (pack);
+    packs.addIfNotAlreadyThere (userPack);
+    for (auto& o : others)
+        packs.addIfNotAlreadyThere (o);
     return packs;
 }
 
@@ -393,7 +406,22 @@ void PresetLibrary::setFavorite (const juce::String& key, bool fav)
 
 bool PresetLibrary::isEditablePack (const juce::String& pack)
 {
-    return pack.isNotEmpty() && ! pack.equalsIgnoreCase (factoryPack) && ! pack.equalsIgnoreCase (userPack);
+    return pack.isNotEmpty() && ! pack.equalsIgnoreCase (factoryPack) && ! pack.equalsIgnoreCase (userPack)
+        && ! pack.equalsIgnoreCase (evillePack);
+}
+
+void PresetLibrary::addBuiltInPack (const juce::String& pack, std::vector<juce::String> xml, const juce::Image& cover)
+{
+    builtInPacks.emplace_back (pack, std::move (xml));
+    if (cover.isValid())
+        builtInCovers[pack] = cover;
+    rescan();
+}
+
+juce::Image PresetLibrary::builtInCover (const juce::String& pack) const
+{
+    const auto it = builtInCovers.find (pack);
+    return it != builtInCovers.end() ? it->second : juce::Image();
 }
 
 juce::File PresetLibrary::packCoverFile (const juce::String& pack) const

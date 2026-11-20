@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "EvillePresets.h"
 #include "PluginEditor.h"
 #include "FactoryPresets.h"
 
@@ -1095,6 +1096,26 @@ void RoomAudioProcessor::ensureLibraries()
     PresetLibrary::migrateLegacy (roomsRoot, studiosRoot);
     library = std::make_unique<PresetLibrary> (studiosRoot, std::move (studios), Kind::studio);
     roomLibrary = std::make_unique<PresetLibrary> (roomsRoot, std::move (rooms), Kind::room);
+
+    // Eville's own rooms and studios: a built-in pack of their own, with its cover on both sides
+    std::vector<juce::String> evilleStudios, evilleRooms;
+    juce::Image evilleCover;
+    for (int i = 0; i < EvillePresets::namedResourceListSize; ++i)
+    {
+        int size = 0;
+        const auto* name = EvillePresets::namedResourceList[i];
+        if (auto* data = EvillePresets::getNamedResource (name, size))
+        {
+            const auto file = juce::String (EvillePresets::getNamedResourceOriginalFilename (name));
+            if (file.endsWithIgnoreCase (".jpg") || file.endsWithIgnoreCase (".png"))
+                evilleCover = juce::ImageFileFormat::loadFrom (data, (size_t) size);
+            else
+                (file.endsWithIgnoreCase (room::presets::roomExtension) ? evilleRooms : evilleStudios)
+                    .push_back (juce::String::fromUTF8 (data, size));
+        }
+    }
+    library->addBuiltInPack (PresetLibrary::evillePack, std::move (evilleStudios), evilleCover);
+    roomLibrary->addBuiltInPack (PresetLibrary::evillePack, std::move (evilleRooms), evilleCover);
 }
 
 room::presets::PresetLibrary& RoomAudioProcessor::getLibrary()

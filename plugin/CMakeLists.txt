@@ -98,6 +98,16 @@ juce_add_binary_data(ROOM_FactoryPresets
     NAMESPACE FactoryPresets
     SOURCES ${ROOM_FACTORY_PRESETS})
 
+# Eville's own ROOMS and STUDIOS (Presets/Eville) and the pack's cover: a built-in "Eville" pack
+file(GLOB ROOM_EVILLE_PRESETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/*.room"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/*.studio"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/cover.jpg")
+juce_add_binary_data(ROOM_EvillePresets
+    HEADER_NAME EvillePresets.h
+    NAMESPACE EvillePresets
+    SOURCES ${ROOM_EVILLE_PRESETS})
+
 # UI assets: fonts (Satoshi, Cormorant Garamond) and images for the faceplate.
 file(GLOB ROOM_UI_ASSETS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.otf"
@@ -128,6 +138,7 @@ endif()
 target_link_libraries(ROOM
     PRIVATE
         ROOM_FactoryPresets
+        ROOM_EvillePresets
         ROOM_UiAssets
         juce::juce_audio_utils
         juce::juce_cryptography
@@ -193,7 +204,7 @@ if (ROOM_BUILD_TESTS)
         $<TARGET_PROPERTY:ROOM,INCLUDE_DIRECTORIES>)
     target_compile_definitions(room_tests PRIVATE
         $<TARGET_PROPERTY:ROOM,COMPILE_DEFINITIONS>)
-    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets ROOM_UiAssets)
+    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets ROOM_EvillePresets ROOM_UiAssets)
     set_target_properties(room_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/room_tests_artefacts/$<CONFIG>")
     if (UNIX AND NOT APPLE)

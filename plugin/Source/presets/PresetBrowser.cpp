@@ -578,8 +578,12 @@ void PresetBrowser::refresh()
     covers.clear();
     for (const auto& pr : packRows)
         if (pr.pack.isNotEmpty() && ! pr.favorites)
+        {
             if (auto f = lib.packCoverFile (pr.pack); f.existsAsFile())
                 covers[pr.pack] = juce::ImageFileFormat::loadFrom (f);
+            else if (auto img = lib.builtInCover (pr.pack); img.isValid())
+                covers[pr.pack] = img;
+        }
 
     packButtons.clear();
     for (int i = 0; i < (int) packRows.size(); ++i)
@@ -1201,7 +1205,7 @@ void PresetBrowser::paint (juce::Graphics& g)
             drawHeart (g, tr.removeFromLeft (14.0f).reduced (0.0f, (r.getHeight() - 13.0f) * 0.5f), true, Colours::dustWhite);
             tr.removeFromLeft (10.0f);
         }
-        if (! pr.favorites && pr.pack.isNotEmpty() && pr.pack.equalsIgnoreCase ("factory"))
+        if (! pr.favorites && pr.pack.isNotEmpty() && (pr.pack.equalsIgnoreCase ("factory") || pr.pack.equalsIgnoreCase (room::presets::PresetLibrary::evillePack)))
             EvilleLookAndFeel::drawCaps (g, "built in", tr.withHeight (14.0f).translated (0.0f, r.getHeight() * 0.18f), 8.5f,
                                          Colours::dustWhite.withAlpha (0.6f));
         EvilleLookAndFeel::drawCaps (g, pr.favorites ? "favourites" : pr.label, tr, 12.0f,

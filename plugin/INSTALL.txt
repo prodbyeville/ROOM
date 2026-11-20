@@ -140,7 +140,10 @@ FIRST RUN
   hear it straight away. Projects you saved keep whatever they had.
 
 FACTORY LIBRARY
-  64 ROOMS (spaces, objects and textures) and 46 STUDIOS, covering every
+  The Eville pack (built in, next to Factory): Eville's own 10 ROOMS and
+  14 STUDIOS, in his style, with its cover.
+
+  Factory: 64 ROOMS (spaces, objects and textures) and 46 STUDIOS, covering every
   "made for" and character tag. 24 ROOMS come from sounds synthesized for
   ROOM (plugin/Tools/make_factory_presets.sh), 25 from Eville's own
   recordings (plugin/Tools/make_pack_rooms.sh) and 15 from Eville's synth
