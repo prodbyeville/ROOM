@@ -167,6 +167,10 @@ On the test sounds: hall clap = 0.70, room tone = 0.29, bottle tap = 0.12. On re
 - The lowest band (around 60 to 85 Hz) is the least reliable decay measurement on short files.
 - The synthetic test sounds are only a sanity check. Real recordings are the real test.
 
+## Marketing renders and videos
+
+Product stills, cinematic close-ups, abstract art and 5-second product videos of ROOM as a hardware module are in [`ROOM_Renders_Final/`](ROOM_Renders_Final/README.md). The finished video clips are in [`ROOM_Videos_Final/`](ROOM_Videos_Final/). The renders README covers how they were made, the brand look, and the Higgsfield job IDs for re-rendering.
+
 ## Not decided yet
 
 Plugin name, final default values, the final balance/mix formula, and how this ships are all open.
