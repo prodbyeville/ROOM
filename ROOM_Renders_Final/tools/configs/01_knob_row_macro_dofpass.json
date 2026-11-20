@@ -1,0 +1,26 @@
+{
+  "in": "/home/user/ROOM/ROOM_Renders_Final/04_Video/01_knob_row_macro_v6.mp4",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/01_knob_row_macro_v6b.mp4",
+  "depth": {
+    "kx": 0.5,
+    "ky": 1.0
+  },
+  "focus_from": [
+    0.33,
+    0.6
+  ],
+  "focus_to": [
+    0.55,
+    0.51
+  ],
+  "t0": 1.6,
+  "t1": 3.9,
+  "envelope": [
+    0.0,
+    1.0,
+    4.0,
+    4.9
+  ],
+  "strength": 34,
+  "max_blur": 12
+}
