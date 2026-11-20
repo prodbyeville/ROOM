@@ -107,6 +107,16 @@ public:
     bool setQuick (const juce::String& key, bool on);
     bool createPack (const juce::String& name, juce::String& errorOut);
 
+    // PACK COVERS AND DELETE (user packs only; not Factory or User)
+    /** The pack's cover image file (cover.jpg / cover.png in its folder), or a non-existent file. */
+    juce::File packCoverFile (const juce::String& pack) const;
+    /** Makes `image` the pack's cover (saved as cover.jpg, at most 1200 px wide). */
+    bool setPackCover (const juce::String& pack, const juce::File& image, juce::String& errorOut);
+    void removePackCover (const juce::String& pack);
+    static bool isEditablePack (const juce::String& pack);
+    /** Moves the pack's folder (and everything in it) to the trash. */
+    bool removePack (const juce::String& pack, juce::String& errorOut);
+
     /** Copies .room files into a pack. Returns how many were imported. */
     int importFiles (const juce::Array<juce::File>&, const juce::String& pack);
 

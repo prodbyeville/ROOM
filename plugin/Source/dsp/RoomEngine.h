@@ -3,6 +3,7 @@
 #include "RoomSynth.h"
 #include "PartitionedConvolver.h"
 #include "WetFx.h"
+#include "RoomCharacter.h"
 #include "NoisePlayer.h"
 #include <juce_dsp/juce_dsp.h>
 
@@ -12,6 +13,7 @@
 //     -> tone-match EQ -> resonators          (tonal path)
 //     -> pre-delay -> synthetic IR            (spatial path, fed by tonal)
 //     -> tone x tonal + space x spatial       (= the "wet" room sound)
+//     -> room artifacts, shimmer / bloom      (Intensity above 100 %)
 //     -> freeze (loop the wet sound)          (Advanced)
 //     -> ducking (wet dips while you play)    (Advanced)
 //     -> wet/dry mix
@@ -30,7 +32,8 @@ struct RoomFx
     float duck = 0.0f;             // 0 .. 1
     float duckReleaseMs = 250.0f;  // 50 .. 1000
     bool freeze = false;
-    float extreme = 0.0f;          // 0 .. 1: Intensity above 100% (see WetFx)
+    float character = 0.0f;        // 0 .. 1: Intensity 100..180 %, the room's artifacts (RoomCharacter.h)
+    float extreme = 0.0f;          // 0 .. 1: Intensity 180..200 % (see WetFx)
     bool stutter = false;          // the glitch key
     float glitchAmount = 0.25f;    // 0 .. 1: follows Intensity (how often / how much it stutters)
     bool glitchSync = false;       // stutter in time with the host
@@ -88,6 +91,8 @@ private:
 
     // Extreme intensity and the stutter glitch, on the wet sound
     WetFx wetFx;
+    RoomCharacter character;
+    float ringNow = 0.0f;   // how much the room's notes ring (Intensity 100..140 %), eased per block
     RateReducer rateDry, rateWet;
 
     // Ducking: envelope of the dry input

@@ -42,6 +42,22 @@ private:
 };
 
 //==============================================================================
+/** The browser's filter drawer: sort and tag chips in groups, toggled in place (no menu). */
+class FilterDrawer : public juce::Component
+{
+public:
+    struct Group { juce::String title; ChipGroup* chips = nullptr; };
+    std::vector<Group> groups;
+    juce::TextButton clear { "clear filters" }, done { "done" };
+
+    FilterDrawer();
+    int idealHeight (int width) const;
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override {}   // clicks don't fall through to the list
+};
+
+//==============================================================================
 class SaveDialog : public juce::Component
 {
 public:
@@ -151,6 +167,8 @@ private:
     void updateRows();
     void layoutSidebar (juce::Rectangle<int>);
     void showFiltersMenu();
+    void showPackMenu (int packRow);
+    std::map<juce::String, juce::Image> covers;   // pack -> its cover image (user packs that have one)
     void showRowMenu (int row);
     int activeFilterCount() const;
     juce::Rectangle<int> cardArea() const;
@@ -186,6 +204,9 @@ private:
     ChipGroup typeChips;    // ROOMS: Type     STUDIOS: Made for
     ChipGroup styleChips;   // ROOMS: Character  STUDIOS: Style
     ChipGroup autoChips;    // ROOMS: Decay / Tone / Source
+    ChipGroup sortChips;    // sort by (one at a time)
+    FilterDrawer filterDrawer;
+    void openFilters (bool open);
     juce::TextButton clearFilters { "Clear filters" };
     juce::TextButton filtersButton { "filters" }, folderButton, pathButton;
     juce::Rectangle<int> sidebarArea, detailArea;

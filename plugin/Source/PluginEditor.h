@@ -190,6 +190,29 @@ private:
     float activity = 1.0f;   // eased: how much the noise is playing now (follow and stop), 0..1
 };
 
+/** TUNE: the room's key on a small glass readout ("D MIN", "OFF"), arrows either side
+    step through the keys, a click lists them; the key beside it picks the scale. */
+class TuneScreen : public juce::Component,
+                   public juce::SettableTooltipClient,
+                   private juce::Timer
+{
+public:
+    explicit TuneScreen (RoomAudioProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void step (int delta);
+    void stepScale();
+    void showMenu();
+    static juce::String scaleShort (int scale);
+    juce::TextButton prev { {} }, next { {} };
+    juce::TextButton scaleKey { "maj" };
+
+private:
+    void timerCallback() override;
+    RoomAudioProcessor& proc;
+    int shownKey = -1, shownScale = -1;
+};
+
 /** The first-run tour: dims the window, lights up one area at a time and
     explains it on a small card (back / next / skip). */
 class TourOverlay : public juce::Component
@@ -373,6 +396,9 @@ private:
     const juce::Rectangle<float> cellGlitch { 112.0f, 540.0f, 144.0f, 60.0f };
     const juce::Rectangle<float> cellAmount { 276.0f, 540.0f, 76.0f, 60.0f };
     const juce::Rectangle<float> autoKeyArea { 392.0f, 556.0f, 64.0f, 28.0f };
+    // ... and under tail / size: tune (the room's notes in a key) | imprint (the sound takes the room's timbre)
+    const juce::Rectangle<float> cellTune { 554.0f, 540.0f, 154.0f, 60.0f };
+    const juce::Rectangle<float> cellImprint { 724.0f, 540.0f, 156.0f, 60.0f };
     // Row 3: noise | level over follow | the stop key on its own | rate
     const juce::Rectangle<float> cellNoise { 12.0f, 616.0f, 346.0f, 144.0f };
     const juce::Rectangle<float> cellLevel { 378.0f, 616.0f, 122.0f, 144.0f };
@@ -404,7 +430,8 @@ private:
     ToneScreen toneScreen { proc };
 
     // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
-    Knob intensity, smooth, glitchAmount, tone, space, tail, size;
+    Knob intensity, smooth, glitchAmount, tone, space, tail, size, imprint;
+    TuneScreen tuneScreen { proc };
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
     juce::ToggleButton glitchKey { "glitch" };

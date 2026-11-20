@@ -2,9 +2,11 @@
 #include "UiColours.h"
 #include "Screens.h"
 #include "EvilleLookAndFeel.h"
+#include "R5Parts.h"
 
 AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
 {
+    getProperties().set ("surface", "light");   // the light module: ink text, light knobs
     setupKnob (preDelay, ParamIDs::preDelay, "pre-delay", "0", "", "500");
     setupKnob (space, ParamIDs::space, "width", "mono", "", "wide");
     setupKnob (damping, ParamIDs::damping, "damping", "-", "0", "+");
@@ -21,7 +23,8 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     duckRelease.slider.setTooltip ("how fast it comes back");
 
     freeze.setClickingTogglesState (true);
-    freeze.getProperties().set ("key", "dark");
+    freeze.getProperties().set ("r5key", "black");
+    freeze.setButtonText ("freeze");
     freeze.setTooltip ("hold the tail forever");
     addAndMakeVisible (freeze);
     freezeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::freeze, freeze);
@@ -34,6 +37,22 @@ AdvancedPanel::AdvancedPanel (RoomAudioProcessor& p) : proc (p), lfoPanel (p)
     }
     addChildComponent (lfoPanel);
     lfoPanel.onDone = [this] { showModulationTab (false); };
+    for (auto* k : allKnobs())
+        names.add (k->label.getText());
+    startTimerHz (15);
+}
+
+void AdvancedPanel::timerCallback()
+{
+    // No value bubble: a knob being touched shows its value in place of its name.
+    const auto ks = allKnobs();
+    for (size_t i = 0; i < ks.size(); ++i)
+    {
+        auto& k = *ks[i];
+        const auto text = k.slider.isMouseOverOrDragging() ? k.slider.getTextFromValue (k.slider.getValue()) : names[(int) i];
+        if (k.label.getText() != text)
+            k.label.setText (text, juce::dontSendNotification);
+    }
 }
 
 std::vector<AdvancedPanel::Knob*> AdvancedPanel::allKnobs()
@@ -45,9 +64,9 @@ void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::Stri
                                const juce::String& lo, const juce::String& mid, const juce::String& hi, float radius)
 {
     k.slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    k.slider.setPopupDisplayEnabled (true, true, this);
+    // no value bubble (values are printed or shown on hover tooltips)
     auto& props = k.slider.getProperties();
-    props.set ("surface", "black");
+    props.set ("surface", "light");
     props.set ("knobRadius", radius);
     props.set ("scaleMin", lo);
     props.set ("scaleMid", mid);
@@ -55,7 +74,7 @@ void AdvancedPanel::setupKnob (Knob& k, const juce::String& id, const juce::Stri
     k.label.setText (name, juce::dontSendNotification);
     k.label.setJustificationType (juce::Justification::centred);
     k.label.setFont (Fonts::sans (13.0f));
-    k.label.setColour (juce::Label::textColourId, Colours::dustWhite);
+    k.label.setColour (juce::Label::textColourId, Colours::ink);
     k.label.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (k.slider);
     addAndMakeVisible (k.label);
@@ -85,20 +104,15 @@ void AdvancedPanel::showModulationTab (bool lfos)
 
 void AdvancedPanel::paint (juce::Graphics& g)
 {
-    g.setColour (Colours::dustWhite);
-    g.setFont (Fonts::sans (22.0f, Fonts::bold));
-    g.drawText (lfoPanel.isVisible() ? "lfo" : "advanced", 26, 30, 200, 30, juce::Justification::centredLeft);
-
-    Hw::drawGroove (g, { 18.0f, 70.0f }, { (float) getWidth() - 18.0f, 70.0f }, true);
+    // ink on the light module
+    R5::drawLabel (g, lfoPanel.isVisible() ? "lfo" : "advanced", { (float) getWidth() * 0.5f, 44.0f }, 12.0f, 1.0f, true);
+    g.setColour (Colours::ink.withAlpha (0.14f));
+    g.fillRect (18.0f, 70.0f, (float) getWidth() - 36.0f, 1.0f);
     if (! lfoPanel.isVisible())
     {
         // Freeze: LED above the key, label below (on the same line as "release")
-        Hw::drawLed (g, { (float) freeze.getBounds().getCentreX(), (float) freeze.getY() - 10.0f }, freeze.getToggleState(), 3.5f);
-        g.setFont (Fonts::sans (13.0f));
-        g.setColour (Colours::dustWhite);
-        g.drawText ("freeze", juce::Rectangle<int> (80, 18).withCentre ({ freeze.getBounds().getCentreX(), duckRelease.label.getBounds().getCentreY() }),
-                    juce::Justification::centred);
-        Hw::drawGroove (g, { 18.0f, (float) lfoTop - 14.0f }, { (float) getWidth() - 18.0f, (float) lfoTop - 14.0f }, true);
+        g.setColour (Colours::ink.withAlpha (0.14f));
+        g.fillRect (18.0f, (float) lfoTop - 14.0f, (float) getWidth() - 36.0f, 1.0f);
     }
 }
 
@@ -121,7 +135,7 @@ void AdvancedPanel::resized()
     place (space, 2, 0);
     place (duck, 0, 1);
     place (duckRelease, 1, 1);
-    freeze.setBounds (juce::Rectangle<int> (40, 40).withCentre ({ cols[2], rows[1] + 2 }));
+    freeze.setBounds (juce::Rectangle<int> (62, 30).withCentre ({ cols[2], rows[1] + 2 }));
     place (tape, 0, 2);
     place (autoEq, 1, 2);
 

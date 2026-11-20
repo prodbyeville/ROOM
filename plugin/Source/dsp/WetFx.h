@@ -7,12 +7,12 @@
 
 // Two effects on the wet (room) sound only, after the room and before freeze:
 //
-//   EXTREME (Intensity above 100%): `amount` 0..1 across the knob's top half.
+//   EXTREME (Intensity 180..200%): `amount` 0..1 across the knob's last 20 %.
+//     (100..180 % belongs to the room's own artifacts: RoomCharacter.h.)
 //     0 .. 0.5   smear + shimmer: an octave-up shimmer that feeds on itself and
-//                reversed swells, so the room turns into a wash.
-//     0.5 .. 1   digital breakup on top: sample-rate reduction, bit crushing,
-//                a drifting ring modulator and choppy gating.
-//     At 0 it is exactly bypassed (bit-identical), so 0..100% is untouched.
+//                reversed swells, so the room turns into a wash (full at 190 %).
+//     0.4 .. 1   the harmonic bloom on top: the room's notes sing (188..200 %).
+//     At 0 it is exactly bypassed (bit-identical), so 0..180% is untouched.
 //
 //   STUTTER (the glitch key): every so often it grabs a short slice of the
 //     room and repeats it a few times, sometimes chopped; between stutters the
@@ -51,12 +51,6 @@ public:
         write = 0;
         shimPhase = 0.0;
         revPos = 0;
-        holdCount = 0;
-        for (auto& h : held) h = 0.0f;
-        ringPhase = 0.0;
-        ringHz = 120.0;
-        gate = 1.0f;
-        gateCount = 0;
         stutterActive = false;
         roomUnder = 1.0f;
         stutterWait = (int) (0.3 * sampleRate);
@@ -132,11 +126,8 @@ private:
 
     void extreme (float* wet, int ch, float e)
     {
-        const auto a = smooth (e * 2.0f);             // smear + shimmer: full by 150%
-        // Digital breakup from 150 %, held at its 165 % amount (where it sounds best), then
-        // handed over to the harmonic bloom, which takes 165 % .. 200 %.
-        const auto h = smooth ((e - bloomStart) / (1.0f - bloomStart));
-        const auto d = smooth ((std::min (e, bloomStart) - 0.5f) * 2.0f) * (1.0f - h);
+        const auto a = smooth (e * 2.0f);                               // smear + shimmer: full by 190 %
+        const auto h = smooth ((e - bloomStart) / (1.0f - bloomStart));  // harmonic bloom: 188 .. 200 %
 
         // --- Shimmer: two read heads sweeping at double speed (octave up), crossfaded.
         shimPhase += 1.0;   // the delay shrinks by one sample per sample = 2x speed
@@ -149,22 +140,6 @@ private:
         revPos = (revPos + 1) % reverseLen;
         const auto rw = (float) std::sin (juce::MathConstants<double>::pi * revPos / reverseLen);
 
-        // --- Digital: hold (sample-rate reduction) + crush + ring + gate.
-        const auto holdN = 1 + (int) (d * 22.0f);
-        const auto bits = 16.0f - d * 12.0f;
-        const auto steps = std::pow (2.0f, bits);
-        if (--holdCount <= 0) holdCount = holdN;
-        ringHz += (rng.nextFloat() - 0.5f) * 0.6;   // the carrier drifts
-        ringHz = juce::jlimit (40.0, 520.0, ringHz);
-        ringPhase += ringHz / sampleRate;
-        if (ringPhase > 1.0) ringPhase -= 1.0;
-        const auto ring = (float) std::sin (juce::MathConstants<double>::twoPi * ringPhase);
-        if (--gateCount <= 0)
-        {
-            gateCount = (int) (sampleRate / (6.0 + rng.nextFloat() * 14.0));
-            gate = rng.nextFloat() < 0.35f * d ? 0.0f : 1.0f;
-        }
-        gateSm += (gate - gateSm) * 0.004f;
         if (h > 0.0f)
             advanceBloomHeads();
 
@@ -177,14 +152,6 @@ private:
 
             auto y = dry * (1.0f - 0.35f * a) + 0.75f * a * shimmerOut[c] + 0.55f * a * rev;
 
-            if (d > 0.0f)
-            {
-                if (holdCount == holdN) held[c] = y;
-                auto z = std::round (held[c] * steps) / steps;
-                z = z * (1.0f - 0.6f * d) + 0.6f * d * z * ring;
-                y = (1.0f - d) * y + d * z;
-                y *= 1.0f - 0.85f * d * (1.0f - gateSm);
-            }
             if (h > 0.0f)
                 y = bloom (c, y, h);
             // Keep it about as loud as the room it came from, and tame the feedback.
@@ -192,12 +159,12 @@ private:
         }
     }
 
-    // --- HARMONIC BLOOM (165 % .. 200 %) -------------------------------------------
+    // --- HARMONIC BLOOM (188 % .. 200 %) -------------------------------------------
     // Instead of breaking up further, the room starts to sing: a bank of resonators
     // tuned to the room's own notes (and their fifths and octaves) rings out of the
     // wet sound, a choir of grains a fifth up and an octave down thickens it, and a
     // warm, slightly asymmetric saturation glues it. No crushing, ring mod or gating.
-    static constexpr float bloomStart = 0.65f;   // 165 % on the knob
+    static constexpr float bloomStart = 0.4f;    // 188 % on the knob
     static constexpr int maxPartials = 8;
 
 public:
@@ -341,12 +308,6 @@ private:
     double partialHz[maxPartials] {};
     int numPartials = 0;
     double fifthPhase = 0.0, lowPhase = 0.0;
-
-    int holdCount = 0;
-    float held[maxCh] {};
-    double ringPhase = 0.0, ringHz = 120.0;
-    float gate = 1.0f, gateSm = 1.0f;
-    int gateCount = 0;
 
     bool stutterActive = false, chopped = false;
     float roomUnder = 1.0f;

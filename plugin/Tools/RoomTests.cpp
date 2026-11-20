@@ -7,6 +7,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "RoomMenu.h"
 #include "dsp/PartitionedConvolver.h"
 #include "dsp/ResonanceSuppressor.h"
 #include "presets/PresetLibrary.h"
@@ -661,6 +662,8 @@ namespace
             const auto before = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                               + paramValue (rig.proc, ParamIDs::size);
             juce::Random r (11);
+            check (room::Randomizer::isSelected (rig.proc, "room"), "Randomize picks a new room by default");
+            room::Randomizer::setSelected (rig.proc, "room", false);   // the room on its own: below
             room::Randomizer::randomizeSelected (rig.proc, r);
             const auto after = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                              + paramValue (rig.proc, ParamIDs::size);
@@ -669,7 +672,7 @@ namespace
             check (std::abs (paramValue (rig.proc, ParamIDs::output) + 4.0f) < 0.05f, "Randomize keeps Output");
             check (paramValue (rig.proc, ParamIDs::bypass) < 0.5f && paramValue (rig.proc, ParamIDs::freeze) < 0.5f,
                    "Randomize never bypasses or freezes");
-            check (analysisXml (rig.proc) == room, "Randomize keeps the room");
+            check (analysisXml (rig.proc) == room, "Randomize keeps the room when room isn't ticked");
             for (int k = 0; k < 50; ++k)
             {
                 room::Randomizer::randomizeSelected (rig.proc, r);
@@ -2109,7 +2112,7 @@ namespace
             return d / e;
         };
 
-        // --- Extreme: 165 % and below don't use the bloom; at 200 % no gating, harmonic, bounded ---
+        // --- Extreme (180..200 %): 187 % and below don't use the bloom; at 200 % no gating, harmonic, bounded ---
         {
             auto render = [] (float e, bool withNotes, std::vector<float>& out)
             {
@@ -2128,9 +2131,9 @@ namespace
                 }
             };
             std::vector<float> a, b;
-            render (0.6f, false, a);
-            render (0.6f, true, b);
-            check (a == b, "at 160 % the bloom isn't used (the room's notes change nothing)");
+            render (0.35f, false, a);
+            render (0.35f, true, b);
+            check (a == b, "at 187 % the bloom isn't used (the room's notes change nothing)");
             render (1.0f, true, b);
             bool finite = true;
             float peak = 0.0f;
@@ -2147,7 +2150,7 @@ namespace
             const auto median = sorted[sorted.size() / 2], lowest = sorted.front();
             check (lowest > 0.25 * median, "at 200 % nothing gates the sound out (quietest 20 ms at "
                                            + juce::String (lowest / median * 100.0, 0) + " % of typical)");
-            check (hfRatio (b, 48000, b.size()) < hfRatio (a, 48000, a.size()), "at 200 % the sound is more tonal than at 160 % (less hiss, more notes)");
+            check (hfRatio (b, 48000, b.size()) < hfRatio (a, 48000, a.size()), "at 200 % the sound is more tonal than at 187 % (less hiss, more notes)");
         }
 
         // --- Smooth: off is untouched; on tucks the attack, keeps the body, darkens the top ---
@@ -2303,6 +2306,257 @@ namespace
             for (auto [id, v] : std::initializer_list<std::pair<const char*, float>> { { ParamIDs::noiseLevel, 0.0f }, { ParamIDs::rate, 44100.0f },
                      { ParamIDs::rateDry, 1.0f }, { ParamIDs::rateReverb, 1.0f }, { ParamIDs::rateNoise, 1.0f }, { ParamIDs::mix, 1.0f } })
                 setParam (rig.proc, id, v);
+        }
+    }
+
+    // Round 6: Intensity's room artifacts (100..180 %), Tune to key, Imprint, pack covers /
+    // delete, randomizing the room and the menu geometry.
+    void testRound6 (const juce::File& root)
+    {
+        std::cout << "round 6: room artifacts / tune / imprint / packs / menus\n";
+        constexpr double sr = 48000.0;
+        auto noiseOf = [] (int n, int seed, float level = 0.25f)
+        {
+            std::vector<float> v ((size_t) n);
+            juce::Random r (seed);
+            for (auto& x : v) x = (r.nextFloat() * 2.0f - 1.0f) * level;
+            return v;
+        };
+        auto rmsOf = [] (const std::vector<float>& x, size_t a, size_t b)
+        {
+            double e = 0.0;
+            for (auto i = a; i < std::min (b, x.size()); ++i) e += (double) x[i] * x[i];
+            return 10.0 * std::log10 (e / (double) std::max<size_t> (1, std::min (b, x.size()) - a) + 1e-20);
+        };
+
+        // --- RoomCharacter: idle at 0; flutter, comb and push are each there; level kept ---
+        {
+            auto runChar = [&] (float amount, const std::vector<float>& in)
+            {
+                room::RoomCharacter c;
+                c.prepare (sr, 2);
+                c.setRoom (25.0f, 1.6f);
+                c.setAmount (amount);
+                std::vector<float> out;
+                for (auto x : in)
+                {
+                    float w[2] = { x, x };
+                    c.processSample (w, 2);
+                    out.push_back (w[0]);
+                }
+                return std::make_pair (out, c.isIdle());
+            };
+            const auto noise = noiseOf ((int) sr * 2, 21);
+            const auto [same, idle] = runChar (0.0f, noise);
+            check (same == noise && idle, "room artifacts are off up to 100 % (untouched)");
+
+            // an impulse train, one click every 250 ms: flutter repeats every 25 ms after each click
+            std::vector<float> clicks ((size_t) sr * 2, 0.0f);
+            for (size_t k = 0; k < clicks.size(); k += (size_t) (0.25 * sr)) clicks[k] = 0.8f;
+            const auto at160 = runChar (0.75f, clicks).first;
+            const auto at100 = runChar (0.0f, clicks).first;
+            const auto click = (size_t) (1.5 * sr), period = (size_t) (0.025 * sr);
+            auto around = [] (const std::vector<float>& x, size_t i) { float m = 0; for (size_t k = i - 4; k <= i + 4; ++k) m = std::max (m, std::abs (x[k])); return m; };
+            check (around (at160, click + period) > 0.05f && around (at100, click + period) == 0.0f,
+                   "flutter echo: the room repeats at its own period (" + juce::String (around (at160, click + period), 3) + ")");
+            check (around (at160, click + 2 * period) > 0.01f, "flutter echo keeps bouncing");
+            const auto comb = (size_t) (0.0016 * sr);
+            check (around (at160, click + comb) > 0.1f, "close-wall comb: a near reflection right after the sound");
+
+            // push: a bursty sound gets squeezed (crest factor down)
+            std::vector<float> bursts ((size_t) sr * 3);
+            juce::Random r (5);
+            for (size_t i = 0; i < bursts.size(); ++i)
+                bursts[i] = (r.nextFloat() * 2.0f - 1.0f) * ((i / 2400) % 4 == 0 ? 0.6f : 0.03f);
+            auto crest = [] (const std::vector<float>& x)
+            {
+                double e = 0; float pk = 0;
+                for (size_t i = x.size() / 3; i < x.size(); ++i) { e += (double) x[i] * x[i]; pk = std::max (pk, std::abs (x[i])); }
+                return pk / std::sqrt (e / (double) (x.size() - x.size() / 3));
+            };
+            const auto pushed = runChar (1.0f, bursts).first;
+            check (crest (pushed) < 0.8 * crest (bursts), "pushed mic squeezes the room (crest " + juce::String (crest (bursts), 1)
+                                                            + " -> " + juce::String (crest (pushed), 1) + ")");
+            const auto full = runChar (1.0f, noise).first;
+            bool finite = true;
+            for (auto x : full) finite = finite && std::isfinite (x);
+            const auto dIn = rmsOf (noise, (size_t) sr, noise.size()), dOut = rmsOf (full, (size_t) sr, full.size());
+            check (finite && std::abs (dOut - dIn) < 3.0, "the room artifacts keep the room's level (" + juce::String (dOut - dIn, 1) + " dB)");
+            check (room::RoomCharacter::ringAmount (0.0f) == 0.0f && room::RoomCharacter::ringAmount (0.5f) == 1.0f,
+                   "the room's notes ring from 100 % and are full at 140 %");
+        }
+
+        // --- The whole plugin at 100 / 140 / 180 %: different, finite, near the room's level ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::toneAmount, 0.6f);
+            const auto in = noiseOf ((int) (0.6 * sr), 3);
+            auto at = [&] (float v) { setParam (rig.proc, ParamIDs::intensity, v); rig.settle(); return rig.run (in, 1.5); };
+            const auto a = at (2.0f), b = at (2.8f), c = at (3.6f);
+            float d1 = 0, d2 = 0; bool finite = true;
+            for (size_t i = 0; i < a.size(); ++i)
+            {
+                d1 = std::max (d1, std::abs (b[i] - a[i])); d2 = std::max (d2, std::abs (c[i] - b[i]));
+                finite = finite && std::isfinite (b[i]) && std::isfinite (c[i]);
+            }
+            check (finite && d1 > 0.01f && d2 > 0.01f, "140 % and 180 % each change the room");
+            const auto l100 = rmsDb (a, 0.0, 1.5), l180 = rmsDb (c, 0.0, 1.5);
+            check (std::abs (l180 - l100) < 6.0, "180 % stays near the room's level (" + juce::String (l180 - l100, 1) + " dB)");
+        }
+
+        // --- Tune to key ---
+        {
+            check (std::abs (room::snapToKey (446.0f, 9, 0) - 440.0f) < 0.01f, "tune: 446 Hz snaps to A in A major");
+            check (std::abs (room::snapToKey (277.2f, 0, 0) - 261.63f) < 0.1f || std::abs (room::snapToKey (277.2f, 0, 0) - 293.66f) < 0.1f,
+                   "tune: C# is not in C major (it goes to C or D)");
+            check (room::snapToKey (277.2f, -1, 0) == 277.2f, "tune off leaves a note alone");
+            Rig rig (root);
+            const auto a = rig.proc.getAnalysis();
+            const auto off = room::designTone (a, sr, 1.0f);
+            const auto tuned = room::designTone (a, sr, 1.0f, 2, 1);   // D minor
+            bool inKey = tuned.numResonators > 0;
+            static constexpr int dMinor[] = { 2, 4, 5, 7, 9, 10, 0 };
+            for (int k = 0; k < tuned.numResonators; ++k)
+            {
+                const auto midi = juce::roundToInt (69.0 + 12.0 * std::log2 (tuned.resonatorHz[k] / 440.0));
+                inKey = inKey && std::find (std::begin (dMinor), std::end (dMinor), ((midi % 12) + 12) % 12) != std::end (dMinor);
+            }
+            check (inKey, "tune: every one of the room's notes lands in D minor");
+            bool same = off.numResonators == room::designTone (a, sr, 1.0f, -1, 1).numResonators;
+            check (same, "tune off builds the room as before");
+
+            const auto in = noiseOf ((int) (0.5 * sr), 8);
+            setParam (rig.proc, ParamIDs::toneAmount, 1.0f);
+            rig.settle();
+            const auto plain = rig.run (in, 0.5);
+            setParam (rig.proc, ParamIDs::tuneKey, 3.0f);   // D
+            rig.settle();
+            const auto keyed = rig.run (in, 0.5);
+            float diff = 0;
+            for (size_t i = 0; i < plain.size(); ++i) diff = std::max (diff, std::abs (keyed[i] - plain[i]));
+            check (diff > 1e-4f, "choosing a key retunes the room");
+        }
+
+        // --- Imprint ---
+        {
+            room::Imprint im;
+            im.prepare (sr, 2);
+            room::Imprint::Profile prof;
+            prof.valid = true;
+            for (int b = 0; b < room::Imprint::numBands; ++b) prof.bandDb[b] = -12.0f + 24.0f * (float) b / 8.0f;   // a bright room
+            im.setProfile (prof);
+            auto run = [&] (float amount, const std::vector<float>& in)
+            {
+                im.reset();
+                im.setAmount (amount);
+                juce::AudioBuffer<float> buf (2, 256);
+                std::vector<float> out;
+                for (size_t start = 0; start + 256 <= in.size(); start += 256)
+                {
+                    for (int i = 0; i < 256; ++i) buf.setSample (0, i, in[start + (size_t) i]), buf.setSample (1, i, in[start + (size_t) i]);
+                    im.process (buf, 256);
+                    for (int i = 0; i < 256; ++i) out.push_back (buf.getSample (0, i));
+                }
+                return out;
+            };
+            // pink-ish (dark) noise in
+            auto in = noiseOf ((int) sr * 3, 12, 0.3f);
+            float lp = 0; for (auto& x : in) { lp += (x - lp) * 0.05f; x = lp * 3.0f; }
+            const auto none = run (0.0f, in);
+            bool same = true;
+            for (size_t i = 0; i < none.size(); ++i) same = same && none[i] == in[i];
+            check (same && im.isIdle(), "imprint at 0 leaves the sound untouched");
+            const auto full = run (1.0f, in);
+            auto hfShare = [] (const std::vector<float>& x)
+            {
+                double e = 1e-20, d = 0.0;
+                for (size_t i = x.size() / 2; i < x.size(); ++i) { e += (double) x[i] * x[i]; d += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]); }
+                return d / e;
+            };
+            check (hfShare (full) > 2.0 * hfShare (none), "imprint gives a dark sound a bright room's timbre ("
+                                                          + juce::String (hfShare (none), 4) + " -> " + juce::String (hfShare (full), 4) + ")");
+            const auto l0 = rmsOf (none, none.size() / 2, none.size()), l1 = rmsOf (full, full.size() / 2, full.size());
+            check (std::abs (l1 - l0) < 3.0, "imprint keeps the level (" + juce::String (l1 - l0, 1) + " dB)");
+
+            Rig rig (root);
+            const auto latency = rig.proc.getLatencySamples();
+            setParam (rig.proc, ParamIDs::imprint, 1.0f);
+            rig.settle();
+            check (rig.proc.getLatencySamples() == latency, "imprint adds no latency");
+            const auto out = rig.run (noiseOf ((int) (0.5 * sr), 4), 0.5);
+            bool finite = true;
+            for (auto x : out) finite = finite && std::isfinite (x);
+            check (finite, "imprint on a real room stays finite");
+            check (room::Modulation::targetIndex (ParamIDs::imprint) >= 0, "an LFO can move Imprint");
+        }
+
+        // --- Randomize the room ---
+        {
+            Rig rig (root);
+            namespace R = room::Randomizer;
+            for (const auto& t : R::targets())
+                R::setSelected (rig.proc, t.key, juce::String (t.key) == "room");
+            juce::Random r (17);
+            const auto before = analysisXml (rig.proc);
+            const auto keyBefore = rig.proc.getCurrentRoomKey();
+            R::randomizeSelected (rig.proc, r);
+            check (analysisXml (rig.proc) != before && rig.proc.getCurrentRoomKey() != keyBefore,
+                   "randomize can pick a new room (" + rig.proc.getCurrentRoomKey() + ")");
+        }
+
+        // --- Pack cover and delete ---
+        {
+            Rig rig (root);
+            auto& lib = rig.proc.getLibrary();
+            juce::String err;
+            check (lib.createPack ("Cover Test", err), "make a pack for the cover test");
+            juce::Image img (juce::Image::RGB, 1600, 900, true);
+            juce::Graphics (img).fillAll (juce::Colours::orange);
+            const auto src = root.getChildFile ("cover-src.png");
+            { juce::FileOutputStream os (src); os.setPosition (0); os.truncate(); juce::PNGImageFormat().writeImageToStream (img, os); }
+            check (lib.setPackCover ("Cover Test", src, err) && lib.packCoverFile ("Cover Test").existsAsFile(), "a pack takes a cover image");
+            const auto cover = juce::ImageFileFormat::loadFrom (lib.packCoverFile ("Cover Test"));
+            check (cover.isValid() && cover.getWidth() <= 1200, "the cover is kept at most 1200 px wide");
+            lib.removePackCover ("Cover Test");
+            check (! lib.packCoverFile ("Cover Test").existsAsFile(), "a cover can be removed");
+            check (! lib.removePack ("Factory", err) && ! lib.removePack ("User", err), "Factory and User packs can't be deleted");
+            check (lib.removePack ("Cover Test", err), "a user pack can be deleted");
+            lib.rescan();
+            bool gone = true;
+            for (const auto& e : lib.getEntries()) gone = gone && e.pack != "Cover Test";
+            check (gone && ! lib.getPacks().contains ("Cover Test"), "a deleted pack is gone from the library");
+        }
+
+        // --- Menus: every highlight inside the panel; long menus break at headers ---
+        {
+            juce::PopupMenu m;
+            for (int sct = 0; sct < 6; ++sct)
+            {
+                m.addSectionHeader ("SECTION " + juce::String (sct));
+                for (int i = 0; i < 10; ++i)
+                    m.addItem ("item " + juce::String (sct) + "." + juce::String (i) + " with a long-ish name", [] {});
+                m.addSeparator();
+            }
+            juce::PopupMenu sub; sub.addItem ("inner", [] {});
+            m.addSubMenu ("more", sub);
+            auto menu = RoomMenu::createForTest (m);
+            const auto panel = menu->panelBounds();
+            bool inside = true;
+            for (const auto& e : menu->getEntries())
+                if (e.kind == RoomMenu::Entry::Kind::item)
+                    inside = inside && panel.reduced (1.0f).contains (menu->highlightFor (e));
+            check (inside, "every menu highlight sits inside the menu's panel");
+            check (menu->numColumns() >= 1, "the long menu is laid out");
+            bool headersFirst = true;
+            float lastX = -1.0f;
+            for (const auto& e : menu->getEntries())
+            {
+                if (e.kind == RoomMenu::Entry::Kind::separator) continue;
+                if (e.row.getX() > lastX + 1.0f && lastX >= 0.0f)
+                    headersFirst = headersFirst && e.kind == RoomMenu::Entry::Kind::header;
+                lastX = std::max (lastX, e.row.getX());
+            }
+            check (headersFirst, "menu columns start at a section header");
         }
     }
 
@@ -2496,6 +2750,8 @@ namespace
         bool allOwn = true, allMove = true;
         for (const auto& t : R::targets())
         {
+            if (t.params.empty())
+                continue;   // the room: it changes the room, not a parameter (tested on its own)
             tickOnly (t.key);
             bool moved = false;
             for (int k = 0; k < 8; ++k)
@@ -2604,6 +2860,7 @@ namespace
 
         // Open the requested view by clicking through the UI's own entry points.
         const auto mode = args[2];
+        bool filtersOpened = false;
         std::function<void (juce::Component&)> findAndShow = [&] (juce::Component& c)
         {
             for (auto* child : c.getChildren())
@@ -2613,6 +2870,19 @@ namespace
                         if ((b->getKind() == Kind::room) == (mode == "rooms")) { b->setVisible (true); b->toFront (false); }
                 if (mode == "save")
                     if (auto* bar = dynamic_cast<PresetBar*> (child)) if (bar->onSave) bar->onSave();
+                if (mode == "filters")
+                {
+                    if (auto* b = dynamic_cast<PresetBrowser*> (child))
+                        if (b->getKind() == Kind::studio) { b->setVisible (true); b->toFront (false); }
+                    if (auto* tb = dynamic_cast<juce::TextButton*> (child))
+                        if (tb->getButtonText().startsWith ("filters") && tb->onClick && ! filtersOpened
+                            && dynamic_cast<PresetBrowser*> (tb->getParentComponent()) != nullptr
+                            && dynamic_cast<PresetBrowser*> (tb->getParentComponent())->getKind() == Kind::studio)
+                        {
+                            filtersOpened = true;
+                            tb->onClick();
+                        }
+                }
                 if (mode == "newpack")
                 {
                     if (auto* b = dynamic_cast<PresetBrowser*> (child))
@@ -2651,73 +2921,83 @@ namespace
         }
 
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
-        if (mode == "menu" || mode == "mainmenu")
+        if (mode == "menu" || mode == "mainmenu" || mode == "noisemenu")
         {
-            // Draw the randomize menu and a knob's modulation menu with the editor's
-            // look and feel, laid over the snapshot where they would open.
-            auto& lf = ed.getLookAndFeel();
-            const juce::PopupMenu::Options opts;
-            auto drawMenu = [&] (juce::Point<int> at, std::vector<std::tuple<juce::String, int, bool, bool>> rows)
+            // ROOM's menus (RoomMenu), drawn over the snapshot where they would open
+            const auto scale = (float) img.getHeight() / (float) RoomAudioProcessorEditor::baseHeight;
+            auto drawMenu = [&] (juce::Point<int> at, const juce::PopupMenu& m, int hover)
             {
-                // rows: text, kind (0 item, 1 header, 2 separator, 3 submenu, 4 info line), ticked, highlighted
-                const auto border = lf.getPopupMenuBorderSizeWithOptions (opts);
-                int w = 0, h = 0;
-                for (auto& [text, kind, ticked, hi] : rows)
+                auto menu = RoomMenu::createForTest (m);
+                menu->setHoverForTest (hover);
+                juce::Image pic (juce::Image::ARGB, menu->getWidth(), menu->getHeight(), true);
                 {
-                    int iw = 0, ih = 0;
-                    lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
-                    w = std::max (w, iw);
-                    h += kind == 1 ? 26 : ih;
-                }
-                const auto scale = (float) img.getHeight() / (float) RoomAudioProcessorEditor::baseHeight;
-                juce::Image menu (juce::Image::ARGB, w + border * 2, h + border * 2, true);
-                {
-                    juce::Graphics g (menu);
-                    lf.drawPopupMenuBackgroundWithOptions (g, menu.getWidth(), menu.getHeight(), opts);
-                    int y = border;
-                    for (auto& [text, kind, ticked, hi] : rows)
-                    {
-                        int iw = 0, ih = 0;
-                        lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
-                        if (kind == 1)
-                        {
-                            lf.drawPopupMenuSectionHeaderWithOptions (g, { border, y, w, 26 }, text, opts);
-                            y += 26;
-                            continue;
-                        }
-                        juce::PopupMenu::Item item (text);
-                        item.isSeparator = kind == 2;
-                        item.isTicked = ticked;
-                        if (kind == 3)
-                            item.subMenu = std::make_unique<juce::PopupMenu>();
-                        item.isEnabled = kind != 4;   // 4: an info line
-                        lf.drawPopupMenuItemWithOptions (g, { border, y, w, ih }, hi, item, opts);
-                        y += ih;
-                    }
+                    juce::Graphics mg (pic);
+                    menu->paint (mg);
                 }
                 juce::Graphics g (img);
                 g.addTransform (juce::AffineTransform::scale (scale));
-                g.drawImageAt (menu, at.x, at.y);
+                g.drawImageAt (pic, at.x, at.y);
             };
-            if (args[2] == "mainmenu")
+            if (mode == "mainmenu")
             {
-                drawMenu ({ 74, 80 }, { { "new preset", 0, false, false }, { "", 2, false, false }, { "tips", 0, true, true },
-                                        { "", 2, false, false }, { "check for updates", 0, false, false },
-                                        { "visit website", 0, false, false }, { "get support", 0, false, false },
-                                        { juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), 0, false, false },
-                                        { "", 2, false, false }, { "room v0.1.0", 0, false, false } });
+                juce::PopupMenu m;
+                m.addItem ("new preset", [] {});
+                m.addItem ("reset all knobs", [] {});
+                m.addSeparator();
+                m.addItem ("tips", true, true, [] {});
+                m.addItem ("show the tour", [] {});
+                m.addSeparator();
+                m.addItem ("check for updates", [] {});
+                m.addItem ("visit website", [] {});
+                m.addItem ("get support", [] {});
+                m.addItem (juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), [] {});
+                m.addSeparator();
+                m.addItem ("room v1.0.2", false, false, nullptr);
+                drawMenu ({ 4, 60 }, m, 2);
+            }
+            else if (mode == "noisemenu")
+            {
+                juce::PopupMenu m;
+                const auto& infos = room::NoiseBank::infos();
+                juce::StringArray sections;
+                for (const auto& info : infos)
+                    sections.addIfNotAlreadyThere (info.section);
+                for (const auto& section : sections)
+                {
+                    m.addSectionHeader (section);
+                    for (size_t k = 0; k < infos.size(); ++k)
+                        if (infos[k].section == section)
+                            m.addItem (infos[k].name, true, k == 31, [] {});
+                }
+                drawMenu ({ 4, 150 }, m, 31);
             }
             else
             {
-            drawMenu ({ 600, 100 }, { { "basement show", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("room  \xc2\xb7  medium  \xc2\xb7  neutral")), 4, false, false },
-                                      { "a packed basement: low, loud and wide.", 4, false, false }, { "factory  (built in)", 4, false, false },
-                                      { "", 2, false, false }, { "load", 0, false, false }, { "favourite", 0, false, false },
-                                      { "add to quick select", 0, false, true }, { "quick select slot", 3, false, false } });
-            drawMenu ({ 560, 470 }, { { "modulation", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), 3, false, true },
-                                      { "move with lfo 2", 0, false, false } });
-            drawMenu ({ 790, 500 }, { { "10%", 0, false, false }, { "25%", 0, true, true }, { "50%", 0, false, false },
-                                      { "100%", 0, false, false }, { "", 2, false, false }, { "invert", 0, false, false },
-                                      { "remove from lfo 1", 0, false, false } });
+                juce::PopupMenu row;
+                row.addSectionHeader ("basement show");
+                row.addItem (juce::String (juce::CharPointer_UTF8 ("room  \xc2\xb7  medium  \xc2\xb7  neutral")), false, false, nullptr);
+                row.addItem ("a packed basement: low, loud and wide.", false, false, nullptr);
+                row.addSeparator();
+                row.addItem ("load", [] {});
+                row.addItem ("favourite", [] {});
+                row.addItem ("add to quick select", [] {});
+                juce::PopupMenu slots;
+                slots.addItem ("slot 1", [] {});
+                row.addSubMenu ("quick select slot", slots);
+                drawMenu ({ 560, 90 }, row, 2);
+
+                juce::PopupMenu depth;
+                for (auto pct : { 10, 25, 50, 100 })
+                    depth.addItem (juce::String (pct) + "%", true, pct == 25, [] {});
+                depth.addSeparator();
+                depth.addItem ("invert", [] {});
+                depth.addItem ("remove from lfo 1", [] {});
+                juce::PopupMenu mod;
+                mod.addSectionHeader ("modulation");
+                mod.addSubMenu (juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), depth);
+                mod.addItem ("move with lfo 2", [] {});
+                drawMenu ({ 300, 470 }, mod, 0);
+                drawMenu ({ 520, 470 }, depth, 1);
             }
         }
         juce::File out (args[1]);
@@ -2889,6 +3169,7 @@ int main (int argc, char* argv[])
     testIntensityGlitchQuick (root, roomSource);
     testNoiseRateToneSync (root);
     testRound4 (root);
+    testRound6 (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

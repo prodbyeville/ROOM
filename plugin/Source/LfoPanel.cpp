@@ -24,7 +24,7 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     rate.getProperties().set ("bigReadout", true);
     rate.setTooltip ("how fast the lfo moves");
     shape.setTooltip ("the lfo's shape");
-    rate.setColour (juce::Slider::textBoxTextColourId, Colours::screenText);
+    rate.setColour (juce::Slider::textBoxTextColourId, Colours::ink);   // on the light module
     rate.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (rate);
     for (auto* b : { &sync, &retrig })
@@ -196,7 +196,7 @@ void LfoModule::paint (juce::Graphics& g)
     g.setColour (Colours::dustWhite);
     g.setFont (Fonts::sans (14.0f, Fonts::bold));
     g.drawText ("lfo " + juce::String (lfo + 1), cap.withTrimmedLeft (21.0f), juce::Justification::centredLeft);
-    g.setColour (Colours::screenDim);
+    g.setColour (Colours::ink.withAlpha (0.6f));
     g.setFont (Fonts::sans (12.0f));
     g.drawText ("drag the handle onto a knob", captionArea.toFloat(), juce::Justification::centredLeft);
 
@@ -224,7 +224,7 @@ void LfoModule::paint (juce::Graphics& g)
     const auto chips = targetChips();
     if (chips.empty())
     {
-        g.setColour (Colours::screenDim);
+        g.setColour (Colours::ink.withAlpha (0.6f));
         g.setFont (Fonts::sans (12.5f));
         g.drawFittedText ("moves nothing yet. drag the handle onto a knob, or right-click a knob.", targetsArea.withHeight (36),
                           juce::Justification::topLeft, 2);

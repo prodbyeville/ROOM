@@ -37,6 +37,7 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     preDelayBuf.setSize (numChans, (int) (maxPreDelayS * sr) + maxBlockSize + 4);
     preDelaySm.reset (sr, 0.1);
     wetFx.prepare (sr, numChans);
+    character.prepare (sr, numChans);
     rateDry.prepare (sr);
     rateWet.prepare (sr);
 
@@ -62,6 +63,8 @@ void RoomEngine::reset()
     historyWrite = 0;
     duckEnv = 0.0f;
     wetFx.reset();
+    character.reset();
+    ringNow = 0.0f;
     frozenActive = false;
     freezeMix.setCurrentAndTargetValue (0.0f);
 }
@@ -147,6 +150,7 @@ void RoomEngine::applyPending()
         }
         wetFx.setHarmonics (hz, n);
     }
+    character.setRoom (tone.flutterMs, tone.combMs);
     hasPending = false;
 
     if (! roomLoaded)
@@ -186,12 +190,31 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
     }
 
     // --- 1. tonal path: EQ in series, then resonators added in parallel ------
+    // Intensity 100..140 %: the room's notes ring louder (x4) and longer (Q x2), eased per block.
+    {
+        const auto target = RoomCharacter::ringAmount (fx.character);
+        ringNow += (target - ringNow) * (float) std::min (1.0, n / (0.05 * sampleRate));
+        if (target <= 0.0f && ringNow < 1.0e-4f)
+            ringNow = 0.0f;
+    }
+    BiquadCoeffs ringCoeffs[ToneSettings::maxResonators];
+    float ringExtra[ToneSettings::maxResonators];
+    auto tonalGain = tone.tonalGain;
+    for (int k = 0; k < tone.numResonators; ++k)
+    {
+        ringCoeffs[k] = ringNow > 0.0f ? design::resonator (tone.resonatorHz[k], tone.resonatorQ[k] * (1.0f + ringNow), sampleRate)
+                                       : tone.resonator[k];
+        ringExtra[k] = tone.resonatorExtra[k] * (1.0f + 3.0f * ringNow);
+    }
+    if (ringNow > 0.0f)
+        tonalGain = tone.tonalGain * std::pow (tone.tonalGainRing / std::max (1.0e-6f, tone.tonalGain), ringNow);
+
     for (int ch = 0; ch < chans; ++ch)
     {
         const auto* in = buffer.getReadPointer (ch);
         auto* out = tonalBuf.getWritePointer (ch);
         for (int k = 0; k < tone.numEq; ++k)         eq[ch][k].c = tone.eq[k];
-        for (int k = 0; k < tone.numResonators; ++k) res[ch][k].c = tone.resonator[k];
+        for (int k = 0; k < tone.numResonators; ++k) res[ch][k].c = ringCoeffs[k];
 
         for (int i = 0; i < n; ++i)
         {
@@ -200,8 +223,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
                 x = eq[ch][k].process (x);
             double y = x;
             for (int k = 0; k < tone.numResonators; ++k)
-                y += tone.resonatorExtra[k] * res[ch][k].process (x);
-            out[i] = (float) (y * tone.tonalGain);
+                y += ringExtra[k] * res[ch][k].process (x);
+            out[i] = (float) (y * tonalGain);
         }
     }
 
@@ -263,6 +286,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
     wetFx.setTargets (fx.extreme, fx.stutter, fx.glitchAmount, fx.glitchSync);
     wetFx.setTransport (fx.hasPpq, fx.ppq, fx.bpm);
     const auto wetFxOn = ! wetFx.isIdle() || fx.extreme > 0.0f || fx.stutter;
+    character.setAmount (fx.character);
+    const auto characterOn = ! character.isIdle() || fx.character > 0.0f;
     const auto rateDryOn = fx.rateDry && ! rateDry.settledOff (fx.rateHz);
     const auto rateWetOn = fx.rateWet && ! rateWet.settledOff (fx.rateHz);
     if (! fx.rateDry) rateDry.reset();
@@ -284,6 +309,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
         float wets[2] {};
         for (int ch = 0; ch < chans; ++ch)
             wets[ch] = tAmt * tonalBuf.getSample (ch, i) + sAmt * kSpatialGain * spatialBuf.getSample (ch, i);
+        if (characterOn)
+            character.processSample (wets, chans);
         if (wetFxOn)
             wetFx.processSample (wets, chans);
 

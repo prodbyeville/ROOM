@@ -1,5 +1,6 @@
 #include "EvilleLookAndFeel.h"
 #include "R5Parts.h"
+#include "RoomMenu.h"
 #include "Screens.h"
 #include "UiColours.h"
 #include "UiAssets.h"
@@ -147,6 +148,14 @@ juce::Font EvilleLookAndFeel::getTextButtonFont (juce::TextButton&, int height)
     return Fonts::sans (std::min (14.0f, (float) height * 0.55f));
 }
 
+bool EvilleLookAndFeel::onLight (const juce::Component& c)
+{
+    for (auto* p = &c; p != nullptr; p = p->getParentComponent())
+        if (p->getProperties()["surface"].toString() == "light")
+            return true;
+    return false;
+}
+
 bool EvilleLookAndFeel::onBlack (const juce::Component& c)
 {
     return c.getProperties()["surface"].toString() == "black";
@@ -182,7 +191,7 @@ void EvilleLookAndFeel::drawRotarySlider (juce::Graphics& g, int, int, int, int,
     const auto bipolar = (bool) s.getProperties()["bipolar"];
     R5::drawKnob (g, kb.getCentre(), kb.getWidth() * 0.5f, startAngle, endAngle, a,
                   bipolar ? (startAngle + endAngle) * 0.5f : startAngle,
-                  s.isEnabled(), s.isMouseOverOrDragging());
+                  s.isEnabled(), s.isMouseOverOrDragging(), true, onLight (s));
 }
 
 void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
@@ -197,12 +206,12 @@ void EvilleLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w
     const auto thumb = std::min (14.0f, (float) h - 4.0f);
     const auto cy = (float) y + (float) h * 0.5f;
     const auto left = (float) x + thumb * 0.5f, right = (float) (x + w) - thumb * 0.5f;
-    g.setColour (Colours::dustWhite.withAlpha (0.18f));
+    g.setColour ((onLight (s) ? Colours::ink : Colours::dustWhite).withAlpha (0.18f));
     g.fillRoundedRectangle (juce::Rectangle<float> (left, cy - 1.0f, right - left, 2.0f), 1.0f);
     const auto px = juce::jlimit (left, right, pos);
     g.setColour (Colours::crimson.brighter (0.15f));
     g.fillRoundedRectangle (juce::Rectangle<float> (left, cy - 1.25f, px - left, 2.5f), 1.25f);
-    g.setColour (Colours::dustWhite.withAlpha (s.isMouseOverOrDragging() ? 1.0f : 0.92f));
+    g.setColour (onLight (s) ? Colours::ink : Colours::dustWhite.withAlpha (s.isMouseOverOrDragging() ? 1.0f : 0.92f));
     g.fillEllipse (juce::Rectangle<float> (thumb, thumb).withCentre ({ px, cy }));
 }
 
@@ -357,18 +366,8 @@ void EvilleLookAndFeel::showDialog (juce::Component& parent, const juce::String&
 
 void EvilleLookAndFeel::showMenu (juce::PopupMenu& m, juce::Component& target)
 {
-    m.setLookAndFeel (&target.getLookAndFeel());
-    auto options = juce::PopupMenu::Options().withStandardItemHeight (28).withMinimumWidth (180);
-    // Opened by a right-click (or any click inside a big area): at the mouse, like every
-    // other app. Opened from a key: just under it.
-    const auto mouse = juce::Desktop::getInstance().getMainMouseSource();
-    const auto pos = mouse.getScreenPosition().roundToInt();
-    const auto isKey = dynamic_cast<juce::Button*> (&target) != nullptr && ! mouse.getCurrentModifiers().isPopupMenu();
-    if (isKey || ! target.getScreenBounds().contains (pos))
-        options = options.withTargetComponent (&target);
-    else
-        options = options.withTargetScreenArea ({ pos.x, pos.y, 1, 1 });
-    m.showMenuAsync (options);
+    // ROOM's own menu window (RoomMenu): the PopupMenu is only the list of items.
+    RoomMenu::show (m, target);
 }
 
 void EvilleLookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int w, int h, const juce::PopupMenu::Options&)
@@ -545,6 +544,11 @@ void EvilleLookAndFeel::drawCaps (juce::Graphics& g, const juce::String& text, j
 void EvilleLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& bg,
                                               bool over, bool down)
 {
+    if (b.getProperties().contains ("r5key"))
+    {
+        drawR5Key (g, b, over, down);
+        return;
+    }
     const auto key = b.getProperties()["key"].toString();
     if (key.isNotEmpty())
     {
@@ -567,6 +571,8 @@ void EvilleLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
 
 void EvilleLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bool down)
 {
+    if (b.getProperties().contains ("r5key"))
+        return;   // the key draws its own label
     const auto key = b.getProperties()["key"].toString();
     if (key.isEmpty())
     {
@@ -618,7 +624,7 @@ void EvilleLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
         const auto key = r.removeFromLeft (std::min (r.getHeight(), 30.0f)).withSizeKeepingCentre (r.getHeight(), r.getHeight());
         Hw::drawMiniKey (g, key, b.getToggleState(), over, down);
         g.setFont (Fonts::sans (13.5f));
-        g.setColour (Colours::dustWhite.withAlpha (over || b.getToggleState() ? 1.0f : 0.82f));
+        g.setColour ((onLight (b) ? Colours::ink : Colours::dustWhite).withAlpha (over || b.getToggleState() ? 1.0f : 0.82f));
         g.drawText (b.getButtonText(), r.withTrimmedLeft (7.0f), juce::Justification::centredLeft);
         return;
     }

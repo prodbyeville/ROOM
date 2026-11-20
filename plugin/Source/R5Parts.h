@@ -21,7 +21,7 @@ namespace R5
 
     /** The machined knob. `ring` is the tick ring's radius; the body sits inside it. */
     void drawKnob (juce::Graphics&, juce::Point<float> centre, float ring, float startAngle, float endAngle,
-                   float angle, float arcFrom, bool enabled, bool hover, bool ticks = true);
+                   float angle, float arcFrom, bool enabled, bool hover, bool ticks = true, bool light = false);
 
     /** A key with its label; `led` adds a small light above the label (D / R / N). */
     void drawKey (juce::Graphics&, juce::Rectangle<float> bounds, KeyKind, const juce::String& label,
@@ -33,6 +33,7 @@ namespace R5
     void drawRoute (juce::Graphics&, std::initializer_list<juce::Point<float>> points, Stroke, End startEnd, End finishEnd);
 
     /** Uppercase Satoshi label and its value, centred over x (the cells' titles). */
-    void drawLabel (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 10.5f, float alpha = 0.92f);
+    void drawLabel (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 10.5f, float alpha = 0.92f,
+                    bool ink = false);
     void drawValue (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 16.0f, float alpha = 1.0f);
 }

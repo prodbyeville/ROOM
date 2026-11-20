@@ -907,15 +907,20 @@ void BypassSwitch::paintButton (juce::Graphics& g, bool over, bool down)
 {
     // The ROOM mark is the power switch: glowing red while ROOM is on, dim when bypassed.
     const auto on = ! getToggleState();
-    const auto d = std::min (getWidth(), getHeight()) - 4.0f;
-    const auto r = juce::Rectangle<float> (d, d).withCentre (getLocalBounds().toFloat().getCentre()).translated (0.0f, down ? 0.5f : 0.0f);
+    // The button is bigger than the mark so its glow fades out fully inside the bounds (no square edge).
+    const auto box = getLocalBounds().toFloat();
+    const auto d = std::min (box.getWidth(), box.getHeight()) * 0.58f;
+    const auto r = juce::Rectangle<float> (d, d).withCentre (box.getCentre()).translated (0.0f, down ? 0.5f : 0.0f);
     const auto colour = on ? juce::Colour (0xffe03535) : Colours::dustWhite.withAlpha (over ? 0.5f : 0.32f);
     if (on)
     {
-        juce::ColourGradient glow (juce::Colour (0xffe03535).withAlpha (over ? 0.45f : 0.32f), r.getCentreX(), r.getCentreY(),
-                                   juce::Colour (0xffe03535).withAlpha (0.0f), r.getCentreX() + d * 0.75f, r.getCentreY(), true);
+        const auto c = r.getCentre();
+        const auto reach = std::min (box.getWidth(), box.getHeight()) * 0.5f - 0.5f;
+        juce::ColourGradient glow (juce::Colour (0xffe03535).withAlpha (over ? 0.34f : 0.24f), c.x, c.y,
+                                   juce::Colour (0xffe03535).withAlpha (0.0f), c.x + reach, c.y, true);
+        glow.addColour (0.55, juce::Colour (0xffe03535).withAlpha (over ? 0.12f : 0.08f));
         g.setGradientFill (glow);
-        g.fillEllipse (r.expanded (d * 0.25f));
+        g.fillEllipse (juce::Rectangle<float> (reach * 2.0f, reach * 2.0f).withCentre (c));
     }
     // the mark (room_mark.svg: frame, back wall, four corner lines), stroked at a weight that reads small
     const auto k = r.getWidth() / 512.0f;
@@ -969,6 +974,128 @@ void SyncDot::paintButton (juce::Graphics& g, bool over, bool down)
     else
         g.setColour (juce::Colour (0xff3a2424));
     g.fillEllipse (core);
+}
+
+TuneScreen::TuneScreen (RoomAudioProcessor& p) : proc (p)
+{
+    setTooltip ("tune the room's notes to a key. click for the list");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    scaleKey.getProperties().set ("r5key", "black");
+    scaleKey.setTooltip ("the key's scale: major, minor or every note");
+    scaleKey.onClick = [this] { stepScale(); };
+    prev.setTooltip ("previous key");
+    next.setTooltip ("next key");
+    prev.onClick = [this] { step (-1); };
+    next.onClick = [this] { step (1); };
+    startTimerHz (10);
+}
+
+juce::String TuneScreen::scaleShort (int scale)
+{
+    return scale == 1 ? "min" : scale == 2 ? "chr" : "maj";
+}
+
+void TuneScreen::timerCallback()
+{
+    const auto key = juce::roundToInt (proc.apvts.getRawParameterValue (ParamIDs::tuneKey)->load());
+    const auto scale = juce::roundToInt (proc.apvts.getRawParameterValue (ParamIDs::tuneScale)->load());
+    if (key != shownKey || scale != shownScale)
+    {
+        shownKey = key;
+        shownScale = scale;
+        scaleKey.setButtonText (scaleShort (scale));
+        scaleKey.setAlpha (key == 0 ? 0.55f : 1.0f);
+        repaint();
+    }
+}
+
+static void setChoice (juce::RangedAudioParameter* prm, int index)
+{
+    if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (prm))
+    {
+        c->beginChangeGesture();
+        c->setValueNotifyingHost (c->convertTo0to1 ((float) index));
+        c->endChangeGesture();
+    }
+}
+
+void TuneScreen::step (int delta)
+{
+    auto* c = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (ParamIDs::tuneKey));
+    if (c == nullptr)
+        return;
+    const auto n = c->choices.size();
+    setChoice (c, ((c->getIndex() + delta) % n + n) % n);
+    timerCallback();
+}
+
+void TuneScreen::stepScale()
+{
+    if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (ParamIDs::tuneScale)))
+        setChoice (c, (c->getIndex() + 1) % c->choices.size());
+    timerCallback();
+}
+
+void TuneScreen::showMenu()
+{
+    auto* key = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (ParamIDs::tuneKey));
+    auto* scale = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (ParamIDs::tuneScale));
+    if (key == nullptr || scale == nullptr)
+        return;
+    juce::PopupMenu m;
+    m.addSectionHeader ("tune the room");
+    m.addItem ("off: the room's own notes", true, key->getIndex() == 0, [key] { setChoice (key, 0); });
+    m.addSectionHeader ("key");
+    for (int i = 1; i < key->choices.size(); ++i)
+        m.addItem (key->choices[i].toLowerCase(), true, key->getIndex() == i, [key, i] { setChoice (key, i); });
+    m.addSectionHeader ("scale");
+    for (int i = 0; i < scale->choices.size(); ++i)
+        m.addItem (scale->choices[i].toLowerCase(), true, scale->getIndex() == i, [scale, i] { setChoice (scale, i); });
+    EvilleLookAndFeel::showMenu (m, *this);
+}
+
+void TuneScreen::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.mouseWasClicked())
+        showMenu();
+}
+
+void TuneScreen::paint (juce::Graphics& g)
+{
+    // A small black glass readout set into the case (the noise screen's glass)
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (juce::Colour (0xff050505));
+    g.fillRoundedRectangle (r, 5.0f);
+    {
+        juce::Graphics::ScopedSaveState s0 (g);
+        juce::Path glass;
+        glass.addRoundedRectangle (r, 5.0f);
+        g.reduceClipRegion (glass);
+        juce::ColourGradient inner (juce::Colours::black.withAlpha (0.75f), r.getX(), r.getY(),
+                                    juce::Colours::transparentBlack, r.getX(), r.getY() + 7.0f, false);
+        g.setGradientFill (inner);
+        g.fillRect (r.withHeight (7.0f));
+    }
+    juce::ColourGradient rim (juce::Colours::white.withAlpha (0.04f), r.getX(), r.getY(),
+                              juce::Colours::white.withAlpha (0.12f), r.getX(), r.getBottom(), false);
+    g.setGradientFill (rim);
+    g.drawRoundedRectangle (r, 5.0f, 1.0f);
+
+    const auto key = juce::roundToInt (proc.apvts.getRawParameterValue (ParamIDs::tuneKey)->load());
+    const auto scale = juce::roundToInt (proc.apvts.getRawParameterValue (ParamIDs::tuneScale)->load());
+    juce::String text = "off";
+    if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (ParamIDs::tuneKey)); c != nullptr && key > 0)
+        text = c->choices[key] + (scale == 2 ? juce::String() : " " + scaleShort (scale));
+    R5::drawLabel (g, text, r.getCentre().translated (0.0f, 0.5f), 10.5f, key > 0 ? 0.95f : 0.5f);
+    if (key > 0)
+    {
+        // a small crimson light: the room is tuned
+        const auto c = juce::Point<float> (r.getRight() - 7.0f, r.getY() + 6.0f);
+        g.setColour (juce::Colour (0xffd8243a).withAlpha (0.35f));
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (c));
+        g.setColour (juce::Colour (0xffff4a5c));
+        g.fillEllipse (juce::Rectangle<float> (3.0f, 3.0f).withCentre (c));
+    }
 }
 
 NoiseScreen::NoiseScreen (RoomAudioProcessor& p) : proc (p)
@@ -1634,6 +1761,18 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
               "how long it rings");
     setupKnob (size, ParamIDs::size, "size", 33.0f, "small", "", "big", false,
               "smaller or bigger room");
+    setupKnob (imprint, ParamIDs::imprint, "imprint", 15.0f, "", "", "", false,
+              "your sound takes on the room's timbre, tail or not");
+
+    // Tune: the readout, its arrows and the scale key
+    content.addAndMakeVisible (tuneScreen);
+    for (auto* b : { &tuneScreen.prev, &tuneScreen.next })
+    {
+        b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        b->setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+        content.addAndMakeVisible (b);
+    }
+    content.addAndMakeVisible (tuneScreen.scaleKey);
 
     // Tone and space are separate knobs; with sync on, turning one turns the other the opposite way.
     lastTone = tone.slider.getValue();
@@ -1833,7 +1972,7 @@ void RoomAudioProcessorEditor::setupKnob (Knob& k, const juce::String& id, const
 {
     k.slider.setTooltip (tip);
     k.slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    k.slider.setPopupDisplayEnabled (true, true, &content);
+    // no value bubble: every value is printed on the panel
     auto& props = k.slider.getProperties();
     props.set ("knobRadius", radius);
     props.set ("scaleMin", lo);
@@ -2140,21 +2279,32 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
     // The near-black brushed case; every control sits in its own pocket (cell).
     R5::drawCase (g, { 0.0f, 0.0f, (float) contentWidth(), (float) baseHeight });
     for (auto cell : { cellIntensity, cellTone, cellSpace, cellTail, cellSize, cellSmooth, cellGlitch, cellAmount,
-                       cellNoise, cellLevel, cellRate })
+                       cellTune, cellImprint, cellNoise, cellLevel, cellRate })
         R5::drawCell (g, cell);
     if (proc.advancedOpen)
     {
+        // Advanced is the opposite of the case: a light module, ink text, the same knobs.
         const auto r = advancedArea.reduced (0.0f, 12.0f).withTrimmedRight (12.0f);
-        R5::drawCell (g, r);
-        if (auto tex = Hw::asset ("panel_advanced.jpg"); tex.isValid())
+        for (int i = 3; i >= 1; --i)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.2f));
+            g.fillRoundedRectangle (r.expanded ((float) i * 0.8f).translated (0.0f, (float) i * 0.8f), 10.0f + (float) i);
+        }
+        juce::ColourGradient paper (juce::Colour (0xffefebe2), r.getX(), r.getY(), juce::Colour (0xffe2ddd2), r.getX(), r.getBottom(), false);
+        g.setGradientFill (paper);
+        g.fillRoundedRectangle (r, 10.0f);
+        if (auto grain = Hw::grain ((int) r.getWidth(), (int) r.getHeight(), false); grain.isValid())
         {
             juce::Graphics::ScopedSaveState save (g);
             juce::Path shape;
-            shape.addRoundedRectangle (r.reduced (1.0f), 9.0f);
+            shape.addRoundedRectangle (r, 10.0f);
             g.reduceClipRegion (shape);
-            g.setOpacity (0.6f);
-            g.drawImage (tex, r, juce::RectanglePlacement::fillDestination);
+            g.setOpacity (0.35f);
+            g.drawImageAt (grain, (int) r.getX(), (int) r.getY());
         }
+        juce::ColourGradient rim (juce::Colours::white.withAlpha (0.7f), r.getX(), r.getY(), juce::Colours::black.withAlpha (0.12f), r.getX(), r.getBottom(), false);
+        g.setGradientFill (rim);
+        g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
     }
     paintConsoleArt (g);
 }
@@ -2191,6 +2341,8 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
     title ("smooth", cellSmooth, 12.0f, 9.0f);
     title ("glitch", cellGlitch, 12.0f, 9.0f);
     title ("amount", cellAmount, 12.0f, 9.0f);
+    title ("tune", cellTune, 12.0f, 9.0f);
+    title ("imprint", cellImprint, 12.0f, 9.0f);
     title ("noise", cellNoise, 16.0f);
     title ("level", cellLevel, 16.0f, 9.5f);
     R5::drawLabel (g, "follow", { cellLevel.getCentreX(), cellLevel.getY() + 81.0f }, 9.5f);
@@ -2227,7 +2379,7 @@ void RoomAudioProcessorEditor::paintSignalLines (juce::Graphics& g)
         const auto y = autoKeyArea.getCentreY();
         R5::drawRoute (g, { { cellTone.getCentreX(), cellTone.getBottom() + gap }, { cellTone.getCentreX(), rowGapY },
                             { elbowX, rowGapY }, { elbowX, y } }, Stroke::solid, End::none, End::none);
-        R5::drawRoute (g, { { elbowX, y }, { autoKeyArea.getX() - 5.0f, y } }, Stroke::dotted, End::none, End::ring);
+        R5::drawRoute (g, { { elbowX + 4.0f, y }, { autoKeyArea.getX() - 5.0f, y } }, Stroke::dotted, End::none, End::ring);
     }
     // space -> auto: dotted crimson, from under space round into auto's right side
     {
@@ -2242,6 +2394,10 @@ void RoomAudioProcessorEditor::paintSignalLines (juce::Graphics& g)
         for (auto [a, b] : { std::pair { cellTone, cellSpace }, { cellSpace, cellTail }, { cellTail, cellSize } })
             R5::drawRoute (g, { { a.getRight() + gap, y }, { b.getX() - gap, y } }, Stroke::solid, End::none, End::none);
     }
+    // tail -> tune, size -> imprint: short drops from the room's shape into its notes and timbre
+    for (auto [a, b] : { std::pair { cellTail, cellTune }, { cellSize, cellImprint } })
+        R5::drawRoute (g, { { a.getCentreX(), a.getBottom() + gap }, { b.getCentreX(), b.getY() - gap } },
+                       Stroke::dotted, End::none, End::ring);
     // noise -> level / follow -> stop
     {
         const auto y = stopKeyArea.getCentreY();
@@ -2280,16 +2436,17 @@ void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
     {
         auto* p = proc.apvts.getParameter (ParamIDs::noiseType);
         R5::drawLabel (g, p->getCurrentValueAsText(), noiseNameArea.toFloat().getCentre(), 11.5f, 0.95f);
-        for (auto* b : { &noiseScreen.prev, &noiseScreen.next })
+        auto dirScale = [this] (const juce::Component* b) { return b == &tuneScreen.prev || b == &tuneScreen.next ? 0.7f : 1.0f; };
+        for (auto* b : { &noiseScreen.prev, &noiseScreen.next, &tuneScreen.prev, &tuneScreen.next })
         {
             const auto c = b->getBounds().toFloat().getCentre();
-            const auto dir = b == &noiseScreen.prev ? -1.0f : 1.0f;
+            const auto dir = b == &noiseScreen.prev || b == &tuneScreen.prev ? -dirScale (b) : dirScale (b);
             juce::Path arrow;
             arrow.startNewSubPath (c.x - dir * 7.0f, c.y);
             arrow.lineTo (c.x + dir * 7.0f, c.y);
-            arrow.startNewSubPath (c.x + dir * 3.0f, c.y - 4.0f);
+            arrow.startNewSubPath (c.x + dir * 3.0f, c.y - 4.0f * std::abs (dir));
             arrow.lineTo (c.x + dir * 7.0f, c.y);
-            arrow.lineTo (c.x + dir * 3.0f, c.y + 4.0f);
+            arrow.lineTo (c.x + dir * 3.0f, c.y + 4.0f * std::abs (dir));
             g.setColour (Colours::dustWhite.withAlpha (b->isMouseOver() ? 1.0f : 0.7f));
             g.strokePath (arrow, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
@@ -2330,7 +2487,7 @@ void RoomAudioProcessorEditor::layoutContent()
         k->label.setBounds (juce::Rectangle<int> (40, 16).withCentre ({ x - 41, keyY + key / 2 }));
         k->label.setJustificationType (juce::Justification::centredRight);
     }
-    bypassButton.setBounds (842, keyY + 2, 36, 36);
+    bypassButton.setBounds (juce::Rectangle<int> (50, 50).withCentre ({ 860, keyY + 20 }));
 
     // --- The stage, its chips, and the room box in the middle ---
     const auto st = stageArea.toNearestInt();
@@ -2358,6 +2515,17 @@ void RoomAudioProcessorEditor::layoutContent()
     placeKnob (size, knobIn (cellSize, knobRowY));
     placeKnob (smooth, knobIn (cellSmooth, 39.0f));
     placeKnob (glitchAmount, knobIn (cellAmount, 39.0f));
+    placeKnob (imprint, knobIn (cellImprint, 39.0f));
+    {
+        // tune: [<] readout [>]  key
+        const auto y = cellTune.getY() + 39.0f;
+        const float aw = 18.0f, sw = 62.0f, kw = 42.0f, between = 6.0f;
+        const auto x0 = cellTune.getCentreX() - (aw * 2.0f + sw + between + kw) * 0.5f;
+        tuneScreen.prev.setBounds (juce::Rectangle<float> (x0, y - 10.0f, aw, 20.0f).toNearestInt());
+        tuneScreen.setBounds (juce::Rectangle<float> (x0 + aw, y - 11.0f, sw, 22.0f).toNearestInt());
+        tuneScreen.next.setBounds (juce::Rectangle<float> (x0 + aw + sw, y - 10.0f, aw, 20.0f).toNearestInt());
+        tuneScreen.scaleKey.setBounds (juce::Rectangle<float> (x0 + aw * 2.0f + sw + between, y - 14.0f, kw, 28.0f).toNearestInt());
+    }
     {
         // glitch + sync, centred together in their cell
         const auto y = cellGlitch.getY() + 39.0f;

@@ -30,6 +30,18 @@ namespace
     }
 
     const juce::Colour caseColour { 0xff101010 };
+    const juce::Colour glowRed { 0xffd23232 };
+
+    /** A soft elliptical glow: radial falloff in both directions, so it has no visible edge. */
+    void softGlow (juce::Graphics& g, juce::Point<float> c, float rx, float ry, float alpha)
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        g.addTransform (juce::AffineTransform::scale (1.0f, ry / rx, c.x, c.y));
+        juce::ColourGradient glow (glowRed.withAlpha (alpha), c.x, c.y, glowRed.withAlpha (0.0f), c.x + rx, c.y, true);
+        glow.addColour (0.45, glowRed.withAlpha (alpha * 0.45f));
+        g.setGradientFill (glow);
+        g.fillEllipse (juce::Rectangle<float> (rx * 2.0f, rx * 2.0f).withCentre (c));
+    }
     const juce::Colour lineWhite = juce::Colour (0xfff5f3ef).withAlpha (0.74f);
     const juce::Colour lineRed = juce::Colour (0xffd23232);
 }
@@ -84,7 +96,7 @@ void drawCell (juce::Graphics& g, juce::Rectangle<float> r)
 }
 
 void drawKnob (juce::Graphics& g, juce::Point<float> c, float ring, float startAngle, float endAngle,
-               float angle, float arcFrom, bool enabled, bool hover, bool ticks)
+               float angle, float arcFrom, bool enabled, bool hover, bool ticks, bool light)
 {
     const auto alpha = enabled ? 1.0f : 0.45f;
     const auto body = ring * 0.80f;
@@ -92,7 +104,7 @@ void drawKnob (juce::Graphics& g, juce::Point<float> c, float ring, float startA
 
     // a soft shadow under the knob
     {
-        juce::ColourGradient sh (juce::Colours::black.withAlpha (0.6f * alpha), c.x, c.y + 2.0f,
+        juce::ColourGradient sh (juce::Colours::black.withAlpha ((light ? 0.38f : 0.6f) * alpha), c.x, c.y + 2.0f,
                                  juce::Colours::transparentBlack, c.x + body * 1.25f, c.y + 2.0f, true);
         g.setGradientFill (sh);
         g.fillEllipse (juce::Rectangle<float> (body * 2.5f, body * 2.5f).withCentre (c.translated (0.0f, 2.0f)));
@@ -105,7 +117,7 @@ void drawKnob (juce::Graphics& g, juce::Point<float> c, float ring, float startA
         {
             const auto t = startAngle + (endAngle - startAngle) * (float) i / (float) n;
             const auto major = i % 7 == 0;
-            g.setColour (juce::Colour (0xfff5f3ef).withAlpha ((major ? 0.55f : 0.32f) * alpha));
+            g.setColour ((light ? juce::Colour (0xff1b1a18) : juce::Colour (0xfff5f3ef)).withAlpha ((major ? (light ? 0.75f : 0.55f) : (light ? 0.45f : 0.32f)) * alpha));
             g.drawLine ({ pointAt (t, ring * (major ? 0.83f : 0.86f)), pointAt (t, ring * 0.95f) }, major ? 1.1f : 0.9f);
         }
     }
@@ -150,14 +162,9 @@ void drawKey (juce::Graphics& g, juce::Rectangle<float> b, KeyKind kind, const j
     auto full = Hw::asset (name);
     const auto key = b.translated (0.0f, down ? 1.0f : 0.0f);
 
-    // lit: a red glow spilling out from under the key
+    // lit: one soft red glow spilling out from under the key (round falloff, no edges)
     if (on)
-    {
-        const auto gc = juce::Point<float> (key.getCentreX(), key.getBottom() - 1.0f);
-        juce::ColourGradient glow (lineRed.withAlpha (0.9f), gc.x, gc.y, lineRed.withAlpha (0.0f), gc.x + key.getWidth() * 0.5f, gc.y, true);
-        g.setGradientFill (glow);
-        g.fillEllipse (juce::Rectangle<float> (key.getWidth() * 1.05f, 12.0f).withCentre (gc.translated (0.0f, 2.0f)));
-    }
+        softGlow (g, { key.getCentreX(), key.getBottom() + 1.0f }, key.getWidth() * 0.46f, 7.0f, 0.55f);
 
     if (full.isValid())
     {
@@ -188,9 +195,15 @@ void drawKey (juce::Graphics& g, juce::Rectangle<float> b, KeyKind kind, const j
     }
     if (on)
     {
-        // the light strip along the key's bottom edge
-        g.setColour (lineRed.withAlpha (0.95f));
-        g.fillRoundedRectangle (juce::Rectangle<float> (key.getWidth() * 0.6f, 1.6f).withCentre ({ key.getCentreX(), key.getBottom() - 1.2f }), 0.8f);
+        // a faint red tint on the lower bevel, as if lit from below
+        juce::Graphics::ScopedSaveState save (g);
+        juce::Path shape;
+        shape.addRoundedRectangle (key.reduced (1.0f), 5.0f);
+        g.reduceClipRegion (shape);
+        juce::ColourGradient tint (lineRed.withAlpha (0.0f), key.getX(), key.getBottom() - key.getHeight() * 0.3f,
+                                   lineRed.withAlpha (0.22f), key.getX(), key.getBottom(), false);
+        g.setGradientFill (tint);
+        g.fillRect (key.withTrimmedTop (key.getHeight() * 0.7f));
     }
 
     // the label, on the key's top face (a little above the middle: the bevel is below)
@@ -236,18 +249,14 @@ void drawRoute (juce::Graphics& g, std::initializer_list<juce::Point<float>> pts
         g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
     else
     {
+        // dots placed by distance along the whole route, so corners keep the same spacing
         const auto gap = 4.2f;
         const auto d = stroke == Stroke::dottedRed ? 2.0f : 1.7f;
-        juce::PathFlatteningIterator flat (p);
-        float carry = 0.0f;
-        while (flat.next())
-        {
-            const juce::Line<float> seg (flat.x1, flat.y1, flat.x2, flat.y2);
-            for (auto t = carry; t <= seg.getLength(); t += gap)
-                g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (seg.getPointAlongLine (t)));
-            carry = gap - std::fmod (seg.getLength() - carry, gap);
-            if (carry >= gap) carry -= gap;
-        }
+        const auto length = p.getLength();
+        const auto n = std::max (1, (int) std::round (length / gap));
+        const auto step = length / (float) n;
+        for (int k = 0; k <= n; ++k)
+            g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (p.getPointAlongPath ((float) k * step)));
     }
 
     auto drawEnd = [&] (End e, juce::Point<float> at)
@@ -270,10 +279,10 @@ void drawRoute (juce::Graphics& g, std::initializer_list<juce::Point<float>> pts
     drawEnd (finishEnd, *(pts.end() - 1));
 }
 
-void drawLabel (juce::Graphics& g, const juce::String& text, juce::Point<float> c, float height, float alpha)
+void drawLabel (juce::Graphics& g, const juce::String& text, juce::Point<float> c, float height, float alpha, bool ink)
 {
     g.setFont (Fonts::sans (height, Fonts::bold).withExtraKerningFactor (0.24f));
-    g.setColour (juce::Colour (0xfff5f3ef).withAlpha (alpha));
+    g.setColour ((ink ? juce::Colour (0xff1b1a18) : juce::Colour (0xfff5f3ef)).withAlpha (alpha));
     // the extra kerning trails the last letter: shift left by half of it so the word sits centred
     const auto trail = height * 0.24f * 0.5f;
     g.drawText (text.toUpperCase(), juce::Rectangle<float> (200.0f, height * 1.6f).withCentre (c.translated (trail, 0.0f)),

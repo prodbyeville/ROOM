@@ -188,7 +188,28 @@ std::vector<float> targetEqCurveDb (const RoomAnalysis& a, float intensity)
     return out;
 }
 
-ToneSettings designTone (const RoomAnalysis& a, double sr, float intensity)
+float snapToKey (float hz, int key, int scale)
+{
+    if (key < 0 || hz <= 0.0f)
+        return hz;
+    static constexpr bool inScale[3][12] = {
+        { 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1 },   // major
+        { 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0 },   // natural minor
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 } }; // chromatic
+    const auto& set = inScale[juce::jlimit (0, 2, scale)];
+    const auto midi = 69.0 + 12.0 * std::log2 ((double) hz / 440.0);
+    auto best = std::round (midi);
+    auto bestDist = 1.0e9;
+    for (int n = (int) std::floor (midi) - 6; n <= (int) std::ceil (midi) + 6; ++n)
+        if (set[((n - key) % 12 + 12) % 12] && std::abs (n - midi) < bestDist)
+        {
+            bestDist = std::abs (n - midi);
+            best = n;
+        }
+    return (float) (440.0 * std::pow (2.0, (best - 69.0) / 12.0));
+}
+
+ToneSettings designTone (const RoomAnalysis& a, double sr, float intensity, int tuneKey, int tuneScale, float size)
 {
     ToneSettings t;
     if (! a.valid)
@@ -224,33 +245,58 @@ ToneSettings designTone (const RoomAnalysis& a, double sr, float intensity)
         if (t.numResonators >= ToneSettings::maxResonators || p.freqHz >= 0.45 * sr)
             continue;
         const auto gainDb = std::min (p.gainDb, kMaxResonanceGainDb) * intensity;
-        t.resonator[t.numResonators] = design::resonator (p.freqHz, p.q, sr);
+        const auto hz = snapToKey (p.freqHz, tuneKey, tuneScale);
+        if (hz >= 0.45 * sr)
+            continue;
+        bool taken = false;   // two of the room's notes tuned onto the same note: keep the first (loudest)
+        for (int k = 0; k < t.numResonators; ++k)
+            taken = taken || std::abs (t.resonatorHz[k] - hz) < hz * 0.01f;
+        if (taken && tuneKey >= 0)
+            continue;
+        t.resonator[t.numResonators] = design::resonator (hz, p.q, sr);
         t.resonatorExtra[t.numResonators] = std::pow (10.0f, gainDb / 20.0f) - 1.0f;
+        t.resonatorHz[t.numResonators] = hz;
+        t.resonatorQ[t.numResonators] = p.q;
         ++t.numResonators;
     }
 
     // --- Loudness compensation ------------------------------------------------
     // Average power gain of the whole tonal path for typical music (the
     // reference tilt), so changing rooms or intensity doesn't jump in level.
-    double num = 0.0, den = 0.0;
-    for (size_t i = 0; i < a.toneFreqsHz.size(); i += 4)
+    // The ringing gain is worked out the same way, with the notes as they ring at 140 %+
+    // (RoomEngine: extra x 4, Q x 2).
+    auto loudnessGain = [&] (double extraMul, double qMul)
     {
-        const double f = a.toneFreqsHz[i];
-        if (f >= 0.45 * sr)
-            break;
-        std::complex<double> h = 1.0;
-        for (int k = 0; k < t.numEq; ++k)
-            h *= t.eq[k].response (f, sr);
-        std::complex<double> res = 1.0;
+        BiquadCoeffs rc[ToneSettings::maxResonators];
         for (int k = 0; k < t.numResonators; ++k)
-            res += (double) t.resonatorExtra[k] * t.resonator[k].response (f, sr);
-        h *= res;
+            rc[k] = qMul == 1.0 ? t.resonator[k] : design::resonator (t.resonatorHz[k], t.resonatorQ[k] * qMul, sr);
+        double num = 0.0, den = 0.0;
+        for (size_t i = 0; i < a.toneFreqsHz.size(); i += 4)
+        {
+            const double f = a.toneFreqsHz[i];
+            if (f >= 0.45 * sr)
+                break;
+            std::complex<double> h = 1.0;
+            for (int k = 0; k < t.numEq; ++k)
+                h *= t.eq[k].response (f, sr);
+            std::complex<double> res = 1.0;
+            for (int k = 0; k < t.numResonators; ++k)
+                res += extraMul * (double) t.resonatorExtra[k] * rc[k].response (f, sr);
+            h *= res;
 
-        const auto w = std::pow (10.0, referenceDb (f) / 10.0) * f;
-        num += w * std::norm (h);
-        den += w;
-    }
-    t.tonalGain = den > 0 ? (float) (1.0 / std::sqrt (num / den + 1e-20)) : 1.0f;
+            const auto w = std::pow (10.0, referenceDb (f) / 10.0) * f;
+            num += w * std::norm (h);
+            den += w;
+        }
+        return den > 0 ? (float) (1.0 / std::sqrt (num / den + 1e-20)) : 1.0f;
+    };
+    t.tonalGain = loudnessGain (1.0, 1.0);
+    t.tonalGainRing = loudnessGain (4.0, 2.0);
+
+    // The room's artifacts: a bigger, longer room flutters slower; its near wall sits further off.
+    const auto spread = juce::jlimit (0.0f, 1.0f, (a.medianT60 * juce::jmax (0.25f, size) - 0.15f) / 1.6f);
+    t.flutterMs = 12.0f + 33.0f * spread;
+    t.combMs = 0.8f + 2.2f * spread;
     return t;
 }
 

@@ -15,7 +15,8 @@
 // (shape, rate / sync, retrig, drag handle, what it moves), in the same place,
 // so the console stays in view while you shape it.
 
-class AdvancedPanel : public juce::Component
+class AdvancedPanel : public juce::Component,
+                      private juce::Timer
 {
 public:
     explicit AdvancedPanel (RoomAudioProcessor&);
@@ -49,4 +50,6 @@ private:
     LfoCard card1 { proc, 0 }, card2 { proc, 1 };
     int lfoTop = 340;
     LfoPanel lfoPanel;
+    juce::StringArray names;   // each knob's label, shown again when it isn't being touched
+    void timerCallback() override;
 };

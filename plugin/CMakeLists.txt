@@ -84,6 +84,7 @@ target_sources(ROOM PRIVATE
     Source/Randomizer.cpp
     Source/dsp/NoiseBank.cpp
     Source/R5Parts.cpp
+    Source/RoomMenu.cpp
     Source/presets/PresetBrowser.cpp)
 
 target_include_directories(ROOM PRIVATE Source)
@@ -147,6 +148,7 @@ target_compile_definitions(room_render PRIVATE ${ROOM_DEFINITIONS})
 target_link_libraries(room_render
     PRIVATE
         juce::juce_audio_formats
+        juce::juce_graphics
         juce::juce_data_structures
         juce::juce_dsp
     PUBLIC

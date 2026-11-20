@@ -120,6 +120,8 @@ public:
     /** Knob centre and radius inside a slider (shared with ModSlider's rings). */
     static juce::Rectangle<float> knobBounds (const juce::Slider&);
     static bool onBlack (const juce::Component&);
+    /** True inside a light module (a parent with the property "surface" = "light"). */
+    static bool onLight (const juce::Component&);
 
 private:
     juce::SharedResourcePointer<UiResources> resources;   // keeps the cache alive while an editor is open

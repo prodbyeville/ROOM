@@ -1,4 +1,5 @@
 #include "PresetLibrary.h"
+#include <juce_graphics/juce_graphics.h>
 
 namespace room::presets
 {
@@ -388,6 +389,88 @@ void PresetLibrary::setFavorite (const juce::String& key, bool fav)
     for (auto& e : entries)
         if (e.key == key)
             e.favorite = fav;
+}
+
+bool PresetLibrary::isEditablePack (const juce::String& pack)
+{
+    return pack.isNotEmpty() && ! pack.equalsIgnoreCase (factoryPack) && ! pack.equalsIgnoreCase (userPack);
+}
+
+juce::File PresetLibrary::packCoverFile (const juce::String& pack) const
+{
+    if (pack.isEmpty() || pack.equalsIgnoreCase (factoryPack))
+        return {};
+    for (auto* name : { "cover.jpg", "cover.png" })
+        if (auto f = packFolder (pack).getChildFile (name); f.existsAsFile())
+            return f;
+    return {};
+}
+
+bool PresetLibrary::setPackCover (const juce::String& pack, const juce::File& image, juce::String& errorOut)
+{
+    if (pack.isEmpty() || pack.equalsIgnoreCase (factoryPack) || ! packFolder (pack).isDirectory())
+    {
+        errorOut = "That pack can't have a cover.";
+        return false;
+    }
+    auto img = juce::ImageFileFormat::loadFrom (image);
+    if (! img.isValid())
+    {
+        errorOut = "That file isn't an image ROOM can read (use a PNG or JPG).";
+        return false;
+    }
+    if (img.getWidth() > 1200)
+        img = img.rescaled (1200, juce::roundToInt (1200.0 * img.getHeight() / img.getWidth()), juce::Graphics::highResamplingQuality);
+    const auto out = packFolder (pack).getChildFile ("cover.jpg");
+    packFolder (pack).getChildFile ("cover.png").deleteFile();
+    out.deleteFile();
+    juce::FileOutputStream os (out);
+    juce::JPEGImageFormat jpeg;
+    jpeg.setQuality (0.9f);
+    if (! os.openedOk() || ! jpeg.writeImageToStream (img.convertedToFormat (juce::Image::RGB), os))
+    {
+        errorOut = "Couldn't save the cover.";
+        return false;
+    }
+    return true;
+}
+
+void PresetLibrary::removePackCover (const juce::String& pack)
+{
+    if (pack.isEmpty() || pack.equalsIgnoreCase (factoryPack))
+        return;
+    packFolder (pack).getChildFile ("cover.jpg").deleteFile();
+    packFolder (pack).getChildFile ("cover.png").deleteFile();
+}
+
+bool PresetLibrary::removePack (const juce::String& pack, juce::String& errorOut)
+{
+    if (! isEditablePack (pack) || ! packFolder (pack).isDirectory())
+    {
+        errorOut = "That pack can't be deleted.";
+        return false;
+    }
+    if (! packFolder (pack).moveToTrash() && ! packFolder (pack).deleteRecursively())
+    {
+        errorOut = "Couldn't move the pack to the trash.";
+        return false;
+    }
+    // forget its favourites and quick slots
+    const auto prefix = pack + "/";
+    bool favChanged = false;
+    for (int i = favoriteKeys.size(); --i >= 0;)
+        if (favoriteKeys[i].startsWith (prefix))
+        {
+            favoriteKeys.remove (i);
+            favChanged = true;
+        }
+    if (favChanged)
+        saveFavorites();
+    for (const auto& k : juce::StringArray (quickKeys))
+        if (k.startsWith (prefix))
+            renameQuick (k, {});
+    rescan();
+    return true;
 }
 
 bool PresetLibrary::createPack (const juce::String& name, juce::String& errorOut)
