@@ -1,0 +1,26 @@
+{
+  "depth": {
+    "kx": 0.6,
+    "ky": 0.6
+  },
+  "t0": 0.0,
+  "t1": 5.0,
+  "envelope": [
+    -0.01,
+    0.8,
+    5.5,
+    6.0
+  ],
+  "strength": 24,
+  "max_blur": 9,
+  "focus_from": [
+    0.66,
+    0.47
+  ],
+  "focus_to": [
+    0.64,
+    0.47
+  ],
+  "in": "/tmp/claude-0/-home-user-ROOM/862feb5a-312a-5fcb-b6f4-d0c74ca69c6a/scratchpad/06_drn_leds_conform.mp4",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/06_drn_leds_final.mp4"
+}

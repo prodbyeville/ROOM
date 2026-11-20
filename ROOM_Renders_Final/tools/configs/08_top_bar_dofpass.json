@@ -1,0 +1,26 @@
+{
+  "depth": {
+    "kx": 1.0,
+    "ky": 0.3
+  },
+  "t0": 0.8,
+  "t1": 4.2,
+  "envelope": [
+    -0.01,
+    0.8,
+    5.5,
+    6.0
+  ],
+  "strength": 24,
+  "max_blur": 9,
+  "focus_from": [
+    0.25,
+    0.45
+  ],
+  "focus_to": [
+    0.42,
+    0.46
+  ],
+  "in": "/tmp/claude-0/-home-user-ROOM/862feb5a-312a-5fcb-b6f4-d0c74ca69c6a/scratchpad/08_top_bar_conform.mp4",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/08_top_bar_final.mp4"
+}
