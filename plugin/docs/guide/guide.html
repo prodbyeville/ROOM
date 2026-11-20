@@ -81,7 +81,7 @@
   .cover .sub { margin-top: .14in; }
   .cover .bottom { position: absolute; bottom: .55in; left: 0; right: 0; }
 
-  .range .tex { min-height: 1.25in; }
+  .range .tex { min-height: .9in; }
   .faq .q { font-weight: 700; margin-bottom: .02in; }
   .faq .a { color: var(--dim); font-size: 9.3pt; margin-bottom: .12in; }
   .types .tex { min-height: .86in; display: flex; flex-direction: column; justify-content: flex-end; padding: .12in .16in; }
@@ -113,7 +113,7 @@
   <img class="word" src="../../Design/brand/wordmark/room-wordmark-offwhite.svg" alt="ROOM">
   <div class="tagline">capture the sound of <span class="serif">any space</span></div>
   <div class="sub caps dim">Tone &nbsp;·&nbsp; Resonance &nbsp;·&nbsp; Decay</div>
-  <div class="sub caps dim" style="margin-top:.08in; opacity:.7">The ROOM guide &nbsp;·&nbsp; Version 1.0</div>
+  <div class="sub caps dim" style="margin-top:.08in; opacity:.7">The ROOM guide &nbsp;·&nbsp; Version 1.4</div>
   <div class="bottom caps dim">prodbyeville</div>
 </section>
 
@@ -122,8 +122,8 @@
   <div class="caps kicker">01 &nbsp;What ROOM is</div>
   <h1>every sound has a <span class="serif">room</span> in it.</h1>
   <p class="lead">A clap in a stairwell, a voice memo in a kitchen, a tap on a glass: each one carries the space it was made in. ROOM captures that space: its tone, the notes it rings at, and how it lets go of every frequency. <span class="red">Then it hands them back to you, so anything you play can live inside it.</span></p>
-  <p>Drop any audio on ROOM, or record straight into it, and a few seconds later you're playing through that place. Use its colour and its notes on their own, add its decay, make it bigger or longer. Push it past 100% and the room's own notes become an instrument. It works anywhere you'd reach for a reverb, and in plenty of places you wouldn't.</p>
-  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="145" data-w="1735" data-h="1060" style="margin:.16in auto .2in; width:88%"></div>
+  <p>Drop any audio on ROOM, or record straight into it, and a few seconds later you're playing through that place. Use its colour and its notes on their own, add its decay, make it bigger or longer, or imprint its timbre straight onto your sound. Push it past 100% and the room starts to fall apart; past 175% its own notes sing. It works anywhere you'd reach for a reverb, and in plenty of places you wouldn't.</p>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="145" data-w="1735" data-h="1060" style="margin:.12in auto .14in; width:74%"></div>
   <div class="grid2">
     <div>
       <div class="caps kicker" style="margin-bottom:.06in">02 &nbsp;Why I made it</div>
@@ -133,7 +133,8 @@
     <div>
       <div class="caps kicker" style="margin-bottom:.06in">In one look</div>
       <div class="item"><div class="name">Room capture</div><p>Any sound in, the place it was made in out: a clap, a voice memo, a tap on a glass.</p></div>
-      <div class="item"><div class="name">Tone · resonance · decay</div><p>The room's colour, the notes it rings at, and how each frequency fades. Use any of them, with or without a tail, or push past 100% and play the room's notes.</p></div>
+      <div class="item"><div class="name">Tone · resonance · decay</div><p>The room's colour, the notes it rings at, and how each frequency fades. Use any of them, with or without a tail.</p></div>
+      <div class="item"><div class="name">Imprint · pitch</div><p>Give your sound the room's timbre, and blend an octave down or up into the room.</p></div>
       <div class="item"><div class="name">95 rooms and studios</div><p>49 rooms and 46 studios built in, plus your own packs.</p></div>
     </div>
   </div>
@@ -170,9 +171,9 @@
     <div>
       <p style="display:flex"><span class="num">1</span><span><b>Header:</b> menu, studios, save, Advanced, Randomize, Wet, Out and power.</span></p>
       <p style="display:flex"><span class="num">2</span><span><b>Stage:</b> drop or record a sound, and your rooms float around it.</span></p>
-      <p style="display:flex"><span class="num">3</span><span><b>Controls:</b> Intensity, Smooth and Glitch; Tone and Space; Tail and Size.</span></p>
+      <p style="display:flex"><span class="num">3</span><span><b>Controls:</b> Intensity, Tone, Space, Tail and Size; under them Smooth, Imprint, Pitch and Auto; and the white Glitch module.</span></p>
       <p style="display:flex"><span class="num">4</span><span><b>Noise and Rate:</b> a texture under the room, and sample rate down to lo-fi.</span></p>
-      <p style="display:flex"><span class="num">5</span><span><b>Advanced:</b> pre-delay, damping, width, ducking, freeze, tape, auto eq and two LFOs.</span></p>
+      <p style="display:flex"><span class="num">5</span><span><b>Advanced:</b> pre-delay, damping, width, ducking, freeze, the finish box (tape, auto eq, mud) and two LFOs.</span></p>
     </div>
   </div>
   <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>03</span></div>
@@ -208,24 +209,24 @@
 <section class="page">
   <div class="caps kicker">05 &nbsp;Every control</div>
   <h1>shaping the room.</h1>
-  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="860" data-w="1735" data-h="340" style="margin:.1in 0 .16in"></div>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="780" data-w="1735" data-h="430" style="margin:.02in auto .06in; width:62%"></div>
   <div class="grid2">
-    <div class="item"><div class="name">Intensity</div><p>How much of the room you hear, from 0 to 200%. Up to 100% it's the room as captured. Past that, its notes take over (below).</p></div>
-    <div class="item"><div class="name">Smooth</div><p>The whole sound as a mic across the room hears it: softer hits, a rounder top, a little air and early reflections.</p></div>
-    <div class="item"><div class="name">Glitch · Amount · Sync</div><p><b>Glitch</b> grabs short slices of the room and stutters them. <b>Amount</b> sets how often and how many repeats. <b>Sync</b> locks the slices to your song's grid.</p></div>
-    <div class="item"><div class="name">Tone · Space</div><p><b>Tone</b> is the room's colour and its ringing notes, with no tail. <b>Space</b> is its decay. Use either, or both.</p></div>
-    <div class="item"><div class="name">Sync · Auto</div><p><b>Sync</b> moves Tone and Space opposite each other, so one knob slides between colour and space. <b>Auto</b> sets both from what ROOM heard in the sound.</p></div>
+    <div class="item"><div class="name">Intensity</div><p>How much of the room you hear, from 0 to 200%. Up to 100% it's the room as captured. Past that, it falls apart (below).</p></div>
+    <div class="item"><div class="name">Tone · Space · Auto</div><p><b>Tone</b> is the room's colour and its ringing notes, with no tail. <b>Space</b> is its decay and width. <b>Auto</b> sets both from what ROOM heard in the sound.</p></div>
     <div class="item"><div class="name">Tail · Size</div><p><b>Tail</b> is how long the room rings. <b>Size</b> makes it smaller or bigger than the one you recorded; 50% is the room as it was.</p></div>
+    <div class="item"><div class="name">Smooth</div><p>The whole sound as a mic across the room hears it: softer hits, a rounder top, a little air.</p></div>
+    <div class="item"><div class="name">Imprint <span class="tag">New</span></div><p>Your sound takes on the room's own timbre, its colour and strongest notes, with or without the tail. No latency.</p></div>
+    <div class="item"><div class="name">Pitch <span class="tag">New</span></div><p>An octave blended into the room. The middle is dry; right brings in the room an octave up, left an octave down. Your dry sound stays in tune.</p></div>
+    <div class="item" style="grid-column: span 2"><div class="name">Glitch module · On · Sync · Amount</div><p><b>On</b> stutters short slices of the room, <b>Sync</b> locks them to your song's grid, <b>Amount</b> sets how often. It gets busier as Intensity rises.</p></div>
   </div>
-  <h2 style="margin-top:.22in">Past 100%</h2>
+  <h2 style="margin-top:.12in">Past 100%</h2>
   <div class="grid4 range" style="margin-top:.1in">
     <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')"><div class="big">0–100%</div><div class="title">The room</div><p>Its tone, notes and decay, from a hint to all of it.</p></div>
-    <div class="tex" style="background-image:url('../../Resources/Ui/card_rose.jpg')"><div class="big">100–150%</div><div class="title">Shimmer</div><p>An octave-up shimmer that feeds back on itself, with reversed swells.</p></div>
-    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="big">150–165%</div><div class="title">Breakup</div><p>A measured amount of digital breakup.</p></div>
-    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')"><div class="big">165–200%</div><div class="title">Bloom</div><p>The room's own notes, their fifths and octaves, a choir and warm saturation. Every room blooms differently.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_rose.jpg')"><div class="big">100–140%</div><div class="title">Ringing walls</div><p>The room's notes ring out like metal and drift; a flutter echo slaps between the walls.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="big">140–175%</div><div class="title">Falling apart</div><p>A near wall that won't sit still, and a mic preamp pushed until it pumps and clips.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')"><div class="big">175–200%</div><div class="title">Shimmer &amp; bloom</div><p>An octave-up shimmer, then the room's own notes, fifths and octaves sing. Every room blooms differently.</p></div>
   </div>
-  <p class="dim" style="font-size:9.4pt; margin-top:.14in">Glitch gets busier as Intensity rises, so the two work as a pair.</p>
-  <div class="tex" style="margin-top:.16in; background-image:url('../../Resources/Ui/card_red.jpg'); padding:.16in .22in">
+  <div class="tex" style="margin-top:.12in; background-image:url('../../Resources/Ui/card_red.jpg'); padding:.12in .2in">
     <div class="title">Try this: Space at 0</div>
     <p>Turn Space all the way down and Tone up. There's no tail at all, yet your sound is now in the room: its colour, and its notes ringing along with yours. That's the part a reverb can't give you.</p>
   </div>
@@ -236,7 +237,7 @@
 <section class="page">
   <div class="caps kicker">06 &nbsp;Every control</div>
   <h1>noise and rate.</h1>
-  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="1225" data-w="1735" data-h="297" style="margin:.1in 0 .18in"></div>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="1222" data-w="1735" data-h="305" style="margin:.1in 0 .18in"></div>
   <p class="lead" style="font-size:11.5pt"><b>Noise</b> lays one of 54 textures under the room, from vinyl to waves to a bus. <b>Rate</b> takes the sample rate down, from clean 44.1 kHz to dusty lo-fi.</p>
   <div class="types" style="display:grid; grid-template-columns:repeat(5,1fr); gap:.1in; margin:.14in 0 .2in">
     <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')"><div class="title">Classics</div><p>Vinyl, tape hiss, air, room tone</p></div>
@@ -261,7 +262,7 @@
   <div class="caps kicker">07 &nbsp;Every control</div>
   <h1>advanced, lfos and randomize.</h1>
   <div class="grid2" style="grid-template-columns: 1.55in 1fr; gap:.28in; margin-top:.12in">
-    <div class="crop" data-src="shots/advanced.jpg" data-iw="2304" data-ih="1544" data-x="1782" data-y="22" data-w="512" data-h="1500"></div>
+    <div class="crop" data-src="shots/advlfo.jpg" data-iw="2304" data-ih="1544" data-x="1782" data-y="22" data-w="512" data-h="1500"></div>
     <div>
       <div class="grid2" style="gap:0 .22in">
         <div class="item" style="border-top:0"><div class="name">Pre-delay</div><p>A gap before the room starts, up to 500 ms, so the dry hit stays clear.</p></div>
@@ -269,9 +270,10 @@
         <div class="item"><div class="name">Width</div><p>From mono to extra wide.</p></div>
         <div class="item"><div class="name">Ducking · Release</div><p>Turns the room down while you play and lets it bloom in the gaps. Release sets how fast it comes back.</p></div>
         <div class="item"><div class="name">Freeze</div><p>Holds the tail forever. Play over it.</p></div>
-        <div class="item"><div class="name">Tape</div><p>Closes in the lows and highs, like an old machine.</p></div>
-        <div class="item"><div class="name">Auto eq</div><p>Tames harsh ringing in the room between 2 and 10 kHz, only where it builds up.</p></div>
-        <div class="item"><div class="name">Two LFOs</div><p>Seven shapes, free or synced, with retrigger. Drag an LFO's handle onto any knob; up to 8 targets each.</p></div>
+        <div class="item"><div class="name">Finish: Tape</div><p>The dark box. Tape closes in the lows and highs, like an old machine.</p></div>
+        <div class="item"><div class="name">Finish: Auto eq</div><p>Tames harsh ringing between 2 and 10 kHz, only where it builds up.</p></div>
+        <div class="item"><div class="name">Finish: Mud <span class="tag">New</span></div><p>Cuts the boxy low mids (280 to 450 Hz), harder when they build up.</p></div>
+        <div class="item"><div class="name">Two LFOs</div><p>Seven shapes, free or synced, with retrigger. Drag an LFO's handle onto any knob; drag its coloured dot to set how much it moves.</p></div>
       </div>
     </div>
   </div>
@@ -279,7 +281,7 @@
     <div class="crop" data-src="shots/randomize.jpg" data-iw="1784" data-ih="1544" data-x="0" data-y="40" data-w="1784" data-h="820"></div>
     <div>
       <h2>Randomize</h2>
-      <p class="dim" style="font-size:9.4pt">Right-click Randomize to tick what it may change. <b style="color:var(--text)">Intensity</b> sets how far it goes:</p>
+      <p class="dim" style="font-size:9.4pt">Right-click Randomize to tick what it may change, including the room itself. <b style="color:var(--text)">Intensity</b> sets how far it goes:</p>
       <p class="dim" style="font-size:9.4pt"><b class="red">Basic</b> stays musical: each knob lands near the middle of its sweet spot, and switches rarely flip. <b class="red">Moderate</b> uses the whole sweet spot. <b class="red">Extreme</b> uses every knob's full range and flips every switch it's allowed to.</p>
       <p class="dim" style="font-size:9.4pt">Your ticks and intensity are saved with the project.</p>
     </div>
@@ -291,7 +293,7 @@
 <section class="page">
   <div class="caps kicker">08 &nbsp;Rooms and studios</div>
   <h1>95 places to start.</h1>
-  <p class="lead" style="font-size:11.5pt">Click the studio name (or All rooms on the stage) to open a library. Click an entry to hear it and keep browsing; arrow keys step through.</p>
+  <p class="lead" style="font-size:11.5pt">The whole Eville library comes with ROOM. Click the studio name (or All rooms on the stage) to open a library. Click an entry to hear it and keep browsing; arrow keys step through.</p>
   <div class="grid3 types" style="margin:.16in 0 .22in">
     <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="title">Small spaces <span class="count">· 20</span></div><p>Closets, cars, booths</p></div>
     <div class="tex paper" style="background-image:url('../../Resources/Ui/card_plaster.jpg')"><div class="title">Rooms <span class="count">· 15</span></div><p>Live rooms, garages, apartments</p></div>
@@ -304,8 +306,8 @@
     <div class="crop" data-src="shots/rooms.jpg" data-iw="1784" data-ih="1544" data-x="92" data-y="215" data-w="1600" data-h="1135"></div>
     <div>
       <div class="item" style="border-top:0"><div class="name">Quick slots</div><p>Six slots at the top of the room library. The rooms in them are the cards on the stage.</p></div>
-      <div class="item"><div class="name">Favourites and search</div><p>Heart anything to find it in Favourites. Search covers names, types, styles and what it's made for; Filters narrow it down.</p></div>
-      <div class="item"><div class="name">Your own packs</div><p>Save into a pack, or make one with + new pack.</p></div>
+      <div class="item"><div class="name">Favourites and search</div><p>Heart anything to find it in Favourites. Search covers names, types, styles and what it's made for; the Filters drawer narrows it down by tag and sorts it.</p></div>
+      <div class="item"><div class="name">Your own packs</div><p>Save into a pack, or make one with + new pack. Right-click a pack's banner to give it a cover image or delete it.</p></div>
       <div class="item"><div class="name">Share</div><p>Import and export rooms, studios and whole packs. A room file is tiny, so they're easy to pass around.</p></div>
       <div class="item"><div class="name">Right-click</div><p>Rename, move, show in folder, export or delete.</p></div>
     </div>
