@@ -23,6 +23,9 @@ namespace R5
     void drawKnob (juce::Graphics&, juce::Point<float> centre, float ring, float startAngle, float endAngle,
                    float angle, float arcFrom, bool enabled, bool hover, bool ticks = true, bool light = false);
 
+    /** Space a key button leaves under the key for its lit glow (EvilleLookAndFeel::drawR5Key). */
+    constexpr float glowRoom = 8.0f;
+
     /** A key with its label; `led` adds a small light above the label (D / R / N). */
     void drawKey (juce::Graphics&, juce::Rectangle<float> bounds, KeyKind, const juce::String& label,
                   bool on, bool over, bool down, bool led = false);

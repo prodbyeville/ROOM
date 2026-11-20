@@ -27,7 +27,7 @@ struct Modulation
     {
         static const juce::StringArray t { "intensity", "spaceAmount", "tail", "space", "mix", "output",
                                            "tape", "autoEq", "preDelay", "size", "damping", "duck", "duckRelease",
-                                           "rate", "noiseLevel", "noiseFollow", "toneAmount", "glitchAmount", "smooth", "imprint" };   // saved by name
+                                           "rate", "noiseLevel", "noiseFollow", "toneAmount", "glitchAmount", "smooth", "imprint", "pitch", "mud" };   // saved by name
         return t;
     }
     static int numTargets() { return targetIds().size(); }

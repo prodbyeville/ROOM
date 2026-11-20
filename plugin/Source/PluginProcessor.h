@@ -9,6 +9,7 @@
 #include "dsp/StereoWidth.h"
 #include "dsp/RoomMic.h"
 #include "dsp/Imprint.h"
+#include "dsp/MudCut.h"
 #include "presets/PresetLibrary.h"
 #include "dsp/Lfo.h"
 #include "Modulation.h"
@@ -22,7 +23,7 @@ namespace ParamIDs
     inline constexpr const char* balance     = "balance";      // old projects only (now tone + space)
     inline constexpr const char* toneAmount  = "toneAmount";   // how much of the room's tone (eq, rings)
     inline constexpr const char* spaceAmount = "spaceAmount";  // how much of the room's space (decay, width)
-    inline constexpr const char* toneSpaceSync = "toneSpaceSync"; // on: tone and space move opposite
+    inline constexpr const char* toneSpaceSync = "toneSpaceSync"; // retired (kept so old projects load); ignored
     inline constexpr const char* tail        = "tail";
     inline constexpr const char* output      = "output";
     inline constexpr const char* tape        = "tape";
@@ -48,8 +49,8 @@ namespace ParamIDs
     inline constexpr const char* rateReverb  = "rateReverb";
     inline constexpr const char* rateNoise   = "rateNoise";
     inline constexpr const char* smooth      = "smooth";     // the room-mic softening (intensity section)
-    inline constexpr const char* tuneKey     = "tuneKey";    // Tune to key: Off, C .. B (the room's notes snap to it)
-    inline constexpr const char* tuneScale   = "tuneScale";  // Major, Minor, Chromatic
+    inline constexpr const char* pitch       = "pitch";      // -1 .. 1: an octave down / up blended into the room
+    inline constexpr const char* mud         = "mud";        // Advanced: tames the boxy low mids
     inline constexpr const char* imprint     = "imprint";    // the sound takes on the room's timbre
     // Top bar
     inline constexpr const char* bypass      = "bypass";
@@ -69,7 +70,7 @@ public:
     /** Intensity values up to this build the room (2 = twice the measured room, shown as 100 %);
         above it, extreme mode. */
     static constexpr float maxRoomIntensity = 2.0f;
-    static constexpr float characterTopIntensity = 3.6f;   // 180 %: room artifacts below, shimmer / bloom above
+    static constexpr float characterTopIntensity = 3.5f;   // 175 %: the room falls apart below, shimmer / bloom above
 
     RoomAudioProcessor();
     ~RoomAudioProcessor() override;
@@ -257,6 +258,7 @@ private:
     juce::AudioBuffer<float> noiseBuf;
     room::RoomMic roomMic;           // Smooth
     room::Imprint imprint;           // Imprint (before the room)
+    room::MudCut mudCut;             // Mud (Advanced, after tape)
     juce::SmoothedValue<float> outputGain;
 
     // Bypass: a latency-matched copy of the input, crossfaded in.
@@ -303,8 +305,8 @@ private:
     std::atomic<float>* rateNoiseParam = nullptr;
     std::atomic<float>* smoothParam = nullptr;
     std::atomic<float>* imprintParam = nullptr;
-    std::atomic<float>* tuneKeyParam = nullptr;
-    std::atomic<float>* tuneScaleParam = nullptr;
+    std::atomic<float>* pitchParam = nullptr;
+    std::atomic<float>* mudParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
 
     // LFOs

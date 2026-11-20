@@ -4,22 +4,21 @@
 #include <cmath>
 #include "Biquad.h"
 
-// The room's own recording artifacts, Intensity 100..180 % (`amount` 0..1 across it).
-// On the wet (room) sound, before the shimmer / bloom of 180..200 % (WetFx.h).
-// Each artifact eases in over its own part of the range; all are full at 180 %:
+// The room falls apart, Intensity 100..175 % (`amount` 0..1 across it), on the wet (room)
+// sound before the shimmer / bloom of 175..200 % (WetFx.h). Each artifact comes in over its
+// own part of the range and is pushed well past "subtle":
 //
-//   ringing notes    100..140 %  the room's resonators ring louder and longer (RoomEngine,
+//   ringing walls    100..130 %  the room's notes ring 12x louder and 4x longer, feed back
+//                                into themselves like metal and wobble in pitch (RoomEngine,
 //                                tonal path: ringAmount())
-//   flutter echo     110..160 %  a short, dark feedback echo between two parallel walls;
-//                                its period comes from the room (12..45 ms)
-//   close-wall comb  120..170 %  a 0.8..3 ms reflection off a wall right by the mic:
-//                                hollow, boxy colour
-//   pushed mic       140..180 %  a preamp driven too hard: a fast compressor pumping the
-//                                room, a lopsided saturation and a low-mid lift
+//   flutter slap     105..140 %  two parallel walls: a bright feedback echo (up to 0.88) that
+//                                bounces left <-> right; its period from the room (12..90 ms)
+//   wall comb        110..145 %  a near reflection whose distance drifts: a boxy flanging room
+//   pushed mic       125..175 %  a preamp driven far too hard: a pumping compressor, a low-mid
+//                                lift, heavy lopsided drive that clips flat at the top
 //
-// The stage keeps the room's level (its output follows its input over the last 0.8 s, and
-// the compressor's threshold follows the room's own average), so turning it up changes the
-// character, not the loudness. At 0 it is exactly bypassed (bit-identical).
+// Levels follow the input over 0.8 s (+1.5 dB allowed at the top). Every feedback path is
+// bounded (tanh). At 0 it is exactly bypassed (bit-identical).
 // Everything is preallocated in prepare(); processSample() never allocates.
 
 namespace room
@@ -32,7 +31,7 @@ public:
     {
         sampleRate = sr;
         chans = juce::jlimit (1, maxCh, channels);
-        bufLen = std::max (64, (int) (0.06 * sr) + 4);
+        bufLen = std::max (64, (int) (0.12 * sr) + 4);
         for (auto& b : buf) b.assign ((size_t) bufLen, 0.0f);
         amountSm.reset (sr, 0.08);
         amountSm.setCurrentAndTargetValue (0.0f);
@@ -52,6 +51,7 @@ public:
         }
         compEnv = 0.0f;
         avgPow = outPow = 0.0f;
+        sweepPhase = 0.0;
     }
 
     /** From the room (ToneSettings, at a room change; audio thread). */
@@ -75,8 +75,8 @@ public:
 
     bool isIdle() const { return amountSm.getCurrentValue() <= 0.0f && ! amountSm.isSmoothing(); }
 
-    /** How much the room's notes ring (0..1) for an amount: 100..140 %. */
-    static float ringAmount (float amount) { return smooth (amount / 0.5f); }
+    /** How much the room's notes ring (0..1) for an amount: 100..130 %. */
+    static float ringAmount (float amount) { return smooth (amount / 0.4f); }
 
     void processSample (float* wet, int numCh)
     {
@@ -93,66 +93,77 @@ public:
         }
         wasActive = true;
 
-        const auto flutter = smooth ((c - 0.125f) / 0.625f);   // 110 .. 160 %
-        const auto comb = smooth ((c - 0.25f) / 0.625f);       // 120 .. 170 %
-        const auto push = smooth ((c - 0.5f) / 0.5f);          // 140 .. 180 %
+        const auto flutter = smooth ((c - 0.067f) / 0.47f);   // 105 .. 140 %
+        const auto comb = smooth ((c - 0.13f) / 0.47f);       // 110 .. 145 %
+        const auto push = smooth ((c - 0.33f) / 0.67f);       // 125 .. 175 %
 
         if (std::abs (push - liftFor) > 0.01f)
         {
             liftFor = push;
-            const auto lc = design::peaking (200.0, 0.8, 3.0 * push, sampleRate);
+            const auto lc = design::peaking (220.0, 0.8, 5.0 * push, sampleRate);
             for (auto& f : lift) f.c = lc;
         }
 
         // Pushed mic: a fast compressor on the sum (both sides pump together). Its threshold
         // sits at the room's own average level, so it squeezes whatever sticks out at any level.
-        float level = 0.0f, power = 0.0f;
+        float power = 0.0f;
         for (int k = 0; k < ch; ++k)
-        {
-            level = std::max (level, std::abs (wet[k]));
             power += wet[k] * wet[k] / (float) ch;
-        }
-        juce::ignoreUnused (level);
-        // fast power (attack ~1 ms, release 120 ms) against the room's average (0.8 s)
+        // fast power (attack ~1 ms, release 40 ms: it pumps) against the room's average (0.8 s)
         const auto att = 1.0f - std::exp (-1.0f / (0.001f * (float) sampleRate));
-        const auto rel = 1.0f - std::exp (-1.0f / (0.12f * (float) sampleRate));
+        const auto rel = 1.0f - std::exp (-1.0f / (0.04f * (float) sampleRate));
         const auto avg = 1.0f - std::exp (-1.0f / (0.8f * (float) sampleRate));
         compEnv += (power - compEnv) * (power > compEnv ? att : rel);
         avgPow += (power - avgPow) * avg;
-        const auto threshold = std::max (1.0e-8f, 1.3f * 1.3f * avgPow);
-        const auto ratio = 1.0f + 7.0f * push;
+        const auto threshold = std::max (1.0e-8f, 0.8f * avgPow);
+        const auto ratio = 1.0f + 15.0f * push;
         const auto gr = compEnv > threshold ? std::pow (threshold / compEnv, 0.5f * (1.0f - 1.0f / ratio)) : 1.0f;
 
-        const auto fb = 0.65f * flutter;
+        // Flutter: two parallel walls slapping the sound back and forth (left <-> right)
+        const auto fb = 0.88f * flutter;
         // Level: the stage's output follows its input over the last ~0.8 s (two followers with the
-        // same time, so the ratio is right from the start and the pumping inside it stays).
-        const auto keep = 1.0f + c * (juce::jlimit (0.4f, 3.0f, std::sqrt ((avgPow + 1.0e-12f) / (outPow + 1.0e-12f))) - 1.0f);
+        // same time, so the ratio is right from the start and the pumping inside it stays),
+        // and lets the falling-apart room come up to 1.5 dB louder at the top.
+        const auto keep = 1.0f + c * (juce::jlimit (0.3f, 4.0f, std::sqrt ((avgPow + 1.0e-12f) / (outPow + 1.0e-12f))) * (1.0f + 0.19f * c) - 1.0f);
+
+        // the near wall drifts: the comb sweeps slowly (a boxy flanging room)
+        sweepPhase += 0.27 / sampleRate;
+        if (sweepPhase >= 1.0) sweepPhase -= 1.0;
+        const auto sweep = 1.0 + 0.45 * comb * std::sin (juce::MathConstants<double>::twoPi * sweepPhase);
 
         float outP = 0.0f;
+        float loops[maxCh] {};
+        for (int k = 0; k < ch; ++k)
+        {
+            const auto fl = read (buf[(size_t) k], flutterLen[k]);
+            loopLp[k] += (fl - loopLp[k]) * 0.6f;
+            loops[k] = loopLp[k];
+        }
         for (int k = 0; k < ch; ++k)
         {
             auto& b = buf[(size_t) k];
             const auto x = wet[k];
+            const auto other = ch > 1 ? loops[1 - k] : loops[k];
 
-            // Flutter echo: a short feedback delay, darker each time round.
-            const auto fl = read (b, flutterLen[k]);
-            loopLp[k] += (fl - loopLp[k]) * 0.35f;
+            // Close-wall comb: a near reflection of what's in the line, its distance drifting
+            const auto cm = read (b, juce::jlimit (2.0, (double) bufLen - 3.0, combLen[k] * sweep));
 
-            // Close-wall comb: a single near reflection of what's in the line.
-            const auto cm = read (b, combLen[k]);
+            b[(size_t) write] = x + fb * std::tanh (other);   // bounded however hard it's pushed
 
-            b[(size_t) write] = x + fb * loopLp[k];
-
-            auto y = x + 0.85f * flutter * loopLp[k];
-            y += 0.75f * comb * cm;
+            auto y = x + 1.1f * flutter * loops[k];
+            y += 0.95f * comb * cm;
 
             if (push > 0.0f)
             {
-                // Preamp: compressor makeup, low-mid lift, lopsided drive (DC blocked).
-                y *= 1.0f + push * (gr * (1.0f + 0.4f * push) - 1.0f);
+                // Preamp: compressor makeup, low-mid lift, a hard lopsided drive (DC blocked).
+                y *= 1.0f + push * (gr * (1.0f + 1.0f * push) - 1.0f);
                 y = (float) lift[k].process (y);
-                const auto drive = 1.0f + 4.0f * push;
-                const auto sat = std::tanh (drive * y + 0.25f * push * y * y) / drive;
+                const auto rms = std::sqrt (avgPow) + 1.0e-6f;
+                const auto drive = (1.0f + 11.0f * push) / (4.0f * rms);   // drive relative to the room's level
+                const auto u = drive * y;
+                auto sat = std::tanh (u + 0.35f * push * u * u) * (4.0f * rms) / (1.0f + 2.0f * push);
+                if (push > 0.6f)   // the top: the preamp clips flat on one side
+                    sat = juce::jlimit (-2.2f * rms, 1.4f * rms * (3.0f - 2.0f * push) + 0.6f * rms, sat);
                 y = y + push * (sat - y);
                 dcOut[k] = y - dcIn[k] + 0.9995f * dcOut[k];
                 dcIn[k] = y;
@@ -186,6 +197,7 @@ private:
     Biquad lift[maxCh];
     float liftFor = -1.0f;
     float compEnv = 0.0f, avgPow = 0.0f, outPow = 0.0f;
+    double sweepPhase = 0.0;
     bool wasActive = false;
     juce::SmoothedValue<float> amountSm;
 };

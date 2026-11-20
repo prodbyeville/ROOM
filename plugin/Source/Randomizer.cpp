@@ -19,6 +19,8 @@ namespace
         { ParamIDs::size,        0.7f, 1.5f },
         { ParamIDs::smooth,      0.1f, 0.6f, true },
         { ParamIDs::imprint,     0.2f, 0.7f, true },
+        { ParamIDs::pitch,       -0.5f, 0.5f, true },
+        { ParamIDs::mud,         0.2f, 0.7f, true },
         { ParamIDs::mix,         0.25f, 0.6f },
         { ParamIDs::glitchAmount, 0.2f, 0.8f },
         { ParamIDs::preDelay,    5.0f, 120.0f, true },
@@ -60,10 +62,9 @@ const std::vector<Target>& targets()
         { "size",      "size",      "room", { ParamIDs::size } },
         { "smooth",    "smooth",    "room", { ParamIDs::smooth } },
         { "imprint",   "imprint",   "room", { ParamIDs::imprint } },
-        { "tune",      "tune key",  "room", { ParamIDs::tuneKey, ParamIDs::tuneScale }, false },
+        { "pitch",     "pitch",     "room", { ParamIDs::pitch } },
         { "mix",       "dry / wet", "room", { ParamIDs::mix }, false },
         { "auto",      "auto",      "room", { ParamIDs::balanceAuto }, false },
-        { "toneSync",  "tone sync", "room", { ParamIDs::toneSpaceSync }, false },
 
         // Glitch
         { "glitchOn",     "glitch on",     "glitch", { ParamIDs::glitch }, false },
@@ -78,6 +79,7 @@ const std::vector<Target>& targets()
         { "release",  "release",   "advanced", { ParamIDs::duckRelease } },
         { "tape",     "tape",      "advanced", { ParamIDs::tape } },
         { "autoEq",   "auto eq",   "advanced", { ParamIDs::autoEq } },
+        { "mud",      "mud",       "advanced", { ParamIDs::mud } },
         { "freeze",   "freeze",    "advanced", { ParamIDs::freeze }, false },
 
         // Texture

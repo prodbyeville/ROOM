@@ -30,7 +30,6 @@ LfoModule::LfoModule (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     for (auto* b : { &sync, &retrig })
     {
         b->getProperties().set ("style", "minikey");
-        b->getProperties().set ("surface", "black");
         addAndMakeVisible (b);
     }
     sync.setTooltip ("lock the rate to the song tempo");
@@ -86,9 +85,11 @@ std::vector<LfoModule::TargetChip> LfoModule::targetChips() const
             if (x > targetsArea.getX() && x + w > targetsArea.getRight())
             {
                 x = targetsArea.getX();
-                y += 27;
+                y += 29;
             }
-            out.push_back ({ t, { x, y, w, 23 } });
+            if (y + 25 > targetsArea.getBottom() + 2)
+                break;   // no room for another row: the rest are still on their knobs' dots
+            out.push_back ({ t, { x, y + 2, w, 23 } });
             x += w + 6;
         }
     return out;
@@ -268,7 +269,7 @@ void LfoModule::resized()
     captionArea = r.removeFromTop (20).withTrimmedLeft (2);
     r.removeFromTop (4);
 
-    const int fixedBelow = 10 + 34 + 8 + 30 + 10 + 48;
+    const int fixedBelow = 10 + 34 + 8 + 30 + 10 + 62;   // two rows of target chips
     waveArea = r.removeFromTop (std::max (60, std::min (200, r.getHeight() - fixedBelow)));
     r.removeFromTop (10);
 
@@ -294,7 +295,6 @@ LfoCard::LfoCard (RoomAudioProcessor& p, int index) : proc (p), lfo (index)
     for (auto* b : { &sync, &retrig })
     {
         b->getProperties().set ("style", "minikey");
-        b->getProperties().set ("surface", "black");
         addAndMakeVisible (b);
     }
     syncAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ParamIDs::lfoSync (lfo), sync);

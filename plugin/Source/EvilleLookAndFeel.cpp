@@ -150,9 +150,10 @@ juce::Font EvilleLookAndFeel::getTextButtonFont (juce::TextButton&, int height)
 
 bool EvilleLookAndFeel::onLight (const juce::Component& c)
 {
+    // the nearest component that says which surface it's on decides (a dark box on a light panel)
     for (auto* p = &c; p != nullptr; p = p->getParentComponent())
-        if (p->getProperties()["surface"].toString() == "light")
-            return true;
+        if (p->getProperties().contains ("surface"))
+            return p->getProperties()["surface"].toString() == "light";
     return false;
 }
 
@@ -648,10 +649,11 @@ void EvilleLookAndFeel::drawR5Key (juce::Graphics& g, juce::Button& b, bool over
     // light above the label; the label is the button's text.
     const auto kind = b.getProperties()["r5key"].toString();
     const auto k = kind == "cream" ? R5::KeyKind::cream : kind == "square" ? R5::KeyKind::square : R5::KeyKind::black;
-    auto r = b.getLocalBounds().toFloat();
+    // The bottom 8 px are left for the lit glow, which fades out inside them (no hard edge).
+    auto r = b.getLocalBounds().toFloat().withTrimmedBottom (R5::glowRoom);
     if (k == R5::KeyKind::square)
         r = r.withSizeKeepingCentre (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight()));
-    R5::drawKey (g, r.reduced (1.0f, 2.0f).withTrimmedBottom (1.0f), k, b.getButtonText(), b.getToggleState(),
+    R5::drawKey (g, r.reduced (1.0f, 1.0f), k, b.getButtonText(), b.getToggleState(),
                  over && b.isEnabled(), down, (bool) b.getProperties()["r5led"]);
 }
 

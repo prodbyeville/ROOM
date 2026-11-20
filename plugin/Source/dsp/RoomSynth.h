@@ -27,20 +27,16 @@ struct ToneSettings
     int numResonators = 0;
     BiquadCoeffs resonator[maxResonators];
     float resonatorExtra[maxResonators] {}; // linear gain added on top of the dry signal
-    float resonatorHz[maxResonators] {};    // each resonator's note and sharpness (after Tune)
+    float resonatorHz[maxResonators] {};    // each resonator's note and sharpness
     float resonatorQ[maxResonators] {};
 
     float tonalGain = 1.0f;                 // keeps the tonal path at the input's loudness
-    float tonalGainRing = 1.0f;             // the same with the notes fully ringing (Intensity 140 %+)
+    float tonalGainRing = 1.0f;             // the same with the notes fully ringing (Intensity 130 %+)
 
     // The room's own artifacts above 100 % (RoomCharacter.h), from the analysis and Size
     float flutterMs = 25.0f;                // flutter echo period
     float combMs = 1.6f;                    // close-wall comb delay
 };
-
-/** Tune to key: snaps a frequency to the nearest note of `key` (0 = C .. 11 = B) in
-    `scale` (0 major, 1 minor, 2 chromatic). key < 0 returns it unchanged. */
-float snapToKey (float hz, int key, int scale);
 
 /** Synthetic stereo IR: per band, filtered noise decaying at that band's
     T60 (times intensity). Unit energy per channel. */
@@ -53,8 +49,7 @@ juce::AudioBuffer<float> synthesizeIR (const RoomAnalysis&, double sampleRate,
 float bandDecay (float measuredT60, float bandCentreHz, float intensity, float size, float damping);
 
 /** Tone-match EQ (room tone curve vs a neutral reference) + resonators. */
-ToneSettings designTone (const RoomAnalysis&, double sampleRate, float intensity,
-                        int tuneKey = -1, int tuneScale = 0, float size = 1.0f);
+ToneSettings designTone (const RoomAnalysis&, double sampleRate, float intensity, float size = 1.0f);
 
 /** The EQ curve (dB) the tone path aims for, on the analysis' tone grid.
     Exposed so the UI and tests can show it. */

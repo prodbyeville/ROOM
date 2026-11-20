@@ -1299,7 +1299,7 @@ namespace
             {
                 tour->showStep (1); tour->showStep (2);
                 check (tour->isVisible() && tour->getStep() == 2, "the tour steps through");
-                tour->showStep (3);
+                tour->showStep (6);   // six steps: past the last one closes it
                 check (! tour->isVisible(), "done closes the tour");
             }
         }
@@ -1966,25 +1966,12 @@ namespace
             ed.turnByHand (true, 0.3);
             check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.3f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.5f) < 0.011f,
                    "tone moves on its own (space stays)");
-            SyncDot* toneSync = nullptr;
-            std::function<void (juce::Component&)> findSync = [&] (juce::Component& c)
-            {
-                if (auto* d = dynamic_cast<SyncDot*> (&c); d != nullptr && d->getTooltip().startsWith ("sync: tone"))
-                    toneSync = d;
-                for (auto* child : c.getChildren()) findSync (*child);
-            };
-            findSync (ed);
-            check (toneSync != nullptr, "tone and space have a sync button");
-            if (toneSync != nullptr)
-                toneSync->setToggleState (true, juce::sendNotificationSync);
-            check (paramValue (p, ParamIDs::toneSpaceSync) > 0.5f, "the sync button sets tone/space sync");
+            // tone / space sync is retired: even a project with it on moves only the knob you turn
+            setParam (p, ParamIDs::toneSpaceSync, 1.0f);
             ed.turnByHand (true, 0.5);
-            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.5f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.3f) < 0.011f,
-                   "with sync on, turning tone up turns space down by as much");
-            ed.turnByHand (false, 0.6);
-            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.2f) < 0.011f, "and the other way round");
-            if (toneSync != nullptr)
-                toneSync->setToggleState (false, juce::sendNotificationSync);
+            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.5f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.5f) < 0.011f,
+                   "tone / space sync is gone: turning tone leaves space alone");
+            setParam (p, ParamIDs::toneSpaceSync, 0.0f);
 
             // Old presets and projects had one balance b: they load as tone 1 - b, space b.
             {
@@ -2313,7 +2300,7 @@ namespace
     // delete, randomizing the room and the menu geometry.
     void testRound6 (const juce::File& root)
     {
-        std::cout << "round 6: room artifacts / tune / imprint / packs / menus\n";
+        std::cout << "round 6/7: the room falling apart / pitch / mud / imprint / packs / menus\n";
         constexpr double sr = 48000.0;
         auto noiseOf = [] (int n, int seed, float level = 0.25f)
         {
@@ -2359,9 +2346,10 @@ namespace
             auto around = [] (const std::vector<float>& x, size_t i) { float m = 0; for (size_t k = i - 4; k <= i + 4; ++k) m = std::max (m, std::abs (x[k])); return m; };
             check (around (at160, click + period) > 0.05f && around (at100, click + period) == 0.0f,
                    "flutter echo: the room repeats at its own period (" + juce::String (around (at160, click + period), 3) + ")");
-            check (around (at160, click + 2 * period) > 0.01f, "flutter echo keeps bouncing");
-            const auto comb = (size_t) (0.0016 * sr);
-            check (around (at160, click + comb) > 0.1f, "close-wall comb: a near reflection right after the sound");
+            check (around (at160, click + period + (size_t) (0.025 * 1.071 * sr)) > 0.01f, "flutter echo keeps bouncing (left to right and back)");
+            float near = 0;
+            for (auto k = click + (size_t) (0.0008 * sr); k < click + (size_t) (0.0024 * sr); ++k) near = std::max (near, std::abs (at160[k]));
+            check (near > 0.1f, "close-wall comb: a near reflection right after the sound");
 
             // push: a bursty sound gets squeezed (crest factor down)
             std::vector<float> bursts ((size_t) sr * 3);
@@ -2381,9 +2369,9 @@ namespace
             bool finite = true;
             for (auto x : full) finite = finite && std::isfinite (x);
             const auto dIn = rmsOf (noise, (size_t) sr, noise.size()), dOut = rmsOf (full, (size_t) sr, full.size());
-            check (finite && std::abs (dOut - dIn) < 3.0, "the room artifacts keep the room's level (" + juce::String (dOut - dIn, 1) + " dB)");
-            check (room::RoomCharacter::ringAmount (0.0f) == 0.0f && room::RoomCharacter::ringAmount (0.5f) == 1.0f,
-                   "the room's notes ring from 100 % and are full at 140 %");
+            check (finite && dOut - dIn > -3.0 && dOut - dIn < 5.0, "the falling-apart room stays near the room's level (" + juce::String (dOut - dIn, 1) + " dB)");
+            check (room::RoomCharacter::ringAmount (0.0f) == 0.0f && room::RoomCharacter::ringAmount (0.4f) == 1.0f,
+                   "the room's notes ring from 100 % and are full at 130 %");
         }
 
         // --- The whole plugin at 100 / 140 / 180 %: different, finite, near the room's level ---
@@ -2392,49 +2380,101 @@ namespace
             setParam (rig.proc, ParamIDs::toneAmount, 0.6f);
             const auto in = noiseOf ((int) (0.6 * sr), 3);
             auto at = [&] (float v) { setParam (rig.proc, ParamIDs::intensity, v); rig.settle(); return rig.run (in, 1.5); };
-            const auto a = at (2.0f), b = at (2.8f), c = at (3.6f);
+            const auto a = at (2.0f), b = at (2.5f), c = at (3.5f);
             float d1 = 0, d2 = 0; bool finite = true;
             for (size_t i = 0; i < a.size(); ++i)
             {
                 d1 = std::max (d1, std::abs (b[i] - a[i])); d2 = std::max (d2, std::abs (c[i] - b[i]));
                 finite = finite && std::isfinite (b[i]) && std::isfinite (c[i]);
             }
-            check (finite && d1 > 0.01f && d2 > 0.01f, "140 % and 180 % each change the room");
-            const auto l100 = rmsDb (a, 0.0, 1.5), l180 = rmsDb (c, 0.0, 1.5);
-            check (std::abs (l180 - l100) < 6.0, "180 % stays near the room's level (" + juce::String (l180 - l100, 1) + " dB)");
+            check (finite && d1 > 0.01f && d2 > 0.01f, "125 % and 175 % each change the room");
+            // clearly audible: the difference from 100 % is within 6 dB of the room itself at 125 %
+            std::vector<float> diff (a.size());
+            for (size_t i = 0; i < a.size(); ++i) diff[i] = b[i] - a[i];
+            const auto l100 = rmsDb (a, 0.0, 1.5), lDiff = rmsDb (diff, 0.0, 1.5), l175 = rmsDb (c, 0.0, 1.5);
+            check (lDiff > l100 - 6.0, "at 125 % the room has clearly changed (difference " + juce::String (lDiff - l100, 1) + " dB of the room)");
+            float peak = 0; for (auto x : c) peak = std::max (peak, std::abs (x));
+            check (peak < 4.0f, "175 % stays bounded (peak " + juce::String (peak, 2) + ")");
+            check (std::abs (l175 - l100) < 8.0, "175 % stays near the room's level (" + juce::String (l175 - l100, 1) + " dB)");
         }
 
-        // --- Tune to key ---
+        // --- Pitch: dry in the middle, an octave either side; room only ---
         {
-            check (std::abs (room::snapToKey (446.0f, 9, 0) - 440.0f) < 0.01f, "tune: 446 Hz snaps to A in A major");
-            check (std::abs (room::snapToKey (277.2f, 0, 0) - 261.63f) < 0.1f || std::abs (room::snapToKey (277.2f, 0, 0) - 293.66f) < 0.1f,
-                   "tune: C# is not in C major (it goes to C or D)");
-            check (room::snapToKey (277.2f, -1, 0) == 277.2f, "tune off leaves a note alone");
-            Rig rig (root);
-            const auto a = rig.proc.getAnalysis();
-            const auto off = room::designTone (a, sr, 1.0f);
-            const auto tuned = room::designTone (a, sr, 1.0f, 2, 1);   // D minor
-            bool inKey = tuned.numResonators > 0;
-            static constexpr int dMinor[] = { 2, 4, 5, 7, 9, 10, 0 };
-            for (int k = 0; k < tuned.numResonators; ++k)
+            auto run = [&] (float amount)
             {
-                const auto midi = juce::roundToInt (69.0 + 12.0 * std::log2 (tuned.resonatorHz[k] / 440.0));
-                inKey = inKey && std::find (std::begin (dMinor), std::end (dMinor), ((midi % 12) + 12) % 12) != std::end (dMinor);
-            }
-            check (inKey, "tune: every one of the room's notes lands in D minor");
-            bool same = off.numResonators == room::designTone (a, sr, 1.0f, -1, 1).numResonators;
-            check (same, "tune off builds the room as before");
+                room::OctaveShift o;
+                o.prepare (sr, 2);
+                o.setAmount (amount);
+                std::vector<float> out;
+                for (int i = 0; i < (int) sr; ++i)
+                {
+                    const auto x = 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sr);
+                    float w[2] = { x, x };
+                    o.processSample (w, 2);
+                    out.push_back (w[0]);
+                }
+                return out;
+            };
+            const auto dry = run (0.0f);
+            bool same = true;
+            for (int i = 0; i < (int) sr; ++i)
+                same = same && dry[(size_t) i] == 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sr);
+            check (same, "pitch in the middle leaves the room untouched");
+            auto energyAt = [&] (const std::vector<float>& x, double hz)
+            {
+                double re = 0, im = 0;
+                for (size_t i = x.size() / 2; i < x.size(); ++i)
+                {
+                    re += x[i] * std::cos (juce::MathConstants<double>::twoPi * hz * (double) i / sr);
+                    im += x[i] * std::sin (juce::MathConstants<double>::twoPi * hz * (double) i / sr);
+                }
+                return re * re + im * im;
+            };
+            const auto up = run (1.0f), down = run (-1.0f);
+            check (energyAt (up, 440.0) > 4.0 * energyAt (up, 220.0), "pitch right: the room an octave up");
+            check (energyAt (down, 110.0) > 4.0 * energyAt (down, 220.0), "pitch left: the room an octave down");
+            check (room::Modulation::targetIndex (ParamIDs::pitch) >= 0, "an LFO can move pitch");
 
-            const auto in = noiseOf ((int) (0.5 * sr), 8);
-            setParam (rig.proc, ParamIDs::toneAmount, 1.0f);
+            // the dry sound stays in tune (room only): with no room mixed in, pitch changes nothing
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::mix, 0.0f);
             rig.settle();
-            const auto plain = rig.run (in, 0.5);
-            setParam (rig.proc, ParamIDs::tuneKey, 3.0f);   // D
+            const auto in = noiseOf ((int) (0.3 * sr), 6);
+            const auto plain = rig.run (in, 0.3);
+            setParam (rig.proc, ParamIDs::pitch, 1.0f);
             rig.settle();
-            const auto keyed = rig.run (in, 0.5);
-            float diff = 0;
-            for (size_t i = 0; i < plain.size(); ++i) diff = std::max (diff, std::abs (keyed[i] - plain[i]));
-            check (diff > 1e-4f, "choosing a key retunes the room");
+            const auto shifted = rig.run (in, 0.3);
+            float worst = 0;
+            for (size_t i = 0; i < plain.size(); ++i) worst = std::max (worst, std::abs (shifted[i] - plain[i]));
+            check (worst < 1e-5f, "pitch leaves the dry sound alone");
+        }
+
+        // --- Mud: off is untouched; on cuts 350 Hz ---
+        {
+            auto run = [&] (float amount, double hz)
+            {
+                room::MudCut m;
+                m.prepare (sr);
+                m.setAmount (amount);
+                juce::AudioBuffer<float> buf (2, 512);
+                double e = 0.0, eIn = 0.0;
+                for (int block = 0; block < 100; ++block)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const auto x = 0.3f * (float) std::sin (juce::MathConstants<double>::twoPi * hz * (block * 512 + i) / sr);
+                        buf.setSample (0, i, x); buf.setSample (1, i, x);
+                        if (block > 50) eIn += (double) x * x;
+                    }
+                    m.process (buf, 512);
+                    if (block > 50) for (int i = 0; i < 512; ++i) e += (double) buf.getSample (0, i) * buf.getSample (0, i);
+                }
+                return 10.0 * std::log10 (e / eIn);
+            };
+            check (run (0.0f, 350.0) == 0.0, "mud at 0 leaves the sound untouched");
+            const auto cut = run (1.0f, 350.0), far = run (1.0f, 3000.0);
+            check (cut < -5.0 && std::abs (far) < 1.0, "mud cuts the boxy 350 Hz (" + juce::String (cut, 1) + " dB) and leaves the top alone ("
+                                                     + juce::String (far, 1) + " dB)");
         }
 
         // --- Imprint ---
@@ -2699,7 +2739,7 @@ namespace
         // LFO panel chips
         {
             LfoModule module (p, 0);
-            module.setBounds (0, 0, 420, 150);
+            module.setBounds (0, 0, 420, 300);
             p.modulation.assign (0, M::targetIndex (ParamIDs::mix), 0.3f);
             const auto chips = module.targetChips();
             check (chips.size() == 2, "a chip per knob the LFO moves");
@@ -2897,8 +2937,19 @@ namespace
             }
         };
         findAndShow (ed);
+        if (mode == "lfo" || mode == "advlfo")
+        {
+            // a few LFO assignments, so the depth dots, arcs and chips show
+            using M = room::Modulation;
+            for (auto* id : { "size", "tape", "autoEq", "duck", "preDelay", "intensity" })
+                p.modulation.assign (0, M::targetIndex (id), 0.25f);
+            for (auto* id : { "tape", "mud", "damping" })
+                p.modulation.assign (1, M::targetIndex (id), -0.4f);
+        }
         if (mode == "lfo")
             ed.setAdvanced (true);
+        if (mode == "advlfo")
+            ed.setAdvancedOpen (true);
         if (mode == "advanced")
             ed.setAdvancedOpen (true);
         if (mode == "info")

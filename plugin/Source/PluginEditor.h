@@ -190,29 +190,6 @@ private:
     float activity = 1.0f;   // eased: how much the noise is playing now (follow and stop), 0..1
 };
 
-/** TUNE: the room's key on a small glass readout ("D MIN", "OFF"), arrows either side
-    step through the keys, a click lists them; the key beside it picks the scale. */
-class TuneScreen : public juce::Component,
-                   public juce::SettableTooltipClient,
-                   private juce::Timer
-{
-public:
-    explicit TuneScreen (RoomAudioProcessor&);
-    void paint (juce::Graphics&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-    void step (int delta);
-    void stepScale();
-    void showMenu();
-    static juce::String scaleShort (int scale);
-    juce::TextButton prev { {} }, next { {} };
-    juce::TextButton scaleKey { "maj" };
-
-private:
-    void timerCallback() override;
-    RoomAudioProcessor& proc;
-    int shownKey = -1, shownScale = -1;
-};
-
 /** The first-run tour: dims the window, lights up one area at a time and
     explains it on a small card (back / next / skip). */
 class TourOverlay : public juce::Component
@@ -393,16 +370,15 @@ private:
     const juce::Rectangle<float> cellSize { 724.0f, 396.0f, 156.0f, 124.0f };
     // Row 2: smooth | glitch (glitch + sync) | amount, and the auto key on its own
     const juce::Rectangle<float> cellSmooth { 12.0f, 540.0f, 80.0f, 60.0f };
-    const juce::Rectangle<float> cellGlitch { 112.0f, 540.0f, 144.0f, 60.0f };
-    const juce::Rectangle<float> cellAmount { 276.0f, 540.0f, 76.0f, 60.0f };
-    const juce::Rectangle<float> autoKeyArea { 392.0f, 556.0f, 64.0f, 28.0f };
-    // ... and under tail / size: tune (the room's notes in a key) | imprint (the sound takes the room's timbre)
-    const juce::Rectangle<float> cellTune { 554.0f, 540.0f, 154.0f, 60.0f };
-    const juce::Rectangle<float> cellImprint { 724.0f, 540.0f, 156.0f, 60.0f };
+    const juce::Rectangle<float> cellImprint { 112.0f, 540.0f, 110.0f, 60.0f };
+    const juce::Rectangle<float> cellPitch { 242.0f, 540.0f, 110.0f, 60.0f };
+    const juce::Rectangle<float> autoKeyArea { 392.0f, 556.0f, 64.0f, 36.0f };   // the bottom 8 px: room for the lit glow
+    // ... and under tail / size: the glitch module (light: it's something else entirely)
+    const juce::Rectangle<float> glitchModule { 554.0f, 540.0f, 326.0f, 60.0f };
     // Row 3: noise | level over follow | the stop key on its own | rate
     const juce::Rectangle<float> cellNoise { 12.0f, 616.0f, 346.0f, 144.0f };
     const juce::Rectangle<float> cellLevel { 378.0f, 616.0f, 122.0f, 144.0f };
-    const juce::Rectangle<float> stopKeyArea { 516.0f, 672.0f, 56.0f, 32.0f };
+    const juce::Rectangle<float> stopKeyArea { 516.0f, 672.0f, 56.0f, 40.0f };   // the bottom 8 px: room for the lit glow
     const juce::Rectangle<float> cellRate { 592.0f, 616.0f, 288.0f, 144.0f };
     static constexpr float knobRowY = 82.0f;   // row 1 knobs: their centre below the cell's top
     const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
@@ -430,21 +406,20 @@ private:
     ToneScreen toneScreen { proc };
 
     // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
-    Knob intensity, smooth, glitchAmount, tone, space, tail, size, imprint;
-    TuneScreen tuneScreen { proc };
+    Knob intensity, smooth, glitchAmount, tone, space, tail, size, imprint, pitch;
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
-    juce::ToggleButton glitchKey { "glitch" };
+    juce::ToggleButton glitchKey { "on" };   // in the glitch module, so just "on"
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> glitchAttachment;
-    SyncDot syncDot, toneSync;   // glitch in time; tone and space move opposite
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment, toneSyncAttachment;
-    double lastTone = 0.5, lastSpace = 0.5;   // for moving the other one while synced
-    void syncToneSpace (bool fromTone, bool byHand);
+    SyncDot syncDot;   // glitch in time
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
 public:
     /** Turn tone (or space) as a hand on the knob would (tests). */
     void turnByHand (bool toneKnob, double value);
 private:
     void paintSignalLines (juce::Graphics&);
+    void paintPaper (juce::Graphics&, juce::Rectangle<float>, float corner);
+    void paintGlitchModule (juce::Graphics&);
     /** The knob's centre in base coordinates (what the signal lines join). */
     static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }
     static float knobRadius (const Knob& k) { return (float) k.slider.getProperties()["knobRadius"]; }

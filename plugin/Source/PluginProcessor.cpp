@@ -129,8 +129,8 @@ RoomAudioProcessor::RoomAudioProcessor()
     rateNoiseParam   = apvts.getRawParameterValue (ParamIDs::rateNoise);
     smoothParam      = apvts.getRawParameterValue (ParamIDs::smooth);
     imprintParam     = apvts.getRawParameterValue (ParamIDs::imprint);
-    tuneKeyParam     = apvts.getRawParameterValue (ParamIDs::tuneKey);
-    tuneScaleParam   = apvts.getRawParameterValue (ParamIDs::tuneScale);
+    pitchParam       = apvts.getRawParameterValue (ParamIDs::pitch);
+    mudParam         = apvts.getRawParameterValue (ParamIDs::mud);
     noise.setBank (&noiseBank.get());
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
 
@@ -142,7 +142,7 @@ RoomAudioProcessor::RoomAudioProcessor()
     }
 
     // These reshape the room, so the IR is rebuilt when they move.
-    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping, ParamIDs::tuneKey, ParamIDs::tuneScale })
+    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
         apvts.addParameterListener (id, this);
 
     // Report the Auto EQ latency from the start (prepareToPlay refines it for
@@ -181,7 +181,7 @@ void RoomAudioProcessor::licenseChanged()
 RoomAudioProcessor::~RoomAudioProcessor()
 {
     licensing->removeChangeListener (&licenseWatch);
-    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping, ParamIDs::tuneKey, ParamIDs::tuneScale })
+    for (auto* id : { ParamIDs::intensity, ParamIDs::tail, ParamIDs::size, ParamIDs::damping })
         apvts.removeParameterListener (id, this);
     worker.reset();
 }
@@ -329,13 +329,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::smooth, 1 }, "Smooth",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
-    // Tune to key (the room's notes snap to a key) and Imprint (the sound takes on the room's timbre)
-    {
-        StringArray keys { "Off", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::tuneKey, 1 }, "Tune Key", keys, 0));
-        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::tuneScale, 1 }, "Tune Scale",
-                                                            StringArray { "Major", "Minor", "Chromatic" }, 0));
-    }
+    // Pitch: an octave down (left) or up (right) blended into the room; the middle is the room as is
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::pitch, 1 }, "Pitch",
+        NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        {
+            if (std::abs (v) < 0.005f) return String ("dry");
+            return String (v > 0 ? "+1 oct " : "-1 oct ") + String (juce::roundToInt (std::abs (v) * 100.0f)) + "%";
+        })));
+    // Mud (Advanced): tames the boxy low mids
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::mud, 1 }, "Mud",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::imprint, 1 }, "Imprint",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
@@ -402,6 +408,7 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     noiseBuf.setSize (2, std::max (1, samplesPerBlock));
     roomMic.prepare (sampleRate);
     imprint.prepare (sampleRate, std::max (2, getTotalNumOutputChannels()));
+    mudCut.prepare (sampleRate);
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -530,6 +537,7 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             fx.character = juce::jlimit (0.0f, 1.0f, (in - maxRoomIntensity) / (characterTopIntensity - maxRoomIntensity));
             fx.extreme = juce::jlimit (0.0f, 1.0f, (in - characterTopIntensity) / (4.0f - characterTopIntensity));
         }
+        fx.pitch = eff (ParamIDs::pitch, pitchParam);
         fx.stutter = glitchParam->load() > 0.5f;
         fx.glitchAmount = eff (ParamIDs::glitchAmount, glitchAmountParam);
         fx.glitchSync = glitchSyncParam->load() > 0.5f;
@@ -583,6 +591,8 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
         static const room::EqBand flat[room::tone::numEqBands] = {};   // the eq is gone: tape only
         toneShaper.process (part, eff (ParamIDs::tape, tapeParam), flat);
+        mudCut.setAmount (eff (ParamIDs::mud, mudParam));
+        mudCut.process (part, len);
         suppressor.process (part, eff (ParamIDs::autoEq, autoEqParam));
         stereoWidth.process (part, eff (ParamIDs::space, spaceParam));
 
@@ -964,9 +974,7 @@ void RoomAudioProcessor::rebuildRoom()
                                                       intensity, size, damping));
     const auto irSeconds = std::min (tail, longest + 0.1f);
 
-    const auto key = juce::roundToInt (tuneKeyParam->load()) - 1;   // 0 = Off
-    const auto tone = room::designTone (a, sr, std::min (intensity, maxRoomIntensity), key,
-                                        juce::roundToInt (tuneScaleParam->load()), size);
+    const auto tone = room::designTone (a, sr, std::min (intensity, maxRoomIntensity), size);
     imprint.setProfile (room::Imprint::makeProfile (a, tone));
     engine.submitRoom (room::synthesizeIR (a, sr, irSeconds, intensity, 0, size, damping), sr, tone);
 }

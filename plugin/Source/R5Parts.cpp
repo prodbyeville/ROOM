@@ -162,9 +162,10 @@ void drawKey (juce::Graphics& g, juce::Rectangle<float> b, KeyKind kind, const j
     auto full = Hw::asset (name);
     const auto key = b.translated (0.0f, down ? 1.0f : 0.0f);
 
-    // lit: one soft red glow spilling out from under the key (round falloff, no edges)
+    // lit: one soft red glow spilling out from under the key, fading to nothing well inside
+    // the button's own bounds (the caller leaves `glowRoom` below the key), so it never clips
     if (on)
-        softGlow (g, { key.getCentreX(), key.getBottom() + 1.0f }, key.getWidth() * 0.46f, 7.0f, 0.55f);
+        softGlow (g, { key.getCentreX(), key.getBottom() - 1.0f }, key.getWidth() * 0.42f, 7.0f, 0.5f);
 
     if (full.isValid())
     {

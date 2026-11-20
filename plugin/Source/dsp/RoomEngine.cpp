@@ -38,6 +38,7 @@ void RoomEngine::prepare (double sr, int maxBlockSize, int numChannels)
     preDelaySm.reset (sr, 0.1);
     wetFx.prepare (sr, numChans);
     character.prepare (sr, numChans);
+    octave.prepare (sr, numChans);
     rateDry.prepare (sr);
     rateWet.prepare (sr);
 
@@ -64,7 +65,10 @@ void RoomEngine::reset()
     duckEnv = 0.0f;
     wetFx.reset();
     character.reset();
+    octave.reset();
     ringNow = 0.0f;
+    for (auto& f : ringFeedback) f = 0.0f;
+    wobbleNow = wobbleTarget = 0.0f;
     frozenActive = false;
     freezeMix.setCurrentAndTargetValue (0.0f);
 }
@@ -190,24 +194,51 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
     }
 
     // --- 1. tonal path: EQ in series, then resonators added in parallel ------
-    // Intensity 100..140 %: the room's notes ring louder (x4) and longer (Q x2), eased per block.
+    // Intensity 100..130 %: the room's notes ring 12x louder and 4x longer, feed back into
+    // themselves (bounded) and drift in pitch; eased per block.
     {
         const auto target = RoomCharacter::ringAmount (fx.character);
         ringNow += (target - ringNow) * (float) std::min (1.0, n / (0.05 * sampleRate));
         if (target <= 0.0f && ringNow < 1.0e-4f)
+        {
             ringNow = 0.0f;
+            for (auto& f : ringFeedback) f = 0.0f;
+            wobbleNow = 0.0f;
+        }
     }
     BiquadCoeffs ringCoeffs[ToneSettings::maxResonators];
     float ringExtra[ToneSettings::maxResonators];
     auto tonalGain = tone.tonalGain;
+    if (ringNow > 0.0f)
+    {
+        // a slow random drift: the walls bend (up to +/- 30 cents)
+        if ((wobbleWait -= n) <= 0)
+        {
+            wobbleTarget = rng.nextFloat() * 2.0f - 1.0f;
+            wobbleWait = (int) ((0.25 + 0.5 * rng.nextDouble()) * sampleRate);
+        }
+        wobbleNow += (wobbleTarget - wobbleNow) * (float) std::min (1.0, n / (0.3 * sampleRate));
+    }
+    const auto wobble = std::pow (2.0f, wobbleNow * ringNow * 30.0f / 1200.0f);
     for (int k = 0; k < tone.numResonators; ++k)
     {
-        ringCoeffs[k] = ringNow > 0.0f ? design::resonator (tone.resonatorHz[k], tone.resonatorQ[k] * (1.0f + ringNow), sampleRate)
+        ringCoeffs[k] = ringNow > 0.0f ? design::resonator (std::min (0.45 * sampleRate, (double) (tone.resonatorHz[k] * wobble)),
+                                                            tone.resonatorQ[k] * (1.0f + 3.0f * ringNow), sampleRate)
                                        : tone.resonator[k];
-        ringExtra[k] = tone.resonatorExtra[k] * (1.0f + 3.0f * ringNow);
+        ringExtra[k] = tone.resonatorExtra[k] * (1.0f + 11.0f * ringNow);
     }
     if (ringNow > 0.0f)
         tonalGain = tone.tonalGain * std::pow (tone.tonalGainRing / std::max (1.0e-6f, tone.tonalGain), ringNow);
+    // the feedback is scaled so the loop never reaches unity at the strongest note: the notes
+    // sustain like metal but don't run away (and tanh bounds them anyway)
+    auto ringFb = 0.0f;
+    if (ringNow > 0.0f)
+    {
+        float strongest = 1.0e-3f;
+        for (int k = 0; k < tone.numResonators; ++k)
+            strongest = std::max (strongest, ringExtra[k] * tonalGain);
+        ringFb = 0.85f * ringNow / std::max (1.0f, strongest);
+    }
 
     for (int ch = 0; ch < chans; ++ch)
     {
@@ -222,8 +253,21 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
             for (int k = 0; k < tone.numEq; ++k)
                 x = eq[ch][k].process (x);
             double y = x;
-            for (int k = 0; k < tone.numResonators; ++k)
-                y += ringExtra[k] * res[ch][k].process (x);
+            if (ringNow > 0.0f)
+            {
+                // the ringing notes feed back into themselves: metal that keeps singing
+                const auto drive = x + ringFb * ringFeedback[ch];
+                double rings = 0.0;
+                for (int k = 0; k < tone.numResonators; ++k)
+                    rings += ringExtra[k] * res[ch][k].process (drive);
+                ringFeedback[ch] = std::tanh ((float) (rings * tonalGain));
+                y += rings;
+            }
+            else
+            {
+                for (int k = 0; k < tone.numResonators; ++k)
+                    y += ringExtra[k] * res[ch][k].process (x);
+            }
             out[i] = (float) (y * tonalGain);
         }
     }
@@ -288,6 +332,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
     const auto wetFxOn = ! wetFx.isIdle() || fx.extreme > 0.0f || fx.stutter;
     character.setAmount (fx.character);
     const auto characterOn = ! character.isIdle() || fx.character > 0.0f;
+    octave.setAmount (fx.pitch);
+    const auto octaveOn = ! octave.isIdle() || fx.pitch != 0.0f;
     const auto rateDryOn = fx.rateDry && ! rateDry.settledOff (fx.rateHz);
     const auto rateWetOn = fx.rateWet && ! rateWet.settledOff (fx.rateHz);
     if (! fx.rateDry) rateDry.reset();
@@ -309,6 +355,8 @@ void RoomEngine::process (juce::AudioBuffer<float>& buffer, float toneAmount, fl
         float wets[2] {};
         for (int ch = 0; ch < chans; ++ch)
             wets[ch] = tAmt * tonalBuf.getSample (ch, i) + sAmt * kSpatialGain * spatialBuf.getSample (ch, i);
+        if (octaveOn)
+            octave.processSample (wets, chans);
         if (characterOn)
             character.processSample (wets, chans);
         if (wetFxOn)
