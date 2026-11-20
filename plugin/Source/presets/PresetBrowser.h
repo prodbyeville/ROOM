@@ -1,4 +1,5 @@
 #pragma once
+#include "../RoomMenu.h"
 
 #include "../PluginProcessor.h"
 
@@ -91,7 +92,7 @@ private:
     juce::TextEditor name, notes, newPackName;
     ChipGroup types;    // ROOMS: Type (pick one)   STUDIOS: Made for (pick any)
     ChipGroup styles;   // ROOMS: Character         STUDIOS: Style
-    juce::ComboBox pack;
+    RoomComboBox pack;
     juce::TextButton saveButton { "Save" }, cancelButton { "Cancel" };
 };
 

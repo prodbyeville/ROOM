@@ -78,3 +78,29 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RoomMenu)
 };
+
+/** A ComboBox whose list opens as a RoomMenu (the same look as every other menu), not
+    JUCE's own popup. Drop-in: items, ids, attachments and onChange all work as usual. */
+class RoomComboBox : public juce::ComboBox
+{
+public:
+    using juce::ComboBox::ComboBox;
+    void showPopup() override
+    {
+        juce::PopupMenu m;
+        const auto current = getSelectedId();
+        for (int i = 0; i < getNumItems(); ++i)
+        {
+            const auto id = getItemId (i);
+            if (id == 0)
+                continue;
+            m.addItem (getItemText (i), isItemEnabled (id), id == current,
+                       [safe = juce::Component::SafePointer<juce::ComboBox> (this), id]
+                       {
+                           if (safe != nullptr)
+                               safe->setSelectedId (id, juce::sendNotificationAsync);
+                       });
+        }
+        RoomMenu::show (m, *this);
+    }
+};

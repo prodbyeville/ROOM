@@ -43,6 +43,8 @@ public:
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
+    /** True while the room box shows its numbers: the near cards then go under them. */
+    std::function<bool()> isInfoShowing;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override { hoverKey.clear(); repaint(); }
@@ -418,7 +420,11 @@ public:
     void turnByHand (bool toneKnob, double value);
 private:
     void paintSignalLines (juce::Graphics&);
+    void showSupport (const juce::String& version);
     void paintPaper (juce::Graphics&, juce::Rectangle<float>, float corner);
+    void paintPaper (juce::Graphics&, const juce::Path& shape);
+    /** The light module's top part: space, tail and size (glitchModule hangs off its right side). */
+    juce::Rectangle<float> lightTop() const { return cellSpace.getUnion (cellSize).expanded (4.0f, 6.0f).withRight (cellSize.getRight()); }
     void paintGlitchModule (juce::Graphics&);
     /** The knob's centre in base coordinates (what the signal lines join). */
     static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }

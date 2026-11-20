@@ -38,5 +38,6 @@ namespace R5
     /** Uppercase Satoshi label and its value, centred over x (the cells' titles). */
     void drawLabel (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 10.5f, float alpha = 0.92f,
                     bool ink = false);
-    void drawValue (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 16.0f, float alpha = 1.0f);
+    void drawValue (juce::Graphics&, const juce::String& text, juce::Point<float> centre, float height = 16.0f, float alpha = 1.0f,
+                    bool ink = false);
 }

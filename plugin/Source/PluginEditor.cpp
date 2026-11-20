@@ -276,7 +276,9 @@ void LoadScreen::paintCards (juce::Graphics& g, bool front)
 
 void LoadScreen::paintOverChildren (juce::Graphics& g)
 {
-    paintCards (g, true);
+    // the near cards go over the box, except while its numbers are up (then they go under them)
+    if (! (isInfoShowing && isInfoShowing()))
+        paintCards (g, true);
     if (! hovering)
         return;
     // A file over the stage: a dark veil, a red dashed outline, what happens on drop.
@@ -338,6 +340,8 @@ void LoadScreen::paint (juce::Graphics& g)
     // The far half of the ring goes behind the room box; the near half is drawn over it
     // (paintOverChildren), solid, so the box disappears behind the cards.
     paintCards (g, false);
+    if (isInfoShowing && isInfoShowing())
+        paintCards (g, true);
 
     // A standing hint: the whole stage takes audio.
     if (status != RoomAudioProcessor::Status::empty)
@@ -398,6 +402,9 @@ RoomScreen::RoomScreen (RoomAudioProcessor& p) : proc (p)
 void RoomScreen::setShowInfo (bool s)
 {
     showInfo = s;
+    // The cards float over the box; its numbers come up over the cards so they can be read.
+    if (auto* p = getParentComponent())
+        p->repaint();
     repaint();
 }
 
@@ -594,7 +601,26 @@ void RoomScreen::paintInfo (juce::Graphics& g, juce::Rectangle<float> glass)
         return;
     }
     const auto lean = analysis.balance > 0.6f ? "spatial" : analysis.balance < 0.4f ? "tonal" : "in between";
-    line ("source", lower (analysis.sourceName));
+    {
+        // timbre: the room's colour, from its tone curve (highs against lows, then the low mids)
+        auto at = [this] (float hz)
+        {
+            const auto& f = analysis.toneFreqsHz;
+            const auto& d = analysis.toneCurveDb;
+            if (f.empty() || f.size() != d.size()) return 0.0f;
+            size_t k = 0;
+            while (k + 1 < f.size() && f[k + 1] < hz) ++k;
+            return d[k];
+        };
+        const auto tilt = (at (4000.0f) + at (8000.0f)) * 0.5f - (at (125.0f) + at (250.0f)) * 0.5f;
+        const auto box = at (400.0f) - (at (125.0f) + at (2000.0f)) * 0.5f;
+        juce::StringArray words;
+        words.add (tilt > 6.0f ? "bright" : tilt < -6.0f ? "dark" : "even");
+        if (box > 3.0f) words.add ("boxy");
+        else if (at (250.0f) > at (2000.0f) + 3.0f) words.add ("warm");
+        if (! analysis.peaks.empty() && analysis.peaks.front().gainDb > 15.0f) words.add ("ringing");
+        line ("timbre", words.joinIntoString (", "));
+    }
     line ("length", juce::String (analysis.durationS, 2) + " s" + (analysis.steady ? " (steady)" : " (a hit)"));
     line ("balance", juce::String (analysis.balance, 2) + " " + lean);
     line ("decay", analysis.steady ? juce::String ("none (estimated)") : juce::String (analysis.medianT60, 2) + " s median");
@@ -1534,13 +1560,14 @@ void AboutOverlay::paint (juce::Graphics& g)
         { "make a room", "drop any audio on the stage (a clap in a stairwell, a voice memo, a tap on a glass) or press record and "
                          "play into the track. room measures how it decays in every band, the tone it puts on things and the notes "
                          "that ring. the cards are your rooms: click one to load it." },
-        { "shape it", "intensity is how much of the room you hear, and glitch stutters it more as intensity goes up. tone and space "
-                      "lean to the room's colour or its sense of space. tail sets how long it rings, size how big the room is." },
-        { "texture it", "noise lays a texture under the room (vinyl, tape hiss, air, room tone), playing all the time or following "
-                        "your sound. rate crushes the room's sample rate. advanced has pre-delay, width, damping, ducking, freeze, "
-                        "tape, auto eq, a five-band eq and two lfos you can drag onto any knob." },
+        { "shape it", "intensity is how much of the room you hear; past 100 it falls apart, past 175 it sings. tone and space "
+                      "lean to the room's colour or its decay, tail sets how long it rings, size how big it is. imprint gives your "
+                      "sound the room's timbre, pitch blends an octave into the room, glitch stutters it." },
+        { "texture it", "noise lays a texture under the room (54 of them, from vinyl to waves), playing all the time or following "
+                        "your sound. rate takes the sample rate down. advanced has pre-delay, damping, width, ducking, freeze, "
+                        "the finish box (tape, auto eq, mud) and two lfos you can drag onto any knob." },
         { "keep it", "a ROOM is just the space. a STUDIO is the whole sound: the room, every knob and the lfos. both have packs, "
-                     "favourites and tags." },
+                     "favourites and tags, and the whole eville library comes built in." },
     };
     for (auto& [title, text] : sections)
     {
@@ -1628,6 +1655,7 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     loadScreen.addAndMakeVisible (allRoomsButton);   // on the stage, so drops over it still reach the stage
     allRoomsButton.onClick = [this] { roomBrowser.setVisible (true); roomBrowser.toFront (true); };
     loadScreen.onLoadRoom = [this] (const juce::String& key) { loadRoom (key); };
+    loadScreen.isInfoShowing = [this] { return roomScreen.isShowingInfo(); };
     loadScreen.addAndMakeVisible (roomScreen);   // on the stage, so drops over it still reach the stage
     content.addAndMakeVisible (toneScreen);
 
@@ -1669,7 +1697,8 @@ RoomAudioProcessorEditor::RoomAudioProcessorEditor (RoomAudioProcessor& p)
     tone.slider.textFromValueFunction = autoText (true);
     space.slider.textFromValueFunction = autoText (false);
 
-    glitchAmount.slider.getProperties().set ("surface", "light");   // it sits on the light glitch module
+    for (auto* k : { &glitchAmount, &space, &tail, &size })
+        k->slider.getProperties().set ("surface", "light");   // on the light module
     glitchKey.getProperties().set ("r5key", "black");
     glitchKey.setTooltip ("stutters the room");
     content.addAndMakeVisible (glitchKey);
@@ -1905,10 +1934,7 @@ void RoomAudioProcessorEditor::showMainMenu()
             });
         });
     m.addItem ("visit website", [] { juce::URL (UpdateChecker::websiteUrl).launchInDefaultBrowser(); });
-    m.addItem ("get support", [version]
-    {
-        LicenseManager::emailSupport ("room v" + version);
-    });
+    m.addItem ("get support", [this, version] { showSupport (version); });
     m.addItem (juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), [this] { showAbout(); });
     m.addSeparator();
     auto& license = proc.getLicensing();
@@ -1919,6 +1945,20 @@ void RoomAudioProcessorEditor::showMainMenu()
     }
     m.addItem ("room v" + version, false, false, nullptr);
     EvilleLookAndFeel::showMenu (m, menuButton);
+}
+
+void RoomAudioProcessorEditor::showSupport (const juce::String& version)
+{
+    // The support page: the address, copy it or open an email to it
+    const juce::String email = UpdateChecker::supportEmail;
+    EvilleLookAndFeel::showDialog (content, "get support",
+                                   "email us at " + email + ". tell us your daw, your computer and what happened.",
+                                   { "copy email", "open email app", "close" }, {},
+                                   [email, version] (int r, const juce::String&)
+                                   {
+                                       if (r == 1) juce::SystemClipboard::copyTextToClipboard (email);
+                                       if (r == 2) LicenseManager::emailSupport ("room v" + version);
+                                   });
 }
 
 bool RoomAudioProcessorEditor::overlayShowing() const
@@ -2121,10 +2161,9 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
 {
     // The near-black brushed case; every control sits in its own pocket (cell).
     R5::drawCase (g, { 0.0f, 0.0f, (float) contentWidth(), (float) baseHeight });
-    for (auto cell : { cellIntensity, cellTone, cellSpace, cellTail, cellSize, cellSmooth, cellImprint, cellPitch,
-                       cellNoise, cellLevel, cellRate })
+    for (auto cell : { cellIntensity, cellTone, cellSmooth, cellImprint, cellPitch, cellNoise, cellLevel, cellRate })
         R5::drawCell (g, cell);
-    paintGlitchModule (g);
+    paintGlitchModule (g);   // the light module: space, tail and size, with glitch hanging off it
     if (proc.advancedOpen)
     {
         // Advanced is the opposite of the case: a light module, ink text, the same knobs.
@@ -2135,34 +2174,60 @@ void RoomAudioProcessorEditor::paintUnit (juce::Graphics& g)
 
 void RoomAudioProcessorEditor::paintPaper (juce::Graphics& g, juce::Rectangle<float> r, float corner)
 {
+    juce::Path shape;
+    shape.addRoundedRectangle (r, corner);
+    paintPaper (g, shape);
+}
+
+void RoomAudioProcessorEditor::paintPaper (juce::Graphics& g, const juce::Path& shape)
+{
     // A light module: warm off-white paper with a faint grain, a soft drop and a lit rim.
+    const auto r = shape.getBounds();
     for (int i = 3; i >= 1; --i)
     {
         g.setColour (juce::Colours::black.withAlpha (0.2f));
-        g.fillRoundedRectangle (r.expanded ((float) i * 0.8f).translated (0.0f, (float) i * 0.8f), corner + (float) i);
+        juce::Path drop (shape);
+        drop.applyTransform (juce::AffineTransform::translation (0.0f, (float) i * 0.8f));
+        g.strokePath (drop, juce::PathStrokeType ((float) i * 1.6f));
+        g.fillPath (drop);
     }
     juce::ColourGradient paper (juce::Colour (0xffefebe2), r.getX(), r.getY(), juce::Colour (0xffe2ddd2), r.getX(), r.getBottom(), false);
     g.setGradientFill (paper);
-    g.fillRoundedRectangle (r, corner);
+    g.fillPath (shape);
     if (auto grain = Hw::grain ((int) r.getWidth(), (int) r.getHeight(), false); grain.isValid())
     {
         juce::Graphics::ScopedSaveState save (g);
-        juce::Path shape;
-        shape.addRoundedRectangle (r, corner);
         g.reduceClipRegion (shape);
         g.setOpacity (0.35f);
         g.drawImageAt (grain, (int) r.getX(), (int) r.getY());
     }
     juce::ColourGradient rim (juce::Colours::white.withAlpha (0.7f), r.getX(), r.getY(), juce::Colours::black.withAlpha (0.12f), r.getX(), r.getBottom(), false);
     g.setGradientFill (rim);
-    g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+    g.strokePath (shape, juce::PathStrokeType (1.0f));
 }
 
 void RoomAudioProcessorEditor::paintGlitchModule (juce::Graphics& g)
 {
-    // Glitch is something else entirely: a light module, no signal lines into it.
+    // One light module: space, tail and size along the top, glitch hanging off its right side
+    // below (an upside-down L), like the advanced panel: ink text, light knobs, no cells.
+    const auto top = lightTop(), bottom = glitchModule;
+    juce::Path outline;
+    outline.startNewSubPath (top.getX(), top.getY());
+    outline.lineTo (top.getRight(), top.getY());
+    outline.lineTo (top.getRight(), bottom.getBottom());
+    outline.lineTo (bottom.getX(), bottom.getBottom());
+    outline.lineTo (bottom.getX(), top.getBottom());
+    outline.lineTo (top.getX(), top.getBottom());
+    outline.closeSubPath();
+    paintPaper (g, outline.createPathWithRoundedCorners (9.0f));
+
+    // hairlines between space | tail | size, and across above glitch
+    g.setColour (juce::Colour (0xff1b1a18).withAlpha (0.14f));
+    for (auto x : { (cellSpace.getRight() + cellTail.getX()) * 0.5f, (cellTail.getRight() + cellSize.getX()) * 0.5f })
+        g.drawLine (x, top.getY() + 16.0f, x, top.getBottom() - 14.0f, 1.0f);
+    g.drawLine (bottom.getX() + 16.0f, bottom.getY() - 4.0f, bottom.getRight() - 16.0f, bottom.getY() - 4.0f, 1.0f);
+
     const auto r = glitchModule;
-    paintPaper (g, r, 8.0f);
     R5::drawLabel (g, "glitch", { r.getX() + 22.0f + 69.0f, r.getY() + 12.0f }, 9.0f, 0.9f, true);
     R5::drawLabel (g, "amount", { r.getRight() - 44.0f - 62.0f, r.getY() + 38.0f }, 9.0f, 0.9f, true);
     g.setColour (juce::Colour (0xff1b1a18).withAlpha (0.18f));
@@ -2189,9 +2254,10 @@ void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
         g.drawLine (x, 24.0f, x, 52.0f, 1.0f);
 
     // The cells' titles (the values are drawn live, in paintValues)
-    auto title = [&g] (const char* text, juce::Rectangle<float> cell, float dy, float height = 10.5f)
+    auto title = [&g, this] (const char* text, juce::Rectangle<float> cell, float dy, float height = 10.5f)
     {
-        R5::drawLabel (g, text, { cell.getCentreX(), cell.getY() + dy }, height);
+        const auto ink = lightTop().contains (cell.getCentre());   // on the light module
+        R5::drawLabel (g, text, { cell.getCentreX(), cell.getY() + dy }, height, 0.92f, ink);
     };
     title ("intensity", cellIntensity, 17.0f);
     title ("tone", cellTone, 17.0f);
@@ -2243,14 +2309,13 @@ void RoomAudioProcessorEditor::paintSignalLines (juce::Graphics& g)
     {
         const auto x = cellSpace.getCentreX() + 27.0f;
         const auto y = autoKeyArea.withTrimmedBottom (R5::glowRoom).getCentreY();
-        R5::drawRoute (g, { { x, cellSpace.getBottom() + gap }, { x, y }, { autoKeyArea.getRight() + 5.0f, y } },
+        R5::drawRoute (g, { { x, lightTop().getBottom() + gap }, { x, y }, { autoKeyArea.getRight() + 5.0f, y } },
                        Stroke::dottedRed, End::none, End::dot);
     }
     // tone -> space -> tail -> size, level with the knobs (sync sits on the tone -> space link)
     {
         const auto y = cellTone.getY() + knobRowY;
-        for (auto [a, b] : { std::pair { cellTone, cellSpace }, { cellSpace, cellTail }, { cellTail, cellSize } })
-            R5::drawRoute (g, { { a.getRight() + gap, y }, { b.getX() - gap, y } }, Stroke::solid, End::none, End::none);
+        R5::drawRoute (g, { { cellTone.getRight() + gap, y }, { lightTop().getX() - gap, y } }, Stroke::solid, End::none, End::none);
     }
     // noise -> level / follow -> stop
     {
@@ -2263,9 +2328,9 @@ void RoomAudioProcessorEditor::paintSignalLines (juce::Graphics& g)
 void RoomAudioProcessorEditor::paintValues (juce::Graphics& g)
 {
     // The values, live (they follow the LFOs too), printed under each cell's title
-    auto value = [&g] (const juce::String& text, juce::Rectangle<float> cell, float dy = 35.0f, float height = 16.0f)
+    auto value = [&g, this] (const juce::String& text, juce::Rectangle<float> cell, float dy = 35.0f, float height = 16.0f)
     {
-        R5::drawValue (g, text, { cell.getCentreX(), cell.getY() + dy }, height);
+        R5::drawValue (g, text, { cell.getCentreX(), cell.getY() + dy }, height, 1.0f, lightTop().contains (cell.getCentre()));
     };
     value (juce::String (juce::roundToInt (intensity.slider.getValue() * 50.0)) + "%", cellIntensity);
 

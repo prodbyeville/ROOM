@@ -290,10 +290,10 @@ void drawLabel (juce::Graphics& g, const juce::String& text, juce::Point<float> 
                 juce::Justification::centred, false);
 }
 
-void drawValue (juce::Graphics& g, const juce::String& text, juce::Point<float> c, float height, float alpha)
+void drawValue (juce::Graphics& g, const juce::String& text, juce::Point<float> c, float height, float alpha, bool ink)
 {
     g.setFont (Fonts::sans (height, Fonts::medium).withExtraKerningFactor (0.03f));
-    g.setColour (juce::Colour (0xfff5f3ef).withAlpha (alpha));
+    g.setColour ((ink ? juce::Colour (0xff1b1a18) : juce::Colour (0xfff5f3ef)).withAlpha (alpha));
     g.drawText (text, juce::Rectangle<float> (200.0f, height * 1.5f).withCentre (c), juce::Justification::centred, false);
 }
 }

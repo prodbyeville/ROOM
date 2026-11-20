@@ -1088,6 +1088,37 @@ void PresetBrowser::showRowMenu (int row)
             m.addSubMenu ("quick select slot", slots);
         }
     }
+    {
+        // Move (your own) or copy (any) into another pack
+        juce::PopupMenu moveTo, copyTo;
+        for (const auto& pk : lib().getPacks())
+        {
+            if (pk == room::presets::PresetLibrary::factoryPack || pk == e.pack)
+                continue;
+            moveTo.addItem (pk.toLowerCase(), [this, key, pk]
+            {
+                if (auto* x = lib().find (key))
+                {
+                    juce::String newKey, err;
+                    if (lib().updateMeta (key, x->meta, pk, newKey, err)) { selectedKey = newKey; refresh(); }
+                    else EvilleLookAndFeel::showDialog (*this, "couldn't move it", err.toLowerCase(), { "ok" });
+                }
+            });
+            copyTo.addItem (pk.toLowerCase(), [this, key, pk]
+            {
+                if (auto* x = lib().find (key))
+                {
+                    juce::String newKey, err;
+                    if (lib().save (lib().loadPreset (*x), pk, false, newKey, err)) refresh();
+                    else EvilleLookAndFeel::showDialog (*this, "couldn't copy it", err.toLowerCase(), { "ok" });
+                }
+            });
+        }
+        if (! e.factory && moveTo.getNumItems() > 0)
+            m.addSubMenu ("move to pack", moveTo);
+        if (copyTo.getNumItems() > 0)
+            m.addSubMenu ("copy to pack", copyTo);
+    }
     if (! e.factory)
     {
         m.addItem (juce::String::fromUTF8 ("edit\xe2\x80\xa6"), [this, key]
