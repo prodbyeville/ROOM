@@ -5,3 +5,6 @@ venv/
 # Rendered audio and reports (regenerate with the scripts)
 examples/audio/
 renders/
+
+# Download bundle of the final renders (too large for GitHub; the folder is committed)
+ROOM_Renders_Final.zip
