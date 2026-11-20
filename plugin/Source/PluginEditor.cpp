@@ -2227,11 +2227,13 @@ void RoomAudioProcessorEditor::paintGlitchModule (juce::Graphics& g)
         g.drawLine (x, top.getY() + 16.0f, x, top.getBottom() - 14.0f, 1.0f);
     g.drawLine (bottom.getX() + 16.0f, bottom.getY() - 4.0f, bottom.getRight() - 16.0f, bottom.getY() - 4.0f, 1.0f);
 
+    // glitch: its title and keys centred in the left part, amount and its knob centred in the right
     const auto r = glitchModule;
-    R5::drawLabel (g, "glitch", { r.getX() + 22.0f + 69.0f, r.getY() + 12.0f }, 9.0f, 0.9f, true);
-    R5::drawLabel (g, "amount", { r.getRight() - 44.0f - 62.0f, r.getY() + 38.0f }, 9.0f, 0.9f, true);
+    const auto split = r.getX() + 172.0f;
+    R5::drawLabel (g, "glitch", { (r.getX() + split) * 0.5f, r.getY() + 13.0f }, 9.0f, 0.9f, true);
+    R5::drawLabel (g, "amount", glitchAmountLabel(), 9.0f, 0.9f, true);
     g.setColour (juce::Colour (0xff1b1a18).withAlpha (0.18f));
-    g.drawLine (r.getX() + 172.0f, r.getY() + 14.0f, r.getX() + 172.0f, r.getBottom() - 14.0f, 1.0f);
+    g.drawLine (split, r.getY() + 12.0f, split, r.getBottom() - 12.0f, 1.0f);
 }
 
 void RoomAudioProcessorEditor::paintConsoleArt (juce::Graphics& g)
@@ -2435,12 +2437,14 @@ void RoomAudioProcessorEditor::layoutContent()
     placeKnob (imprint, knobIn (cellImprint, 39.0f));
     placeKnob (pitch, knobIn (cellPitch, 39.0f));
     {
-        // the glitch module: [glitch] [sync]  |  amount (o)
-        const auto y = glitchModule.getY() + 37.0f;
-        const auto x0 = glitchModule.getX() + 22.0f;
-        glitchKey.setBounds (juce::Rectangle<float> (x0, y - 17.0f, 72.0f, 36.0f).toNearestInt());
-        syncDot.setBounds (juce::Rectangle<float> (x0 + 80.0f, y - 17.0f, 58.0f, 36.0f).toNearestInt());
-        placeKnob (glitchAmount, { glitchModule.getRight() - 44.0f, y });
+        // the glitch module: [on] [sync] centred under its title | amount (o) centred in its half
+        const auto split = glitchModule.getX() + 172.0f;
+        const auto keyTop = glitchModule.getY() + 23.0f;
+        const float onW = 72.0f, syncW = 58.0f, between = 8.0f;
+        const auto x0 = (glitchModule.getX() + split) * 0.5f - (onW + between + syncW) * 0.5f;
+        glitchKey.setBounds (juce::Rectangle<float> (x0, keyTop, onW, 28.0f + R5::glowRoom).toNearestInt());
+        syncDot.setBounds (juce::Rectangle<float> (x0 + onW + between, keyTop, syncW, 28.0f + R5::glowRoom).toNearestInt());
+        placeKnob (glitchAmount, glitchAmountKnob());
     }
     autoBalance.setBounds (autoKeyArea.toNearestInt());
 

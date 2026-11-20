@@ -424,7 +424,10 @@ private:
     void paintPaper (juce::Graphics&, juce::Rectangle<float>, float corner);
     void paintPaper (juce::Graphics&, const juce::Path& shape);
     /** The light module's top part: space, tail and size (glitchModule hangs off its right side). */
-    juce::Rectangle<float> lightTop() const { return cellSpace.getUnion (cellSize).expanded (4.0f, 6.0f).withRight (cellSize.getRight()); }
+    /** Glitch's right half: "amount" and its knob side by side, centred in it. */
+    juce::Point<float> glitchAmountLabel() const { return { (glitchModule.getX() + 172.0f + glitchModule.getRight()) * 0.5f - 22.0f, glitchModule.getCentreY() }; }
+    juce::Point<float> glitchAmountKnob() const { return { (glitchModule.getX() + 172.0f + glitchModule.getRight()) * 0.5f + 32.0f, glitchModule.getCentreY() }; }
+    juce::Rectangle<float> lightTop() const { return cellSpace.getUnion (cellSize); }   // the same edges as the other cells
     void paintGlitchModule (juce::Graphics&);
     /** The knob's centre in base coordinates (what the signal lines join). */
     static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }
