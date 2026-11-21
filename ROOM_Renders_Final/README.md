@@ -12,7 +12,7 @@ The final video download is in [`../ROOM_Videos_Final/`](../ROOM_Videos_Final/) 
 | `01_Studio/` | Four hero stills on pure black: three-quarter hero (**the master reference**), hero angle 2, front (4:3), top-down. |
 | `02_Cinematic/` | 11 shallow-depth-of-field close-ups, in `full_res/` and `1920x1080/`. |
 | `03_Abstract/` | Room cards and wireframe box as physical objects: A hero card, B ring, D card edge macro, I box alone. |
-| `04_Video/` | Working video files: `*_final.mp4` deliverables, `raw/` Kling downloads, `SHOT_LIST.md`, and earlier attempts at clip 01 (v1–v7). |
+| `04_Video/` | Final processed clips (`*_final.mp4`) and `SHOT_LIST.md`. Approved clip 01 (v7b) and 02 are in `../ROOM_Videos_Final/01_Approved/`. Raw Kling downloads and the clip 01 test versions are not kept in git; re-download them from Higgsfield using the job IDs below. |
 | `05_Sharp_Plates/` | All-in-focus plates and built end frames used for the video tests. |
 | `tools/` | Scripts (see below). |
 
@@ -73,7 +73,25 @@ See [`04_Video/SHOT_LIST.md`](04_Video/SHOT_LIST.md).
 | Cinematic 12 wide hero (GPT 2.6) | `6d396208-42ec-485c-899b-1b3089238458` |
 | Abstract A / B / D / I | `326acbb9-1ffe-4c45-9ae9-fccfd6ea70e5` / `4b495103-c6a8-49d3-9c12-a6a2db3b9916` / `c619f0a8-0b70-4fbc-9936-d07c6d1a90f3` / `4497c316-6e34-428c-b91f-61c0806901af` |
 
-Video job IDs for the batch are in `04_Video/raw/batch_jobs.json`.
+**Video job IDs (Kling 3.0 Pro, final takes):**
+
+| Clip | Job |
+|---|---|
+| 01 knob row (v7b) | `f248fae7-d4b9-4eb1-8032-415c8eaa79fb` |
+| 02 TONE knob | `f1a98a99-7789-48e8-be19-9867161cdd34` |
+| 04 wireframe box | `d192d501-2a2d-40b4-b5a7-c6bf88dea950` |
+| 05 cream panel edge | `a74fc521-3e84-459b-9808-7b20db740478` |
+| 06 D R N LEDs | `1e5ffce4-dcac-4f2f-bf9a-321b09eb4834` |
+| 07 NOISE screen | `7464c514-c390-465b-b5c6-c2771a210a0e` |
+| 08 top bar | `ca3021c4-a85b-432f-8de7-0363f5756d30` |
+| 09 small controls | `94db8308-ff82-4577-9880-88e6e1800a74` |
+| 10 STOP button | `eb66cba1-0d39-404c-9d79-14cd1d63da50` |
+| 11 side profile (retake needed) | `c563da31-20c7-4c5b-b6d5-e5e5267f2c6c` |
+| 12 wide hero (retake needed) | `2804086d-fc77-4f1b-8c0f-d5bd67607618` |
+| A hero card | `1e91e10c-b3be-4acf-a76e-8b78ba613c91` |
+| B ring | `49ba81c5-a3f6-4930-be5c-493ecd00924a` |
+| D card edge macro | `4642ae62-cf02-44bc-b4c3-f4aa2947928c` |
+| I box alone | `e5780846-7565-4e45-81c1-a9085d9ae29a` |
 
 ## Open items
 
@@ -83,5 +101,6 @@ Video job IDs for the batch are in `04_Video/raw/batch_jobs.json`.
 
 **Not in the repo:**
 - Draft and rejected renders (`plugin/Design/renders/`, gitignored, about 220 MB).
-- The stills download zip (over GitHub's 100 MB limit; the folder itself is committed).
+- The stills and video download zips (the folders themselves are committed).
+- Raw Kling downloads and the clip 01 test versions (re-download them via the job IDs above).
 - Third-party reference videos.
