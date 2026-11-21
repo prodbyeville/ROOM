@@ -18,6 +18,9 @@ namespace
         { ParamIDs::tail,        0.6f, 4.0f },
         { ParamIDs::size,        0.7f, 1.5f },
         { ParamIDs::smooth,      0.1f, 0.6f, true },
+        { ParamIDs::imprint,     0.2f, 0.7f, true },
+        { ParamIDs::pitch,       -0.5f, 0.5f, true },
+        { ParamIDs::mud,         0.2f, 0.7f, true },
         { ParamIDs::mix,         0.25f, 0.6f },
         { ParamIDs::glitchAmount, 0.2f, 0.8f },
         { ParamIDs::preDelay,    5.0f, 120.0f, true },
@@ -50,16 +53,18 @@ namespace
 const std::vector<Target>& targets()
 {
     static const std::vector<Target> list = {
-        // Room
+        // Room (the room itself first: loading one resets intensity, which may then be randomized)
+        { "room",      "room",      "room", {} },
         { "intensity", "intensity", "room", { ParamIDs::intensity } },
         { "tone",      "tone",      "room", { ParamIDs::toneAmount } },
         { "space",     "space",     "room", { ParamIDs::spaceAmount } },
         { "tail",      "tail",      "room", { ParamIDs::tail } },
         { "size",      "size",      "room", { ParamIDs::size } },
         { "smooth",    "smooth",    "room", { ParamIDs::smooth } },
+        { "imprint",   "imprint",   "room", { ParamIDs::imprint } },
+        { "pitch",     "pitch",     "room", { ParamIDs::pitch } },
         { "mix",       "dry / wet", "room", { ParamIDs::mix }, false },
         { "auto",      "auto",      "room", { ParamIDs::balanceAuto }, false },
-        { "toneSync",  "tone sync", "room", { ParamIDs::toneSpaceSync }, false },
 
         // Glitch
         { "glitchOn",     "glitch on",     "glitch", { ParamIDs::glitch }, false },
@@ -74,6 +79,7 @@ const std::vector<Target>& targets()
         { "release",  "release",   "advanced", { ParamIDs::duckRelease } },
         { "tape",     "tape",      "advanced", { ParamIDs::tape } },
         { "autoEq",   "auto eq",   "advanced", { ParamIDs::autoEq } },
+        { "mud",      "mud",       "advanced", { ParamIDs::mud } },
         { "freeze",   "freeze",    "advanced", { ParamIDs::freeze }, false },
 
         // Texture
@@ -169,6 +175,11 @@ void randomizeSelected (RoomAudioProcessor& p, juce::Random& rng)
     {
         if (! isSelected (p, t.key))
             continue;
+        if (juce::String (t.key) == "room")
+        {
+            p.loadRandomRoom (rng);
+            continue;
+        }
         for (const auto& id : t.params)
             if (auto* prm = p.apvts.getParameter (id))
                 setParam (p, id, randomFor (*prm, id, intensity, rng));

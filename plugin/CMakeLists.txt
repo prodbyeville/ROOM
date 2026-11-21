@@ -14,7 +14,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
-project(ROOM VERSION 1.0.2 LANGUAGES C CXX)
+project(ROOM VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +82,9 @@ target_sources(ROOM PRIVATE
     Source/Screens.cpp
     Source/UpdateChecker.cpp
     Source/Randomizer.cpp
+    Source/dsp/NoiseBank.cpp
+    Source/R5Parts.cpp
+    Source/RoomMenu.cpp
     Source/presets/PresetBrowser.cpp)
 
 target_include_directories(ROOM PRIVATE Source)
@@ -95,6 +98,16 @@ juce_add_binary_data(ROOM_FactoryPresets
     NAMESPACE FactoryPresets
     SOURCES ${ROOM_FACTORY_PRESETS})
 
+# Eville's own ROOMS and STUDIOS (Presets/Eville) and the pack's cover: a built-in "Eville" pack
+file(GLOB ROOM_EVILLE_PRESETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/*.room"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/*.studio"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Eville/cover.jpg")
+juce_add_binary_data(ROOM_EvillePresets
+    HEADER_NAME EvillePresets.h
+    NAMESPACE EvillePresets
+    SOURCES ${ROOM_EVILLE_PRESETS})
+
 # UI assets: fonts (Satoshi, Cormorant Garamond) and images for the faceplate.
 file(GLOB ROOM_UI_ASSETS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Ui/*.otf"
@@ -107,12 +120,12 @@ juce_add_binary_data(ROOM_UiAssets
     NAMESPACE UiAssets
     SOURCES ${ROOM_UI_ASSETS})
 
-# Noise profiles (the bottom module): every WAV / AIFF in Resources/Noise, compiled in and
-# listed by file name ("01 vinyl.wav" -> "vinyl"). Empty folder: built-in placeholders.
+# Noise profiles (the bottom module): the loops in Resources/Noise ("NN name.ogg") and their
+# list, noise.txt, all made by Tools/noise/make_noise_loops.py. Compiled in compressed; the
+# four built-ins (vinyl, tape hiss, air, room tone) are made in NoiseBank.cpp.
 file(GLOB ROOM_NOISE_FILES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.wav"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aif"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.aiff")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/*.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Noise/noise.txt")
 if (ROOM_NOISE_FILES)
     juce_add_binary_data(ROOM_NoiseFiles
         HEADER_NAME NoiseFiles.h
@@ -125,6 +138,7 @@ endif()
 target_link_libraries(ROOM
     PRIVATE
         ROOM_FactoryPresets
+        ROOM_EvillePresets
         ROOM_UiAssets
         juce::juce_audio_utils
         juce::juce_cryptography
@@ -145,6 +159,7 @@ target_compile_definitions(room_render PRIVATE ${ROOM_DEFINITIONS})
 target_link_libraries(room_render
     PRIVATE
         juce::juce_audio_formats
+        juce::juce_graphics
         juce::juce_data_structures
         juce::juce_dsp
     PUBLIC
@@ -189,7 +204,7 @@ if (ROOM_BUILD_TESTS)
         $<TARGET_PROPERTY:ROOM,INCLUDE_DIRECTORIES>)
     target_compile_definitions(room_tests PRIVATE
         $<TARGET_PROPERTY:ROOM,COMPILE_DEFINITIONS>)
-    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets ROOM_UiAssets)
+    target_link_libraries(room_tests PRIVATE ROOM ROOM_FactoryPresets ROOM_EvillePresets ROOM_UiAssets)
     set_target_properties(room_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/room_tests_artefacts/$<CONFIG>")
     if (UNIX AND NOT APPLE)

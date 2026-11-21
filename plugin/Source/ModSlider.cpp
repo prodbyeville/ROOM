@@ -51,7 +51,8 @@ juce::Rectangle<float> ModSlider::depthDotBounds (int lfo) const
         if (mod->isAssigned (l, target))
             ++k;
     const auto geo = ringGeometry();
-    const auto x = geo.centre.x + geo.ringR + 16.0f;
+    const auto gapProp = getProperties()["dotGap"];
+    const auto x = geo.centre.x + geo.ringR + (gapProp.isVoid() ? 16.0f : (float) gapProp);
     if (x + 6.0f > (float) getWidth())
         return {};   // a tiny knob: use right-click or the LFO panel instead
     return juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ x, geo.centre.y - 6.0f + (float) k * 16.0f });

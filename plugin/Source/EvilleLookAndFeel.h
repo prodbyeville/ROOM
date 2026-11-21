@@ -34,6 +34,9 @@ namespace UiAssetFiles
 struct UiResources
 {
     juce::Image image (const char* fileName);
+    /** The image halved as often as it can be while staying at least `minWidth` wide
+        (so photographed parts stay crisp when drawn small). */
+    juce::Image mip (const char* fileName, int minWidth);
     juce::Typeface::Ptr typeface (const char* fileName);
 
 private:
@@ -108,6 +111,8 @@ public:
 
     /** A soft dark chip (buttons, keys); `on` lights its edge red. */
     static void drawChip (juce::Graphics&, juce::Rectangle<float>, bool on, bool over, bool down);
+    /** A button drawn as one of the photographed keys (property "r5key": cream / black / square). */
+    static void drawR5Key (juce::Graphics&, juce::Button&, bool over, bool down);
     /** Letterspaced caps (titles, chips). */
     static void drawCaps (juce::Graphics&, const juce::String&, juce::Rectangle<float>, float height, juce::Colour,
                           juce::Justification = juce::Justification::centredLeft, Fonts::Weight = Fonts::bold);
@@ -115,6 +120,8 @@ public:
     /** Knob centre and radius inside a slider (shared with ModSlider's rings). */
     static juce::Rectangle<float> knobBounds (const juce::Slider&);
     static bool onBlack (const juce::Component&);
+    /** True inside a light module (a parent with the property "surface" = "light"). */
+    static bool onLight (const juce::Component&);
 
 private:
     juce::SharedResourcePointer<UiResources> resources;   // keeps the cache alive while an editor is open

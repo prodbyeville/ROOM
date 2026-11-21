@@ -1,4 +1,5 @@
 #pragma once
+#include "RoomMenu.h"
 
 #include "PluginProcessor.h"
 #include "ModSlider.h"
@@ -42,7 +43,7 @@ private:
 
     RoomAudioProcessor& proc;
     const int lfo;
-    juce::ComboBox shape, division;
+    RoomComboBox shape, division;
     juce::ToggleButton sync { "sync" }, retrig { "retrig" };
     juce::Slider rate { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> shapeAtt, divAtt;

@@ -1,0 +1,51 @@
+# number|name|section|count|thickness|speed|waves|sparkle (made by Tools/noise/make_noise_loops.py)
+5|waves|nature|579|0.22|0.09|1.11|0.07
+6|tide|nature|515|0.20|0.08|0.99|0.12
+7|shore|nature|481|0.21|0.06|1.03|0.10
+8|before the waves|nature|430|0.21|0.05|1.04|0.00
+9|pouring rain|nature|512|0.15|0.09|0.76|0.24
+10|grey day|nature|515|0.15|0.11|0.73|0.04
+11|drips|nature|831|0.37|0.17|1.86|0.30
+12|stream|nature|463|0.20|0.06|0.99|0.15
+13|water|nature|637|0.15|0.17|0.75|0.07
+14|birds|nature|461|0.21|0.07|1.04|0.14
+15|dolphins|nature|409|0.34|0.05|1.71|0.25
+16|gravel|nature|470|0.21|0.06|1.03|0.30
+17|far away|nature|526|0.20|0.09|1.02|0.28
+18|empty room|places|1539|0.13|0.32|0.64|0.02
+19|air con|places|459|0.18|0.05|0.92|0.02
+20|ac hum|places|481|0.17|0.07|0.87|0.00
+21|art class|places|430|0.24|0.05|1.18|0.14
+22|takeout|places|427|0.29|0.05|1.44|0.27
+23|chatter|places|410|0.30|0.05|1.50|0.18
+24|bus|places|406|0.16|0.05|0.82|0.00
+25|outside|places|445|0.15|0.06|0.75|0.00
+26|night|places|510|0.21|0.13|1.03|0.15
+27|island|places|426|0.20|0.05|0.98|0.03
+28|open window|places|635|0.16|0.09|0.82|0.05
+29|hallway|places|447|0.20|0.05|1.02|0.05
+30|tascam|machines|1452|0.25|0.23|1.25|0.30
+31|crackle|machines|1600|0.45|0.32|2.40|0.30
+32|tape eco|machines|1600|0.22|0.32|1.10|0.25
+33|tape isle|machines|1600|0.45|0.32|2.40|0.30
+34|tape script|machines|1600|0.13|0.32|0.65|0.30
+35|tape chamber|machines|1600|0.19|0.32|0.93|0.30
+36|tape rain|machines|594|0.20|0.19|0.98|0.30
+37|electric|machines|1022|0.42|0.12|2.09|0.30
+38|buzz|machines|552|0.23|0.10|1.15|0.30
+39|sos radio|machines|1600|0.13|0.32|0.67|0.30
+40|something's wrong|machines|1497|0.38|0.31|1.90|0.30
+41|micro|machines|608|0.20|0.13|0.99|0.10
+42|dead air|machines|1600|0.13|0.32|0.67|0.16
+43|warm fuzz|machines|1537|0.16|0.28|0.80|0.13
+44|anthem|tonal|483|0.14|0.09|0.70|0.14
+45|ascent|tonal|1221|0.13|0.32|0.64|0.28
+46|ooh ahh|tonal|480|0.30|0.09|1.49|0.16
+47|whistle|tonal|416|0.22|0.06|1.11|0.05
+48|sphere|tonal|671|0.17|0.11|0.83|0.09
+49|bloops|tonal|412|0.30|0.04|1.49|0.05
+50|shaker|tonal|813|0.22|0.11|1.10|0.30
+51|lovestruck|tonal|417|0.22|0.05|1.09|0.03
+52|life|tonal|409|0.28|0.05|1.40|0.00
+53|carbine|tonal|429|0.23|0.05|1.16|0.21
+54|lukewarm|tonal|686|0.16|0.07|0.81|0.30

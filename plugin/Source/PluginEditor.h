@@ -43,6 +43,8 @@ public:
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
+    /** True while the room box shows its numbers: the near cards then go under them. */
+    std::function<bool()> isInfoShowing;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override { hoverKey.clear(); repaint(); }
@@ -187,6 +189,7 @@ private:
     RoomAudioProcessor& proc;
     juce::RangedAudioParameter* type = nullptr;
     float phase = 0.0f;
+    float activity = 1.0f;   // eased: how much the noise is playing now (follow and stop), 0..1
 };
 
 /** The first-run tour: dims the window, lights up one area at a time and
@@ -297,6 +300,11 @@ public:
     static inline bool autoShowTour = true;
     void openAbout() { showAbout(); }
 
+    /** An update is known, not snoozed and not shown yet in this window (tests). */
+    bool wouldAnnounceUpdate() const;
+    /** "later": don't announce this version again for a day. */
+    void snoozeUpdate();
+
     /** Show the full room info on the room screen. */
     void showRoomInfo (bool show) { roomScreen.setShowInfo (show); }
 
@@ -343,13 +351,38 @@ private:
     LicensePage licensePage { proc };
     int ticksUntilUpdateCheck = 45;   // a few seconds after the window opens
     int ticksUntilTour = 6;           // first open: once the window has settled
+    int ticksUntilAnnounce = 45;      // say "update available" a few seconds after opening
+    bool announcePending = false, updateAnnounced = false;
+    void maybeAnnounceUpdate();
+    bool overlayShowing() const;
 
     // Fixed geometry (base coordinates): the top bar, then the stage, the
     // controls module and the bottom module; advanced pops out on the right.
     const juce::Rectangle<float> consoleArea { 0.0f, 0.0f, 892.0f, 772.0f };
-    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 346.0f };
-    const juce::Rectangle<float> controlsArea { 12.0f, 430.0f, 868.0f, 170.0f };
-    const juce::Rectangle<float> finishArea { 12.0f, 612.0f, 868.0f, 148.0f };
+    const juce::Rectangle<float> stageArea { 12.0f, 72.0f, 868.0f, 312.0f };
+    const juce::Rectangle<float> controlsArea { 12.0f, 396.0f, 868.0f, 204.0f };   // the two rows of shape cells
+    const juce::Rectangle<float> finishArea { 12.0f, 616.0f, 868.0f, 144.0f };     // noise, level / follow, stop, rate
+
+    // The cells (round 5): each control sits in its own pocket in the case.
+    // Row 1: intensity | tone | space | tail | size
+    const juce::Rectangle<float> cellIntensity { 12.0f, 396.0f, 186.0f, 124.0f };
+    const juce::Rectangle<float> cellTone { 214.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellSpace { 384.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellTail { 554.0f, 396.0f, 154.0f, 124.0f };
+    const juce::Rectangle<float> cellSize { 724.0f, 396.0f, 156.0f, 124.0f };
+    // Row 2: smooth | glitch (glitch + sync) | amount, and the auto key on its own
+    const juce::Rectangle<float> cellSmooth { 12.0f, 540.0f, 80.0f, 60.0f };
+    const juce::Rectangle<float> cellImprint { 112.0f, 540.0f, 110.0f, 60.0f };
+    const juce::Rectangle<float> cellPitch { 242.0f, 540.0f, 110.0f, 60.0f };
+    const juce::Rectangle<float> autoKeyArea { 392.0f, 556.0f, 64.0f, 36.0f };   // the bottom 8 px: room for the lit glow
+    // ... and under tail / size: the glitch module (light: it's something else entirely)
+    const juce::Rectangle<float> glitchModule { 554.0f, 540.0f, 326.0f, 60.0f };
+    // Row 3: noise | level over follow | the stop key on its own | rate
+    const juce::Rectangle<float> cellNoise { 12.0f, 616.0f, 346.0f, 144.0f };
+    const juce::Rectangle<float> cellLevel { 378.0f, 616.0f, 122.0f, 144.0f };
+    const juce::Rectangle<float> stopKeyArea { 516.0f, 672.0f, 56.0f, 40.0f };   // the bottom 8 px: room for the lit glow
+    const juce::Rectangle<float> cellRate { 592.0f, 616.0f, 288.0f, 144.0f };
+    static constexpr float knobRowY = 82.0f;   // row 1 knobs: their centre below the cell's top
     const juce::Rectangle<float> advancedArea { 892.0f, 0.0f, 260.0f, 772.0f };
     juce::Image staticLayer;   // the window, the modules and their titles, at the window's pixel size
     float staticScale = 0.0f;
@@ -375,20 +408,27 @@ private:
     ToneScreen toneScreen { proc };
 
     // Shape the room: intensity -> glitch (sync) | tone -> space (auto) | tail -> size
-    Knob intensity, smooth, glitchAmount, tone, space, tail, size;
+    Knob intensity, smooth, glitchAmount, tone, space, tail, size, imprint, pitch;
     juce::ToggleButton autoBalance { "auto" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoAttachment;
-    juce::ToggleButton glitchKey { "glitch" };
+    juce::ToggleButton glitchKey { "on" };   // in the glitch module, so just "on"
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> glitchAttachment;
-    SyncDot syncDot, toneSync;   // glitch in time; tone and space move opposite
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment, toneSyncAttachment;
-    double lastTone = 0.5, lastSpace = 0.5;   // for moving the other one while synced
-    void syncToneSpace (bool fromTone, bool byHand);
+    SyncDot syncDot;   // glitch in time
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> syncAttachment;
 public:
     /** Turn tone (or space) as a hand on the knob would (tests). */
     void turnByHand (bool toneKnob, double value);
 private:
     void paintSignalLines (juce::Graphics&);
+    void showSupport (const juce::String& version);
+    void paintPaper (juce::Graphics&, juce::Rectangle<float>, float corner);
+    void paintPaper (juce::Graphics&, const juce::Path& shape);
+    /** The light module's top part: space, tail and size (glitchModule hangs off its right side). */
+    /** Glitch's right half: "amount" and its knob side by side, centred in it. */
+    juce::Point<float> glitchAmountLabel() const { return { (glitchModule.getX() + 172.0f + glitchModule.getRight()) * 0.5f - 22.0f, glitchModule.getCentreY() }; }
+    juce::Point<float> glitchAmountKnob() const { return { (glitchModule.getX() + 172.0f + glitchModule.getRight()) * 0.5f + 32.0f, glitchModule.getCentreY() }; }
+    juce::Rectangle<float> lightTop() const { return cellSpace.getUnion (cellSize); }   // the same edges as the other cells
+    void paintGlitchModule (juce::Graphics&);
     /** The knob's centre in base coordinates (what the signal lines join). */
     static juce::Point<float> knobCentre (const Knob& k) { return k.slider.getBounds().toFloat().getCentre(); }
     static float knobRadius (const Knob& k) { return (float) k.slider.getProperties()["knobRadius"]; }

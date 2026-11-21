@@ -69,6 +69,24 @@ namespace
     }
 }
 
+namespace
+{
+    /** A pack banner's (invisible) button: left-click selects, right-click opens the pack's menu. */
+    struct PackButton : juce::TextButton
+    {
+        std::function<void()> onRightClick;
+        void clicked (const juce::ModifierKeys& m) override
+        {
+            if (m.isPopupMenu())
+            {
+                if (onRightClick) onRightClick();
+            }
+            else
+                juce::TextButton::clicked (m);
+        }
+    };
+}
+
 //==============================================================================
 // Chips
 
@@ -343,7 +361,9 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
     : proc (p), kind (k),
       typeChips (k == Kind::room ? allTypes() : allMadeFor(), false),
       styleChips (allStyles(), false),
-      autoChips (allAutoTags(), false)
+      autoChips (allAutoTags(), false),
+      sortChips (k == Kind::room ? juce::StringArray { "name", "type", "decay", "tone", "favourites first" }
+                                 : juce::StringArray { "name", "made for", "style", "room", "pack", "favourites first" }, true)
 {
     setWantsKeyboardFocus (true);
 
@@ -435,7 +455,37 @@ PresetBrowser::PresetBrowser (RoomAudioProcessor& p, Kind k)
         (pr.pack.isNotEmpty() ? lib().getRoot().getChildFile (pr.pack) : lib().getRoot()).startAsProcess();
     };
     filtersButton.setTooltip ("sort, and filter by tags");
-    filtersButton.onClick = [this] { showFiltersMenu(); };
+    filtersButton.onClick = [this] { openFilters (! filterDrawer.isVisible()); };
+    {
+        // the filter drawer: sort, then the tag groups (the same chips that hold the query)
+        filterDrawer.groups = { { "sort by", &sortChips },
+                                { kind == Kind::room ? "type" : "made for", &typeChips },
+                                { kind == Kind::room ? "character" : "style", &styleChips } };
+        if (kind == Kind::room)
+            filterDrawer.groups.push_back ({ juce::String::fromUTF8 ("decay \xc2\xb7 tone \xc2\xb7 source"), &autoChips });
+        for (auto& gr : filterDrawer.groups)
+        {
+            gr.chips->setVisible (true);
+            filterDrawer.addAndMakeVisible (gr.chips);
+        }
+        sortChips.onChange = [this]
+        {
+            using S = PresetLibrary::SortColumn;
+            const std::vector<std::tuple<const char*, int, S>> sorts {
+                { "name", colName, S::name }, { "type", colType, S::type }, { "decay", colDecay, S::decay }, { "tone", colTone, S::tone },
+                { "made for", colMadeFor, S::madeFor }, { "style", colStyle, S::style }, { "room", colRoom, S::room },
+                { "pack", colPack, S::pack }, { "favourites first", colFav, S::favorite } };
+            const auto sel = sortChips.getSelected();
+            for (auto& [label, col, by] : sorts)
+                if (sel.contains (label))
+                    sortOrderChanged (col, by != S::favorite);
+            if (sel.isEmpty())
+                sortChips.setSelected ({ "name" }), sortOrderChanged (colName, true);
+        };
+        filterDrawer.clear.onClick = [this] { clearFilters.onClick(); openFilters (true); };
+        filterDrawer.done.onClick = [this] { openFilters (false); };
+        addChildComponent (filterDrawer);
+    }
     closeButton.setButtonText ({});
     closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     closeButton.setTooltip ("close");
@@ -525,10 +575,22 @@ void PresetBrowser::refresh()
         if (packRows[(size_t) i].label == previousPack.label && packRows[(size_t) i].favorites == previousPack.favorites)
             selectedPackRow = i;
 
+    covers.clear();
+    for (const auto& pr : packRows)
+        if (pr.pack.isNotEmpty() && ! pr.favorites)
+        {
+            if (auto f = lib.packCoverFile (pr.pack); f.existsAsFile())
+                covers[pr.pack] = juce::ImageFileFormat::loadFrom (f);
+            else if (auto img = lib.builtInCover (pr.pack); img.isValid())
+                covers[pr.pack] = img;
+        }
+
     packButtons.clear();
     for (int i = 0; i < (int) packRows.size(); ++i)
     {
-        auto* b = packButtons.add (new juce::TextButton());
+        auto* pb = new PackButton();
+        pb->onRightClick = [this, i] { showPackMenu (i); };
+        auto* b = packButtons.add (pb);
         b->setButtonText (packRows[(size_t) i].label);
         b->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
         b->setColour (juce::TextButton::buttonOnColourId, Colours::panel);
@@ -862,50 +924,127 @@ int PresetBrowser::activeFilterCount() const
     return query.types.size() + query.madeFor.size() + query.styles.size() + query.autoTags.size();
 }
 
+void PresetBrowser::showPackMenu (int i)
+{
+    if (i < 0 || i >= (int) packRows.size())
+        return;
+    const auto pr = packRows[(size_t) i];
+    if (pr.favorites || ! PresetLibrary::isEditablePack (pr.pack))
+        return;   // all, favourites, factory and user have nothing to edit
+    auto& library = lib();
+    const auto hasCover = library.packCoverFile (pr.pack).existsAsFile();
+    juce::PopupMenu m;
+    m.addSectionHeader (pr.label);
+    m.addItem (juce::String::fromUTF8 ("upload cover image\xe2\x80\xa6"), [this, pack = pr.pack]
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Choose a cover image for \"" + pack + "\"", juce::File(), "*.png;*.jpg;*.jpeg");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this, pack] (const juce::FileChooser& fc)
+                              {
+                                  const auto f = fc.getResult();
+                                  if (! f.existsAsFile())
+                                      return;
+                                  juce::String err;
+                                  if (! lib().setPackCover (pack, f, err))
+                                      EvilleLookAndFeel::showDialog (*this, "cover", err, { "ok" });
+                                  refresh();
+                              });
+    });
+    m.addItem ("remove cover", hasCover, false, [this, pack = pr.pack] { lib().removePackCover (pack); refresh(); });
+    m.addSeparator();
+    m.addItem (juce::String::fromUTF8 ("delete pack\xe2\x80\xa6"), [this, pack = pr.pack, count = pr.count]
+    {
+        EvilleLookAndFeel::showDialog (*this, "delete pack",
+                                       "delete \"" + pack + "\" and its " + juce::String (count) + (count == 1 ? " preset" : " presets")
+                                           + "? they go to the trash.",
+                                       { "delete", "cancel" }, {},
+                                       [this, pack] (int result, const juce::String&)
+                                       {
+                                           if (result != 1)
+                                               return;
+                                           juce::String err;
+                                           if (! lib().removePack (pack, err))
+                                               EvilleLookAndFeel::showDialog (*this, "delete pack", err, { "ok" });
+                                           refresh();
+                                       });
+    });
+    EvilleLookAndFeel::showMenu (m, *packButtons[i]);
+}
+
 void PresetBrowser::showFiltersMenu()
 {
-    juce::PopupMenu m;
-    // Sorting (the list has no column header, WARP-style)
-    m.addSectionHeader ("sort by");
-    using S = PresetLibrary::SortColumn;
-    std::vector<std::tuple<const char*, int, S>> sorts { { "name", colName, S::name } };
-    if (kind == Kind::room)
-        sorts.insert (sorts.end(), { { "type", colType, S::type }, { "decay", colDecay, S::decay }, { "tone", colTone, S::tone } });
-    else
-        sorts.insert (sorts.end(), { { "made for", colMadeFor, S::madeFor }, { "style", colStyle, S::style }, { "room", colRoom, S::room },
-                                     { "pack", colPack, S::pack } });
-    sorts.push_back ({ "favourites first", colFav, S::favorite });
-    for (auto& [label, col, by] : sorts)
-        m.addItem (label, true, query.sortBy == by, [this, col = col, by = by]
-        {
-            sortOrderChanged (col, query.sortBy == by ? ! query.ascending : by != S::favorite);
-        });
-    m.addSeparator();
-    auto group = [&] (const juce::String& title, ChipGroup& chips, const juce::StringArray& options)
+    openFilters (true);
+}
+
+void PresetBrowser::openFilters (bool open)
+{
+    if (open)
     {
-        m.addSectionHeader (title);
-        const auto selected = chips.getSelected();
-        for (auto& o : options)
-            m.addItem (o.toLowerCase(), true, selected.contains (o), [this, &chips, o]
-            {
-                auto sel = chips.getSelected();
-                if (sel.contains (o)) sel.removeString (o); else sel.add (o);
-                chips.setSelected (sel);
-                if (chips.onChange) chips.onChange();
-                showFiltersMenu();   // stay open so several can be ticked in one go
-            });
-    };
-    group (kind == Kind::room ? "type" : "made for", typeChips, kind == Kind::room ? allTypes() : allMadeFor());
-    group (kind == Kind::room ? "character" : "style", styleChips, allStyles());
-    if (kind == Kind::room)
-    {
-        juce::StringArray a;
-        a.addArray (allDecayTags()); a.addArray (allToneTags()); a.addArray (allSources());
-        group (juce::String::fromUTF8 ("decay \xc2\xb7 tone \xc2\xb7 source"), autoChips, a);
+        using S = PresetLibrary::SortColumn;
+        const std::vector<std::pair<S, const char*>> names { { S::name, "name" }, { S::type, "type" }, { S::decay, "decay" }, { S::tone, "tone" },
+                                                            { S::madeFor, "made for" }, { S::style, "style" }, { S::room, "room" },
+                                                            { S::pack, "pack" }, { S::favorite, "favourites first" } };
+        for (auto& [by, label] : names)
+            if (query.sortBy == by)
+                sortChips.setSelected ({ label });
+        resized();
+        filterDrawer.toFront (false);
     }
-    m.addSeparator();
-    m.addItem ("clear filters", activeFilterCount() > 0, false, [this] { clearFilters.onClick(); });
-    EvilleLookAndFeel::showMenu (m, filtersButton);
+    filterDrawer.setVisible (open);
+    filtersButton.setToggleState (open || activeFilterCount() > 0, juce::dontSendNotification);
+}
+
+//==============================================================================
+FilterDrawer::FilterDrawer()
+{
+    for (auto* b : { &clear, &done })
+    {
+        b->getProperties().set ("key", "dark");
+        addAndMakeVisible (b);
+    }
+}
+
+int FilterDrawer::idealHeight (int width) const
+{
+    int h = 16;
+    for (auto& gr : groups)
+        h += 26 + gr.chips->heightForWidth (width - 32) + 12;
+    return h + 44;
+}
+
+void FilterDrawer::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (r.translated (0.0f, 3.0f), 9.0f);
+    g.setColour (juce::Colour (0xff141212));
+    g.fillRoundedRectangle (r, 9.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.09f));
+    g.drawRoundedRectangle (r, 9.0f, 1.0f);
+    int y = 16;
+    for (auto& gr : groups)
+    {
+        EvilleLookAndFeel::drawCaps (g, gr.title, { 16.0f, (float) y, (float) getWidth() - 32.0f, 16.0f }, 9.5f, Colours::redLight,
+                                     juce::Justification::centredLeft, Fonts::bold);
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillRect (16.0f, (float) y + 19.0f, (float) getWidth() - 32.0f, 1.0f);
+        y += 26 + gr.chips->heightForWidth (getWidth() - 32) + 12;
+    }
+}
+
+void FilterDrawer::resized()
+{
+    int y = 16;
+    for (auto& gr : groups)
+    {
+        const auto h = gr.chips->heightForWidth (getWidth() - 32);
+        gr.chips->setBounds (16, y + 26, getWidth() - 32, h);
+        y += 26 + h + 12;
+    }
+    auto bottom = getLocalBounds().reduced (16, 12).removeFromBottom (30);
+    done.setBounds (bottom.removeFromRight (90));
+    bottom.removeFromRight (8);
+    clear.setBounds (bottom.removeFromRight (130));
 }
 
 void PresetBrowser::showRowMenu (int row)
@@ -952,6 +1091,37 @@ void PresetBrowser::showRowMenu (int row)
             m.addItem ("add to quick select", hasFree, false, [this, key] { lib().setQuick (key, true); quickSlots.repaint(); });
             m.addSubMenu ("quick select slot", slots);
         }
+    }
+    {
+        // Move (your own) or copy (any) into another pack
+        juce::PopupMenu moveTo, copyTo;
+        for (const auto& pk : lib().getPacks())
+        {
+            if (pk == room::presets::PresetLibrary::factoryPack || pk == e.pack)
+                continue;
+            moveTo.addItem (pk.toLowerCase(), [this, key, pk]
+            {
+                if (auto* x = lib().find (key))
+                {
+                    juce::String newKey, err;
+                    if (lib().updateMeta (key, x->meta, pk, newKey, err)) { selectedKey = newKey; refresh(); }
+                    else EvilleLookAndFeel::showDialog (*this, "couldn't move it", err.toLowerCase(), { "ok" });
+                }
+            });
+            copyTo.addItem (pk.toLowerCase(), [this, key, pk]
+            {
+                if (auto* x = lib().find (key))
+                {
+                    juce::String newKey, err;
+                    if (lib().save (lib().loadPreset (*x), pk, false, newKey, err)) refresh();
+                    else EvilleLookAndFeel::showDialog (*this, "couldn't copy it", err.toLowerCase(), { "ok" });
+                }
+            });
+        }
+        if (! e.factory && moveTo.getNumItems() > 0)
+            m.addSubMenu ("move to pack", moveTo);
+        if (copyTo.getNumItems() > 0)
+            m.addSubMenu ("copy to pack", copyTo);
     }
     if (! e.factory)
     {
@@ -1011,7 +1181,9 @@ void PresetBrowser::paint (juce::Graphics& g)
             juce::Path shape;
             shape.addRoundedRectangle (r, 10.0f);
             g.reduceClipRegion (shape);
-            if (auto tex = Hw::asset (texName); tex.isValid())
+            if (auto cover = covers.find (pr.pack); ! pr.favorites && cover != covers.end() && cover->second.isValid())
+                g.drawImage (cover->second, r, juce::RectanglePlacement::fillDestination | juce::RectanglePlacement::xMid | juce::RectanglePlacement::yMid);
+            else if (auto tex = Hw::asset (texName); tex.isValid())
             {
                 const auto seed = (int) (pr.label.hashCode() & 0xffff);
                 g.drawImage (tex, r.getX(), r.getY(), r.getWidth(), r.getHeight(),
@@ -1033,7 +1205,7 @@ void PresetBrowser::paint (juce::Graphics& g)
             drawHeart (g, tr.removeFromLeft (14.0f).reduced (0.0f, (r.getHeight() - 13.0f) * 0.5f), true, Colours::dustWhite);
             tr.removeFromLeft (10.0f);
         }
-        if (! pr.favorites && pr.pack.isNotEmpty() && pr.pack.equalsIgnoreCase ("factory"))
+        if (! pr.favorites && pr.pack.isNotEmpty() && (pr.pack.equalsIgnoreCase ("factory") || pr.pack.equalsIgnoreCase (room::presets::PresetLibrary::evillePack)))
             EvilleLookAndFeel::drawCaps (g, "built in", tr.withHeight (14.0f).translated (0.0f, r.getHeight() * 0.18f), 8.5f,
                                          Colours::dustWhite.withAlpha (0.6f));
         EvilleLookAndFeel::drawCaps (g, pr.favorites ? "favourites" : pr.label, tr, 12.0f,
@@ -1133,6 +1305,12 @@ void PresetBrowser::resized()
     auto right = listPanel().reduced (8);
     auto top = right.removeFromTop (40);
     filtersButton.setBounds (top.removeFromRight (110));
+    {
+        // the filter drawer drops down under the search row, over the list
+        auto drawer = right.withTrimmedTop (8);
+        drawer = drawer.withHeight (std::min (drawer.getHeight(), filterDrawer.idealHeight (drawer.getWidth())));
+        filterDrawer.setBounds (drawer);
+    }
     top.removeFromRight (8);
     search.setBounds (top);
     search.setIndents (34, 12);
@@ -1345,10 +1523,27 @@ void PresetBar::paint (juce::Graphics& g)
     // One dark box: the name in caps, then save and the heart side by side, a
     // divider and the arrows.
     const auto box = nameArea().toFloat().reduced (0.5f);
-    g.setColour (juce::Colour (0xff141212));
-    g.fillRoundedRectangle (box, 6.0f);
-    g.setColour (Colours::moduleEdge);
-    g.drawRoundedRectangle (box, 6.0f, 1.0f);
+    // a small black glass screen set into the case (round 5)
+    g.setColour (juce::Colour (0xff060606));
+    g.fillRoundedRectangle (box, 7.0f);
+    {
+        juce::Graphics::ScopedSaveState save (g);
+        juce::Path clip;
+        clip.addRoundedRectangle (box, 7.0f);
+        g.reduceClipRegion (clip);
+        juce::ColourGradient inner (juce::Colours::black.withAlpha (0.7f), box.getX(), box.getY(),
+                                    juce::Colours::transparentBlack, box.getX(), box.getY() + 8.0f, false);
+        g.setGradientFill (inner);
+        g.fillRect (box.withHeight (8.0f));
+        juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.035f), box.getX(), box.getY(),
+                                    juce::Colours::transparentWhite, box.getX(), box.getCentreY(), false);
+        g.setGradientFill (sheen);
+        g.fillRect (box.withHeight (box.getHeight() * 0.5f));
+    }
+    juce::ColourGradient rim (juce::Colours::white.withAlpha (0.04f), box.getX(), box.getY(),
+                              juce::Colours::white.withAlpha (0.12f), box.getX(), box.getBottom(), false);
+    g.setGradientFill (rim);
+    g.drawRoundedRectangle (box, 7.0f, 1.0f);
     if (isMouseOver (true) && nameArea().contains (getMouseXYRelative()))
     {
         g.setColour (juce::Colours::white.withAlpha (0.03f));

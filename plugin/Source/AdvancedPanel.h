@@ -8,14 +8,15 @@
 //   advanced
 //   (pre-delay) (damping) (width)
 //   (ducking)   (release) [freeze]
-//   (tape)      (auto eq)
+//   [ finish: (tape) (auto eq) (mud) ]   a dark box
 //   [ lfo 1 card ]
 //   [ lfo 2 card ]   (down to the bottom of the unit)
 // Clicking an LFO card swaps the knobs and cards for that LFO's full controls
 // (shape, rate / sync, retrig, drag handle, what it moves), in the same place,
 // so the console stays in view while you shape it.
 
-class AdvancedPanel : public juce::Component
+class AdvancedPanel : public juce::Component,
+                      private juce::Timer
 {
 public:
     explicit AdvancedPanel (RoomAudioProcessor&);
@@ -38,15 +39,18 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
     void setupKnob (Knob&, const juce::String& id, const juce::String& name,
-                    const juce::String& lo, const juce::String& mid, const juce::String& hi, float radius = 20.0f);
+                    const juce::String& lo, const juce::String& mid, const juce::String& hi, float radius = 18.0f);
 
     RoomAudioProcessor& proc;
-    Knob preDelay, space, damping, duck, duckRelease, tape, autoEq;   // "space" shows as width
+    Knob preDelay, space, damping, duck, duckRelease, tape, autoEq, mud;   // "space" shows as width
     std::vector<Knob*> allKnobs();
     juce::TextButton freeze { {} };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 
     LfoCard card1 { proc, 0 }, card2 { proc, 1 };
     int lfoTop = 340;
+    juce::Rectangle<float> finishBox;   // tape, auto eq, mud: a dark box on the light panel
     LfoPanel lfoPanel;
+    juce::StringArray names;   // each knob's label, shown again when it isn't being touched
+    void timerCallback() override;
 };
