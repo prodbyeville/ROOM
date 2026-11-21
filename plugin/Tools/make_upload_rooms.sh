@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Makes the factory ROOMS that come from Eville's own synth and melodic sounds (ROOM 1.4.1)
+# Makes the factory ROOMS that come from Eville's own synth and melodic sounds
 # in plugin/Presets/Factory/. A .room keeps only the analysis, so the audio itself is not in
 # this repo: pass the folder it lives in.
 #

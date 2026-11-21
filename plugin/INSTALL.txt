@@ -147,5 +147,5 @@ FACTORY LIBRARY
   "made for" and character tag. 24 ROOMS come from sounds synthesized for
   ROOM (plugin/Tools/make_factory_presets.sh), 25 from Eville's own
   recordings (plugin/Tools/make_pack_rooms.sh) and 15 from Eville's synth
-  and melodic sounds (plugin/Tools/make_upload_rooms.sh, new in 1.4.1). A ROOM keeps only the
+  and melodic sounds (plugin/Tools/make_upload_rooms.sh). A ROOM keeps only the
   analysis, never the audio.

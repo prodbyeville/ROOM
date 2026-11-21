@@ -3,7 +3,7 @@
 ; Puts ROOM.vst3 in the standard VST3 folder and adds an uninstaller.
 
 #ifndef AppVersion
-  #define AppVersion "1.4.1"
+  #define AppVersion "1.0.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\..\package"
