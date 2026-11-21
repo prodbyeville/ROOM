@@ -1,0 +1,26 @@
+{
+  "depth": {
+    "kx": 0.4,
+    "ky": 1.0
+  },
+  "t0": 0.0,
+  "t1": 5.0,
+  "envelope": [
+    -0.01,
+    0.8,
+    5.5,
+    6.0
+  ],
+  "strength": 16,
+  "max_blur": 7,
+  "focus_from": [
+    0.55,
+    0.42
+  ],
+  "focus_to": [
+    0.55,
+    0.42
+  ],
+  "in": "/tmp/claude-0/-home-user-ROOM/862feb5a-312a-5fcb-b6f4-d0c74ca69c6a/scratchpad/12_wide_hero_conform.mp4",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/12_wide_hero_final.mp4"
+}

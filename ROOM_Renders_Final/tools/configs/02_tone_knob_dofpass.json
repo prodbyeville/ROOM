@@ -1,0 +1,26 @@
+{
+  "in": "/home/user/ROOM/ROOM_Renders_Final/04_Video/02_tone_knob_bold.mp4",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/02_tone_knob_final.mp4",
+  "depth": {
+    "kx": 0.35,
+    "ky": 1.0
+  },
+  "focus_from": [
+    0.5,
+    0.47
+  ],
+  "focus_to": [
+    0.5,
+    0.47
+  ],
+  "t0": 0.0,
+  "t1": 5.0,
+  "envelope": [
+    -0.01,
+    0.6,
+    5.5,
+    6.0
+  ],
+  "strength": 30,
+  "max_blur": 10
+}

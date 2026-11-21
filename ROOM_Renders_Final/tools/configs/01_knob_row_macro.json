@@ -1,0 +1,70 @@
+{
+  "plate": "/home/user/ROOM/ROOM_Renders_Final/05_Sharp_Plates/01_knob_row_macro_sharp.png",
+  "out": "/home/user/ROOM/ROOM_Renders_Final/04_Video/01_knob_row_macro_v4.mp4",
+  "duration": 5,
+  "camera": {
+    "zoom_start": 1.03,
+    "zoom_end": 1.12,
+    "center_start": [
+      0.5,
+      0.5
+    ],
+    "center_end": [
+      0.54,
+      0.48
+    ],
+    "parallax_px": 20
+  },
+  "depth": {
+    "kx": 0.5,
+    "ky": 1.0
+  },
+  "focus": {
+    "points": [
+      [
+        0.335,
+        0.56
+      ],
+      [
+        0.585,
+        0.45
+      ]
+    ],
+    "t0": 1.0,
+    "t1": 3.8,
+    "strength": 48,
+    "max_blur": 16
+  },
+  "knobs": [
+    {
+      "name": "INTENSITY",
+      "cx": 952,
+      "cy": 913,
+      "a": 152,
+      "b": 60,
+      "tilt": -3,
+      "angle": 8,
+      "t0": 0.15,
+      "t1": 1.4,
+      "inner": 0.8
+    },
+    {
+      "name": "TONE",
+      "cx": 1648,
+      "cy": 740,
+      "a": 128,
+      "b": 46,
+      "tilt": 0,
+      "angle": 8,
+      "t0": 2.6,
+      "t1": 4.3,
+      "inner": 0.8
+    }
+  ],
+  "highlight": {
+    "from": -0.9,
+    "to": 0.9,
+    "width": 0.25,
+    "strength": 0.06
+  }
+}
