@@ -14,6 +14,7 @@ The final video download is in [`../ROOM_Videos_Final/`](../ROOM_Videos_Final/) 
 | `03_Abstract/` | Room cards and wireframe box as physical objects: A hero card, B ring, D card edge macro, I box alone. |
 | `04_Video/` | Final processed clips (`*_final.mp4`) and `SHOT_LIST.md`. Approved clip 01 (v7b) and 02 are in `../ROOM_Videos_Final/01_Approved/`. Raw Kling downloads and the clip 01 test versions are not kept in git; re-download them from Higgsfield using the job IDs below. |
 | `05_Sharp_Plates/` | All-in-focus plates and built end frames used for the video tests. |
+| `06_Lower_Third/` | Product lower third: the 3D room box pops up and drifts, then "room" and PRODBYEVILLE.COM wipe in, with grain, halation and gate weave. Only the hold still is committed; render the videos with `python3 tools/lower_third.py` (about 5 min). |
 | `tools/` | Scripts (see below). |
 
 ## Brand and look (keep consistent)
