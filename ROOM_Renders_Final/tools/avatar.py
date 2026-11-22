@@ -20,10 +20,10 @@ DEEP = np.array((186, 39, 39), np.float32) / 255
 
 N = 1080          # working size
 SS = 2
-FRAME = 760          # front frame size in px at 1080 (keeps the corners inside the circle crop)
+FRAME = 820          # front frame size in px at 1080 (keeps the corners inside the circle crop)
 LINE = 3.0           # line weight in px
-LOGO_H = 0.43        # logo height as a fraction of the front frame
-LOGO_BASE = 336      # where the logo stands on the floor, in mark units (back wall bottom is 308)
+LOGO_H = 0.47        # logo height as a fraction of the front frame
+LOGO_BASE = 340      # where the logo stands on the floor, in mark units (back wall bottom is 308)
 BW, BD, BH = 1.30, 1.00, 1.00
 YAW, PITCH, CAM_D = math.radians(-20), math.radians(17), 6.0
 SCALE = 455.0
