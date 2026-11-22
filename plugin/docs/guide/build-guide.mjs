@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 const here = path.dirname(fileURLToPath(import.meta.url));
-const out = process.argv[2] ?? path.join(here, "../../dist/ROOM-Guide.pdf");
+const out = process.argv[2] ?? path.join(here, "ROOM-Guide.pdf");   // committed: the release zips bundle it
 fs.mkdirSync(path.dirname(out), { recursive: true });
 const browser = await chromium.launch({ args: ["--allow-file-access-from-files"] });
 const page = await browser.newPage();
