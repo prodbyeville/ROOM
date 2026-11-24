@@ -7,6 +7,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "RoomMenu.h"
 #include "dsp/PartitionedConvolver.h"
 #include "dsp/ResonanceSuppressor.h"
 #include "presets/PresetLibrary.h"
@@ -84,7 +85,7 @@ namespace
 
         check (lib.countInPack (PresetLibrary::factoryPack) >= 10, "factory presets are present");
         check (lib.getUnreadableCount() == 0, "all factory presets parse");
-        check (lib.getPacks()[0] == "Factory" && lib.getPacks()[1] == "User", "pack order: Factory, User, ...");
+        check (lib.getPacks()[0] == "Factory" && lib.getPacks()[1] == "Eville" && lib.getPacks()[2] == "User", "pack order: Factory, Eville, User, ...");
         const auto studios = root.getChildFile ("STUDIOS");
         check (studios.getChildFile ("User").isDirectory(), "User pack folder is created");
 
@@ -163,7 +164,7 @@ namespace
         // Pack names
         check (! PresetLibrary::isValidPackName ("Factory"), "can't create a pack called Factory");
         check (! PresetLibrary::isValidPackName ("a/b"), "pack names can't contain slashes");
-        check (PresetLibrary::isValidPackName ("Eville"), "normal pack names are fine");
+        check (PresetLibrary::isValidPackName ("MyPack"), "normal pack names are fine");
         check (toFileName ("  Big: Room?. ") == "Big Room", "file names are made safe");
     }
 
@@ -261,13 +262,13 @@ namespace
 
         // Edit tags + move to a new pack; favorite follows.
         lib.setFavorite (key, true);
-        check (lib.createPack ("Eville", err), "create pack");
+        check (lib.createPack ("MyPack", err), "create pack");
         meta.name = "Renamed Room";
         meta.type = "Hall";
         meta.styles = { "Dark" };
         juce::String newKey;
-        check (lib.updateMeta (key, meta, "Eville", newKey, err), "edit + move: " + err);
-        check (newKey == "Eville/Renamed Room" && lib.find (key) == nullptr, "moved to new pack");
+        check (lib.updateMeta (key, meta, "MyPack", newKey, err), "edit + move: " + err);
+        check (newKey == "MyPack/Renamed Room" && lib.find (key) == nullptr, "moved to new pack");
         check (lib.find (newKey) != nullptr && lib.find (newKey)->favorite, "favorite follows a rename");
         check (lib.find (newKey)->meta.type == "Hall" && lib.find (newKey)->meta.styles == juce::StringArray { "Dark" }, "edited tags");
         check (lib.loadPreset (*lib.find (newKey)).getChildWithName ("PARAMS").getNumChildren() > 10, "sound kept after edit");
@@ -275,12 +276,12 @@ namespace
         // Import (name clash gets a new name) and export
         const auto exportDir = root.getSiblingFile ("rooms_export");
         exportDir.deleteRecursively();
-        check (lib.exportPack ("Eville", exportDir), "export pack");
-        check (exportDir.getChildFile ("Eville/Renamed Room.studio").existsAsFile(), "exported file exists");
+        check (lib.exportPack ("MyPack", exportDir), "export pack");
+        check (exportDir.getChildFile ("MyPack/Renamed Room.studio").existsAsFile(), "exported file exists");
         check (lib.exportPack ("Factory", exportDir) && exportDir.getChildFile ("Factory/Big Hall.studio").existsAsFile(),
                "factory pack can be exported");
-        const auto imported = lib.importFiles ({ exportDir.getChildFile ("Eville/Renamed Room.studio") }, "Eville");
-        check (imported == 1 && lib.countInPack ("Eville") == 2, "import with a name clash keeps both");
+        const auto imported = lib.importFiles ({ exportDir.getChildFile ("MyPack/Renamed Room.studio") }, "MyPack");
+        check (imported == 1 && lib.countInPack ("MyPack") == 2, "import with a name clash keeps both");
         exportDir.deleteRecursively();
 
         // Delete
@@ -661,6 +662,8 @@ namespace
             const auto before = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                               + paramValue (rig.proc, ParamIDs::size);
             juce::Random r (11);
+            check (room::Randomizer::isSelected (rig.proc, "room"), "Randomize picks a new room by default");
+            room::Randomizer::setSelected (rig.proc, "room", false);   // the room on its own: below
             room::Randomizer::randomizeSelected (rig.proc, r);
             const auto after = paramValue (rig.proc, ParamIDs::intensity) + paramValue (rig.proc, ParamIDs::tail)
                              + paramValue (rig.proc, ParamIDs::size);
@@ -669,7 +672,7 @@ namespace
             check (std::abs (paramValue (rig.proc, ParamIDs::output) + 4.0f) < 0.05f, "Randomize keeps Output");
             check (paramValue (rig.proc, ParamIDs::bypass) < 0.5f && paramValue (rig.proc, ParamIDs::freeze) < 0.5f,
                    "Randomize never bypasses or freezes");
-            check (analysisXml (rig.proc) == room, "Randomize keeps the room");
+            check (analysisXml (rig.proc) == room, "Randomize keeps the room when room isn't ticked");
             for (int k = 0; k < 50; ++k)
             {
                 room::Randomizer::randomizeSelected (rig.proc, r);
@@ -907,7 +910,7 @@ namespace
         check (rooms.countInPack (PresetLibrary::factoryPack) >= 6, "factory ROOMS are present");
         bool roomsKnown = true;
         for (auto& e : studios.getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
                 roomsKnown = roomsKnown && rooms.find ("Factory/" + e.meta.roomName) != nullptr && e.meta.madeFor.size() > 0;
         check (roomsKnown, "every factory STUDIO names a factory ROOM and has Made for tags");
         check (rooms.getUnreadableCount() == 0, "factory ROOMS parse");
@@ -917,7 +920,7 @@ namespace
         for (auto& e : rooms.getEntries())
         {
             allTagged = allTagged && allDecayTags().contains (e.tags.decay) && allToneTags().contains (e.tags.tone)
-                        && e.tags.source == "Factory";
+                        && (e.pack != "Factory" || e.tags.source == "Factory");   // Eville's own keep where they came from (e.g. recorded)
             std::cout << "    " << e.meta.name << ": " << e.tags.decay << " " << juce::String (e.tags.medianT60, 2)
                       << " s, " << e.tags.tone << " (" << juce::String (e.tags.toneTiltDb, 1) << " dB)\n";
         }
@@ -1050,7 +1053,7 @@ namespace
         noRoom.removeChild (noRoom.getChildWithName ("ROOM_ANALYSIS"), nullptr);
         lm.name = "Knobs Only";
         writeMeta (noRoom, lm);
-        save (noRoom, oldBase.getChildFile ("ROOMS/Eville/Knobs Only.room"));
+        save (noRoom, oldBase.getChildFile ("ROOMS/MyPack/Knobs Only.room"));
         oldBase.getChildFile ("ROOMS/favorites.xml").replaceWithText (
             "<ROOMS_FAVORITES><FAVORITE key=\"User/My Old Hall\"/></ROOMS_FAVORITES>");
 
@@ -1058,14 +1061,14 @@ namespace
         old.setPresetRoot (oldBase);
         auto& oldStudios = old.getLibrary();
         auto& oldRooms = old.getRoomLibrary();
-        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("Eville/Knobs Only") != nullptr,
+        check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("MyPack/Knobs Only") != nullptr,
                "old presets became STUDIOS");
         check (oldStudios.find ("User/My Old Hall") != nullptr && oldStudios.find ("User/My Old Hall")->favorite,
                "favorites carried over to STUDIOS");
         check (oldRooms.find ("User/My Old Hall") != nullptr && oldRooms.find ("User/My Old Hall")->favorite
                    && oldRooms.find ("User/My Old Hall")->meta.type == readMeta (legacyPreset).type,
                "their rooms became ROOMS (same name, type, favorite)");
-        check (oldRooms.find ("Eville/Knobs Only") == nullptr && oldRooms.getUnreadableCount() == 0,
+        check (oldRooms.find ("MyPack/Knobs Only") == nullptr && oldRooms.getUnreadableCount() == 0,
                "a preset without a room only becomes a STUDIO");
         const auto studioCount = oldStudios.getEntries().size();
         check (PresetLibrary::migrateLegacy (oldBase.getChildFile ("ROOMS"), oldBase.getChildFile ("STUDIOS")) == 0,
@@ -1208,7 +1211,7 @@ namespace
         check (rooms >= 45 && studios >= 40, "the factory library has 45+ ROOMS and 40+ STUDIOS");
         for (auto& e : lib.getEntries())
         {
-            if (! e.factory) continue;
+            if (! e.factory || e.pack != "Factory") continue;
             const auto r = measurePreset (e.key);
             allFinite = allFinite && r.finite;
             if (r.peakDb > -0.1f) { allPeaks = false; bad.add (e.meta.name + " peak " + juce::String (r.peakDb, 1)); }
@@ -1238,7 +1241,7 @@ namespace
                 w->writeFromAudioSampleBuffer (dry, 0, dry.getNumSamples());
         }
         for (auto& e : p.getLibrary().getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
             {
                 juce::AudioBuffer<float> out;
                 measurePreset (e.key, &out);
@@ -1260,7 +1263,7 @@ namespace
         p.setPresetRoot (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("room_level_presets"));
         std::printf ("%-20s %8s %10s %8s\n", "studio", "peak dB", "level dB", "tail dB");
         for (auto& e : p.getLibrary().getEntries())
-            if (e.factory)
+            if (e.factory && e.pack == "Factory")   // the Factory library's own standards (Eville's pack is as he made it)
             {
                 const auto r = measurePreset (e.key);
                 std::printf ("%-20s %8.1f %10.1f %8.1f%s\n", e.meta.name.toRawUTF8(), r.peakDb, r.rmsDiffDb, r.tailDb, r.finite ? "" : "  NaN!");
@@ -1296,7 +1299,7 @@ namespace
             {
                 tour->showStep (1); tour->showStep (2);
                 check (tour->isVisible() && tour->getStep() == 2, "the tour steps through");
-                tour->showStep (3);
+                tour->showStep (6);   // six steps: past the last one closes it
                 check (! tour->isVisible(), "done closes the tour");
             }
         }
@@ -1773,24 +1776,47 @@ namespace
         // --- Noise loops are seamless ---
         {
             room::NoiseBank bank;
-            check (bank.size() == room::NoiseBank::names().size() && bank.size() >= 1, "every noise profile has a loop");
-            float worstJump = 0.0f, typical = 0.0f;
+            check (bank.size() == room::NoiseBank::names().size() && bank.size() >= 4, "every noise profile has a slot");
+            check (room::NoiseBank::names()[0] == "vinyl" && room::NoiseBank::names()[3] == "room tone",
+                   "the four 1.0.2 noises keep their places (projects saved the index)");
+           #if ROOM_HAS_NOISE_FILES
+            check (bank.size() >= 50, "the recorded noises are listed (" + juce::String (bank.size()) + ")");
+           #endif
+            // Unpacked only when asked for: a recording isn't in memory until it's chosen.
+            if (bank.size() > 4)
+            {
+                const auto* before = bank.tryGet (bank.size() - 1);
+                juce::Thread::sleep (400);
+                const auto* after = bank.tryGet (bank.size() - 1);
+                check (before == nullptr && after != nullptr, "a recording is unpacked on the bank's thread when it's asked for");
+            }
+            float worstJump = 0.0f;
+            int loaded = 0;
+            juce::String worstName;
             for (int i = 0; i < bank.size(); ++i)
             {
-                const auto& a = bank.get (i).audio;
-                const auto n = a.getNumSamples();
+                const auto* l = bank.getNow (i);
+                if (l == nullptr)
+                    continue;
+                ++loaded;
+                const auto n = l->length;
                 for (int ch = 0; ch < 2; ++ch)
                 {
-                    double sum = 0.0;
+                    // the wrap (last sample -> first) should look like any other step: compare
+                    // it with the loop's own 99.9th percentile step
+                    std::vector<float> steps;
+                    steps.reserve ((size_t) n);
                     for (int k = 1; k < n; ++k)
-                        sum += std::abs (a.getSample (ch, k) - a.getSample (ch, k - 1));
-                    const auto mean = (float) (sum / (n - 1));
-                    typical = std::max (typical, mean);
-                    // the wrap (last sample -> first) should look like any other step
-                    worstJump = std::max (worstJump, std::abs (a.getSample (ch, 0) - a.getSample (ch, n - 1)) / std::max (1.0e-6f, mean));
+                        steps.push_back (std::abs (l->sample (ch, k) - l->sample (ch, k - 1)));
+                    std::nth_element (steps.begin(), steps.begin() + (long) (steps.size() * 999 / 1000), steps.end());
+                    const auto p999 = std::max (1.0e-5f, steps[steps.size() * 999 / 1000]);
+                    const auto jump = std::abs (l->sample (ch, 0) - l->sample (ch, n - 1)) / p999;
+                    if (jump > worstJump) { worstJump = jump; worstName = room::NoiseBank::names()[i]; }
                 }
             }
-            check (worstJump < 8.0f, "noise loops wrap without a click (" + juce::String (worstJump, 1) + "x a normal step)");
+            check (loaded == bank.size(), "every noise unpacks (" + juce::String (loaded) + " of " + juce::String (bank.size()) + ")");
+            check (worstJump <= 1.0f, "noise loops wrap without a click (worst: " + worstName + ", "
+                                          + juce::String (worstJump, 2) + "x its own biggest steps)");
 
             // A sine with a non-whole number of cycles: the crossfade hides the seam.
             juce::AudioBuffer<float> sine (2, 44100);
@@ -1940,25 +1966,12 @@ namespace
             ed.turnByHand (true, 0.3);
             check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.3f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.5f) < 0.011f,
                    "tone moves on its own (space stays)");
-            SyncDot* toneSync = nullptr;
-            std::function<void (juce::Component&)> findSync = [&] (juce::Component& c)
-            {
-                if (auto* d = dynamic_cast<SyncDot*> (&c); d != nullptr && d->getTooltip().startsWith ("sync: tone"))
-                    toneSync = d;
-                for (auto* child : c.getChildren()) findSync (*child);
-            };
-            findSync (ed);
-            check (toneSync != nullptr, "tone and space have a sync button");
-            if (toneSync != nullptr)
-                toneSync->setToggleState (true, juce::sendNotificationSync);
-            check (paramValue (p, ParamIDs::toneSpaceSync) > 0.5f, "the sync button sets tone/space sync");
+            // tone / space sync is retired: even a project with it on moves only the knob you turn
+            setParam (p, ParamIDs::toneSpaceSync, 1.0f);
             ed.turnByHand (true, 0.5);
-            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.5f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.3f) < 0.011f,
-                   "with sync on, turning tone up turns space down by as much");
-            ed.turnByHand (false, 0.6);
-            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.2f) < 0.011f, "and the other way round");
-            if (toneSync != nullptr)
-                toneSync->setToggleState (false, juce::sendNotificationSync);
+            check (std::abs (paramValue (p, ParamIDs::toneAmount) - 0.5f) < 0.011f && std::abs (paramValue (p, ParamIDs::spaceAmount) - 0.5f) < 0.011f,
+                   "tone / space sync is gone: turning tone leaves space alone");
+            setParam (p, ParamIDs::toneSpaceSync, 0.0f);
 
             // Old presets and projects had one balance b: they load as tone 1 - b, space b.
             {
@@ -2035,10 +2048,10 @@ namespace
             auto& rooms = p.getRoomLibrary();
             const auto factoryKey = rooms.getEntries().front().key;
             const auto tree = rooms.loadPreset (*rooms.find (factoryKey));
-            rooms.getRoot().getChildFile ("Eville").createDirectory();
-            room::presets::save (tree, rooms.getRoot().getChildFile ("Eville").getChildFile ("Stairwell" + juce::String (room::presets::extensionFor (Kind::room))));
+            rooms.getRoot().getChildFile ("MyPack").createDirectory();
+            room::presets::save (tree, rooms.getRoot().getChildFile ("MyPack").getChildFile ("Stairwell" + juce::String (room::presets::extensionFor (Kind::room))));
             rooms.rescan();
-            const auto* mine = rooms.find ("Eville/Stairwell");
+            const auto* mine = rooms.find ("MyPack/Stairwell");
             check (mine != nullptr, "a room in a user pack (Eville) is in the library");
             for (int s = 0; s < room::presets::PresetLibrary::numQuickSlots; ++s)
                 rooms.setQuickSlot (s, {});
@@ -2046,10 +2059,10 @@ namespace
             if (auto* stage = findChild<LoadScreen> (ed))
             {
                 stage->refreshCards();
-                check (stage->cardKeys().contains ("Eville/Stairwell"), "user-pack rooms show on the stage before factory ones");
-                rooms.setQuickSlot (3, "Eville/Stairwell");
+                check (stage->cardKeys().contains ("MyPack/Stairwell"), "user-pack rooms show on the stage before factory ones");
+                rooms.setQuickSlot (3, "MyPack/Stairwell");
                 stage->refreshCards();
-                check (stage->cardKeys()[0] == "Eville/Stairwell", "a user-pack room in a quick slot is on the stage");
+                check (stage->cardKeys()[0] == "MyPack/Stairwell", "a user-pack room in a quick slot is on the stage");
                 rooms.setQuickSlot (3, {});
             }
             auto* strip = findChild<room::presets::QuickSlotStrip> (ed);
@@ -2062,11 +2075,11 @@ namespace
                                         strip->slotBounds (1).getCentre(), juce::Time::getCurrentTime(), 1, false);
                 strip->mouseUp (click);
                 check (strip->getArmed() == 1, "clicking an empty slot waits for a room");
-                strip->fillArmed ("Eville/Stairwell");
-                check (rooms.getQuickSlots()[1] == "Eville/Stairwell" && strip->getArmed() < 0, "the next room clicked fills it");
+                strip->fillArmed ("MyPack/Stairwell");
+                check (rooms.getQuickSlots()[1] == "MyPack/Stairwell" && strip->getArmed() < 0, "the next room clicked fills it");
                 rooms.setQuickSlot (1, {});
             }
-            rooms.getRoot().getChildFile ("Eville").deleteRecursively();
+            rooms.getRoot().getChildFile ("MyPack").deleteRecursively();
             rooms.rescan();
         }
     }
@@ -2086,7 +2099,7 @@ namespace
             return d / e;
         };
 
-        // --- Extreme: 165 % and below don't use the bloom; at 200 % no gating, harmonic, bounded ---
+        // --- Extreme (180..200 %): 187 % and below don't use the bloom; at 200 % no gating, harmonic, bounded ---
         {
             auto render = [] (float e, bool withNotes, std::vector<float>& out)
             {
@@ -2105,9 +2118,9 @@ namespace
                 }
             };
             std::vector<float> a, b;
-            render (0.6f, false, a);
-            render (0.6f, true, b);
-            check (a == b, "at 160 % the bloom isn't used (the room's notes change nothing)");
+            render (0.35f, false, a);
+            render (0.35f, true, b);
+            check (a == b, "at 187 % the bloom isn't used (the room's notes change nothing)");
             render (1.0f, true, b);
             bool finite = true;
             float peak = 0.0f;
@@ -2124,7 +2137,7 @@ namespace
             const auto median = sorted[sorted.size() / 2], lowest = sorted.front();
             check (lowest > 0.25 * median, "at 200 % nothing gates the sound out (quietest 20 ms at "
                                            + juce::String (lowest / median * 100.0, 0) + " % of typical)");
-            check (hfRatio (b, 48000, b.size()) < hfRatio (a, 48000, a.size()), "at 200 % the sound is more tonal than at 160 % (less hiss, more notes)");
+            check (hfRatio (b, 48000, b.size()) < hfRatio (a, 48000, a.size()), "at 200 % the sound is more tonal than at 187 % (less hiss, more notes)");
         }
 
         // --- Smooth: off is untouched; on tucks the attack, keeps the body, darkens the top ---
@@ -2194,6 +2207,45 @@ namespace
                                                + juce::String (lossDb, 2) + " dB), no crunch");
         }
 
+        // --- A known newer version is announced by itself; "later" holds it off a day ---
+        if (auto settings = UpdateChecker::openSettings())
+        {
+            const auto oldLatest = settings->getValue ("latestVersion");
+            const auto oldSnooze = settings->getValue ("updateSnoozed"), oldAt = settings->getValue ("updateSnoozedAt");
+            settings->setValue ("latestVersion", "99.0.0");
+            settings->removeValue ("updateSnoozed");
+            settings->removeValue ("updateSnoozedAt");
+            settings->saveIfNeeded();
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (ed.wouldAnnounceUpdate(), "a newer version is announced without asking");
+                ed.snoozeUpdate();
+                check (! ed.wouldAnnounceUpdate(), "and only once");
+            }
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (! ed.wouldAnnounceUpdate(), "after later, that version waits a day");
+            }
+            if (auto s2 = UpdateChecker::openSettings()) { s2->setValue ("latestVersion", "99.1.0"); s2->saveIfNeeded(); }
+            {
+                RoomAudioProcessor p;
+                p.setPresetRoot (root);
+                RoomAudioProcessorEditor ed (p);
+                check (ed.wouldAnnounceUpdate(), "an even newer version is announced straight away");
+            }
+            if (auto s3 = UpdateChecker::openSettings())
+            {
+                s3->setValue ("latestVersion", oldLatest);
+                s3->setValue ("updateSnoozed", oldSnooze);
+                s3->setValue ("updateSnoozedAt", oldAt);
+                s3->saveIfNeeded();
+            }
+        }
+
         // --- Size reads 0..100 %, 50 % = the room as measured (1x) ---
         {
             RoomAudioProcessor pp;
@@ -2241,6 +2293,344 @@ namespace
             for (auto [id, v] : std::initializer_list<std::pair<const char*, float>> { { ParamIDs::noiseLevel, 0.0f }, { ParamIDs::rate, 44100.0f },
                      { ParamIDs::rateDry, 1.0f }, { ParamIDs::rateReverb, 1.0f }, { ParamIDs::rateNoise, 1.0f }, { ParamIDs::mix, 1.0f } })
                 setParam (rig.proc, id, v);
+        }
+    }
+
+    // Round 6: Intensity's room artifacts (100..180 %), Tune to key, Imprint, pack covers /
+    // delete, randomizing the room and the menu geometry.
+    void testRound6 (const juce::File& root)
+    {
+        std::cout << "round 6/7: the room falling apart / pitch / mud / imprint / packs / menus\n";
+        constexpr double sr = 48000.0;
+        auto noiseOf = [] (int n, int seed, float level = 0.25f)
+        {
+            std::vector<float> v ((size_t) n);
+            juce::Random r (seed);
+            for (auto& x : v) x = (r.nextFloat() * 2.0f - 1.0f) * level;
+            return v;
+        };
+        auto rmsOf = [] (const std::vector<float>& x, size_t a, size_t b)
+        {
+            double e = 0.0;
+            for (auto i = a; i < std::min (b, x.size()); ++i) e += (double) x[i] * x[i];
+            return 10.0 * std::log10 (e / (double) std::max<size_t> (1, std::min (b, x.size()) - a) + 1e-20);
+        };
+
+        // --- RoomCharacter: idle at 0; flutter, comb and push are each there; level kept ---
+        {
+            auto runChar = [&] (float amount, const std::vector<float>& in)
+            {
+                room::RoomCharacter c;
+                c.prepare (sr, 2);
+                c.setRoom (25.0f, 1.6f);
+                c.setAmount (amount);
+                std::vector<float> out;
+                for (auto x : in)
+                {
+                    float w[2] = { x, x };
+                    c.processSample (w, 2);
+                    out.push_back (w[0]);
+                }
+                return std::make_pair (out, c.isIdle());
+            };
+            const auto noise = noiseOf ((int) sr * 2, 21);
+            const auto [same, idle] = runChar (0.0f, noise);
+            check (same == noise && idle, "room artifacts are off up to 100 % (untouched)");
+
+            // an impulse train, one click every 250 ms: flutter repeats every 25 ms after each click
+            std::vector<float> clicks ((size_t) sr * 2, 0.0f);
+            for (size_t k = 0; k < clicks.size(); k += (size_t) (0.25 * sr)) clicks[k] = 0.8f;
+            const auto at160 = runChar (0.75f, clicks).first;
+            const auto at100 = runChar (0.0f, clicks).first;
+            const auto click = (size_t) (1.5 * sr), period = (size_t) (0.025 * sr);
+            auto around = [] (const std::vector<float>& x, size_t i) { float m = 0; for (size_t k = i - 4; k <= i + 4; ++k) m = std::max (m, std::abs (x[k])); return m; };
+            check (around (at160, click + period) > 0.05f && around (at100, click + period) == 0.0f,
+                   "flutter echo: the room repeats at its own period (" + juce::String (around (at160, click + period), 3) + ")");
+            check (around (at160, click + period + (size_t) (0.025 * 1.071 * sr)) > 0.01f, "flutter echo keeps bouncing (left to right and back)");
+            float near = 0;
+            for (auto k = click + (size_t) (0.0008 * sr); k < click + (size_t) (0.0024 * sr); ++k) near = std::max (near, std::abs (at160[k]));
+            check (near > 0.1f, "close-wall comb: a near reflection right after the sound");
+
+            // push: a bursty sound gets squeezed (crest factor down)
+            std::vector<float> bursts ((size_t) sr * 3);
+            juce::Random r (5);
+            for (size_t i = 0; i < bursts.size(); ++i)
+                bursts[i] = (r.nextFloat() * 2.0f - 1.0f) * ((i / 2400) % 4 == 0 ? 0.6f : 0.03f);
+            auto crest = [] (const std::vector<float>& x)
+            {
+                double e = 0; float pk = 0;
+                for (size_t i = x.size() / 3; i < x.size(); ++i) { e += (double) x[i] * x[i]; pk = std::max (pk, std::abs (x[i])); }
+                return pk / std::sqrt (e / (double) (x.size() - x.size() / 3));
+            };
+            const auto pushed = runChar (1.0f, bursts).first;
+            check (crest (pushed) < 0.8 * crest (bursts), "pushed mic squeezes the room (crest " + juce::String (crest (bursts), 1)
+                                                            + " -> " + juce::String (crest (pushed), 1) + ")");
+            const auto full = runChar (1.0f, noise).first;
+            bool finite = true;
+            for (auto x : full) finite = finite && std::isfinite (x);
+            const auto dIn = rmsOf (noise, (size_t) sr, noise.size()), dOut = rmsOf (full, (size_t) sr, full.size());
+            check (finite && dOut - dIn > -3.0 && dOut - dIn < 5.0, "the falling-apart room stays near the room's level (" + juce::String (dOut - dIn, 1) + " dB)");
+            check (room::RoomCharacter::ringAmount (0.0f) == 0.0f && room::RoomCharacter::ringAmount (0.4f) == 1.0f,
+                   "the room's notes ring from 100 % and are full at 130 %");
+        }
+
+        // --- The whole plugin at 100 / 140 / 180 %: different, finite, near the room's level ---
+        {
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::toneAmount, 0.6f);
+            const auto in = noiseOf ((int) (0.6 * sr), 3);
+            auto at = [&] (float v) { setParam (rig.proc, ParamIDs::intensity, v); rig.settle(); return rig.run (in, 1.5); };
+            const auto a = at (2.0f), b = at (2.5f), c = at (3.5f);
+            float d1 = 0, d2 = 0; bool finite = true;
+            for (size_t i = 0; i < a.size(); ++i)
+            {
+                d1 = std::max (d1, std::abs (b[i] - a[i])); d2 = std::max (d2, std::abs (c[i] - b[i]));
+                finite = finite && std::isfinite (b[i]) && std::isfinite (c[i]);
+            }
+            check (finite && d1 > 0.01f && d2 > 0.01f, "125 % and 175 % each change the room");
+            // clearly audible: the difference from 100 % is within 6 dB of the room itself at 125 %
+            std::vector<float> diff (a.size());
+            for (size_t i = 0; i < a.size(); ++i) diff[i] = b[i] - a[i];
+            const auto l100 = rmsDb (a, 0.0, 1.5), lDiff = rmsDb (diff, 0.0, 1.5), l175 = rmsDb (c, 0.0, 1.5);
+            check (lDiff > l100 - 6.0, "at 125 % the room has clearly changed (difference " + juce::String (lDiff - l100, 1) + " dB of the room)");
+            float peak = 0; for (auto x : c) peak = std::max (peak, std::abs (x));
+            check (peak < 4.0f, "175 % stays bounded (peak " + juce::String (peak, 2) + ")");
+            check (std::abs (l175 - l100) < 8.0, "175 % stays near the room's level (" + juce::String (l175 - l100, 1) + " dB)");
+        }
+
+        // --- Pitch: dry in the middle, an octave either side; room only ---
+        {
+            auto run = [&] (float amount)
+            {
+                room::OctaveShift o;
+                o.prepare (sr, 2);
+                o.setAmount (amount);
+                std::vector<float> out;
+                for (int i = 0; i < (int) sr; ++i)
+                {
+                    const auto x = 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sr);
+                    float w[2] = { x, x };
+                    o.processSample (w, 2);
+                    out.push_back (w[0]);
+                }
+                return out;
+            };
+            const auto dry = run (0.0f);
+            bool same = true;
+            for (int i = 0; i < (int) sr; ++i)
+                same = same && dry[(size_t) i] == 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sr);
+            check (same, "pitch in the middle leaves the room untouched");
+            auto energyAt = [&] (const std::vector<float>& x, double hz)
+            {
+                double re = 0, im = 0;
+                for (size_t i = x.size() / 2; i < x.size(); ++i)
+                {
+                    re += x[i] * std::cos (juce::MathConstants<double>::twoPi * hz * (double) i / sr);
+                    im += x[i] * std::sin (juce::MathConstants<double>::twoPi * hz * (double) i / sr);
+                }
+                return re * re + im * im;
+            };
+            const auto up = run (1.0f), down = run (-1.0f);
+            check (energyAt (up, 440.0) > 4.0 * energyAt (up, 220.0), "pitch right: the room an octave up");
+            check (energyAt (down, 110.0) > 4.0 * energyAt (down, 220.0), "pitch left: the room an octave down");
+            check (room::Modulation::targetIndex (ParamIDs::pitch) >= 0, "an LFO can move pitch");
+
+            // the dry sound stays in tune (room only): with no room mixed in, pitch changes nothing
+            Rig rig (root);
+            setParam (rig.proc, ParamIDs::mix, 0.0f);
+            rig.settle();
+            const auto in = noiseOf ((int) (0.3 * sr), 6);
+            const auto plain = rig.run (in, 0.3);
+            setParam (rig.proc, ParamIDs::pitch, 1.0f);
+            rig.settle();
+            const auto shifted = rig.run (in, 0.3);
+            float worst = 0;
+            for (size_t i = 0; i < plain.size(); ++i) worst = std::max (worst, std::abs (shifted[i] - plain[i]));
+            check (worst < 1e-5f, "pitch leaves the dry sound alone");
+        }
+
+        // --- Mud: off is untouched; on cuts 350 Hz ---
+        {
+            auto run = [&] (float amount, double hz)
+            {
+                room::MudCut m;
+                m.prepare (sr);
+                m.setAmount (amount);
+                juce::AudioBuffer<float> buf (2, 512);
+                double e = 0.0, eIn = 0.0;
+                for (int block = 0; block < 100; ++block)
+                {
+                    for (int i = 0; i < 512; ++i)
+                    {
+                        const auto x = 0.3f * (float) std::sin (juce::MathConstants<double>::twoPi * hz * (block * 512 + i) / sr);
+                        buf.setSample (0, i, x); buf.setSample (1, i, x);
+                        if (block > 50) eIn += (double) x * x;
+                    }
+                    m.process (buf, 512);
+                    if (block > 50) for (int i = 0; i < 512; ++i) e += (double) buf.getSample (0, i) * buf.getSample (0, i);
+                }
+                return 10.0 * std::log10 (e / eIn);
+            };
+            check (run (0.0f, 350.0) == 0.0, "mud at 0 leaves the sound untouched");
+            const auto cut = run (1.0f, 350.0), far = run (1.0f, 3000.0);
+            check (cut < -5.0 && std::abs (far) < 1.0, "mud cuts the boxy 350 Hz (" + juce::String (cut, 1) + " dB) and leaves the top alone ("
+                                                     + juce::String (far, 1) + " dB)");
+        }
+
+        // --- Imprint ---
+        {
+            room::Imprint im;
+            im.prepare (sr, 2);
+            room::Imprint::Profile prof;
+            prof.valid = true;
+            for (int b = 0; b < room::Imprint::numBands; ++b) prof.bandDb[b] = -12.0f + 24.0f * (float) b / 8.0f;   // a bright room
+            im.setProfile (prof);
+            auto run = [&] (float amount, const std::vector<float>& in)
+            {
+                im.reset();
+                im.setAmount (amount);
+                juce::AudioBuffer<float> buf (2, 256);
+                std::vector<float> out;
+                for (size_t start = 0; start + 256 <= in.size(); start += 256)
+                {
+                    for (int i = 0; i < 256; ++i) buf.setSample (0, i, in[start + (size_t) i]), buf.setSample (1, i, in[start + (size_t) i]);
+                    im.process (buf, 256);
+                    for (int i = 0; i < 256; ++i) out.push_back (buf.getSample (0, i));
+                }
+                return out;
+            };
+            // pink-ish (dark) noise in
+            auto in = noiseOf ((int) sr * 3, 12, 0.3f);
+            float lp = 0; for (auto& x : in) { lp += (x - lp) * 0.05f; x = lp * 3.0f; }
+            const auto none = run (0.0f, in);
+            bool same = true;
+            for (size_t i = 0; i < none.size(); ++i) same = same && none[i] == in[i];
+            check (same && im.isIdle(), "imprint at 0 leaves the sound untouched");
+            const auto full = run (1.0f, in);
+            auto hfShare = [] (const std::vector<float>& x)
+            {
+                double e = 1e-20, d = 0.0;
+                for (size_t i = x.size() / 2; i < x.size(); ++i) { e += (double) x[i] * x[i]; d += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]); }
+                return d / e;
+            };
+            check (hfShare (full) > 2.0 * hfShare (none), "imprint gives a dark sound a bright room's timbre ("
+                                                          + juce::String (hfShare (none), 4) + " -> " + juce::String (hfShare (full), 4) + ")");
+            const auto l0 = rmsOf (none, none.size() / 2, none.size()), l1 = rmsOf (full, full.size() / 2, full.size());
+            check (std::abs (l1 - l0) < 3.0, "imprint keeps the level (" + juce::String (l1 - l0, 1) + " dB)");
+
+            Rig rig (root);
+            const auto latency = rig.proc.getLatencySamples();
+            setParam (rig.proc, ParamIDs::imprint, 1.0f);
+            rig.settle();
+            check (rig.proc.getLatencySamples() == latency, "imprint adds no latency");
+            const auto out = rig.run (noiseOf ((int) (0.5 * sr), 4), 0.5);
+            bool finite = true;
+            for (auto x : out) finite = finite && std::isfinite (x);
+            check (finite, "imprint on a real room stays finite");
+            check (room::Modulation::targetIndex (ParamIDs::imprint) >= 0, "an LFO can move Imprint");
+        }
+
+        // --- Randomize the room ---
+        {
+            Rig rig (root);
+            namespace R = room::Randomizer;
+            for (const auto& t : R::targets())
+                R::setSelected (rig.proc, t.key, juce::String (t.key) == "room");
+            juce::Random r (17);
+            const auto before = analysisXml (rig.proc);
+            const auto keyBefore = rig.proc.getCurrentRoomKey();
+            R::randomizeSelected (rig.proc, r);
+            check (analysisXml (rig.proc) != before && rig.proc.getCurrentRoomKey() != keyBefore,
+                   "randomize can pick a new room (" + rig.proc.getCurrentRoomKey() + ")");
+        }
+
+        // --- Eville's own pack: built in, read-only, with its cover, on both sides ---
+        {
+            Rig rig (root);
+            for (auto* libp : { &rig.proc.getLibrary(), &rig.proc.getRoomLibrary() })
+            {
+                auto& lib = *libp;
+                const auto packs = lib.getPacks();
+                int n = 0;
+                bool allBuiltIn = true;
+                for (const auto& e : lib.getEntries())
+                    if (e.pack == "Eville") { ++n; allBuiltIn = allBuiltIn && e.factory; }
+                const auto what = juce::String (lib.getKind() == room::presets::Kind::room ? "rooms" : "studios");
+                check (packs.indexOf ("Eville") == 1 && packs.indexOf ("Eville", false, 2) < 0, "the Eville pack comes right after Factory, once (" + what + ")");
+                check (n == (lib.getKind() == room::presets::Kind::room ? 10 : 14) && allBuiltIn, "the Eville " + what + " are all built in (" + juce::String (n) + ")");
+                check (lib.builtInCover ("Eville").isValid(), "the Eville pack has its cover (" + what + ")");
+                check (! room::presets::PresetLibrary::isEditablePack ("Eville"), "the Eville pack can't be deleted (" + what + ")");
+            }
+            // every Eville studio loads and plays
+            auto& studios = rig.proc.getLibrary();
+            bool allPlay = true;
+            const auto in = noiseOf ((int) (0.3 * sr), 2);
+            for (const auto& e : studios.getEntries())
+            {
+                if (e.pack != "Eville") continue;
+                rig.proc.applyPreset (studios.loadPreset (e), e.key);
+                rig.settle();
+                const auto out = rig.run (in, 0.5);
+                float peak = 0; bool finite = true;
+                for (auto x : out) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
+                if (! finite || peak < 1e-4f) { allPlay = false; std::cout << "    " << e.key << " doesn't play\n"; }
+            }
+            check (allPlay, "every Eville studio loads and plays");
+        }
+
+        // --- Pack cover and delete ---
+        {
+            Rig rig (root);
+            auto& lib = rig.proc.getLibrary();
+            juce::String err;
+            check (lib.createPack ("Cover Test", err), "make a pack for the cover test");
+            juce::Image img (juce::Image::RGB, 1600, 900, true);
+            juce::Graphics (img).fillAll (juce::Colours::orange);
+            const auto src = root.getChildFile ("cover-src.png");
+            { juce::FileOutputStream os (src); os.setPosition (0); os.truncate(); juce::PNGImageFormat().writeImageToStream (img, os); }
+            check (lib.setPackCover ("Cover Test", src, err) && lib.packCoverFile ("Cover Test").existsAsFile(), "a pack takes a cover image");
+            const auto cover = juce::ImageFileFormat::loadFrom (lib.packCoverFile ("Cover Test"));
+            check (cover.isValid() && cover.getWidth() <= 1200, "the cover is kept at most 1200 px wide");
+            lib.removePackCover ("Cover Test");
+            check (! lib.packCoverFile ("Cover Test").existsAsFile(), "a cover can be removed");
+            check (! lib.removePack ("Factory", err) && ! lib.removePack ("User", err), "Factory and User packs can't be deleted");
+            check (lib.removePack ("Cover Test", err), "a user pack can be deleted");
+            lib.rescan();
+            bool gone = true;
+            for (const auto& e : lib.getEntries()) gone = gone && e.pack != "Cover Test";
+            check (gone && ! lib.getPacks().contains ("Cover Test"), "a deleted pack is gone from the library");
+        }
+
+        // --- Menus: every highlight inside the panel; long menus break at headers ---
+        {
+            juce::PopupMenu m;
+            for (int sct = 0; sct < 6; ++sct)
+            {
+                m.addSectionHeader ("SECTION " + juce::String (sct));
+                for (int i = 0; i < 10; ++i)
+                    m.addItem ("item " + juce::String (sct) + "." + juce::String (i) + " with a long-ish name", [] {});
+                m.addSeparator();
+            }
+            juce::PopupMenu sub; sub.addItem ("inner", [] {});
+            m.addSubMenu ("more", sub);
+            auto menu = RoomMenu::createForTest (m);
+            const auto panel = menu->panelBounds();
+            bool inside = true;
+            for (const auto& e : menu->getEntries())
+                if (e.kind == RoomMenu::Entry::Kind::item)
+                    inside = inside && panel.reduced (1.0f).contains (menu->highlightFor (e));
+            check (inside, "every menu highlight sits inside the menu's panel");
+            check (menu->numColumns() >= 1, "the long menu is laid out");
+            bool headersFirst = true;
+            float lastX = -1.0f;
+            for (const auto& e : menu->getEntries())
+            {
+                if (e.kind == RoomMenu::Entry::Kind::separator) continue;
+                if (e.row.getX() > lastX + 1.0f && lastX >= 0.0f)
+                    headersFirst = headersFirst && e.kind == RoomMenu::Entry::Kind::header;
+                lastX = std::max (lastX, e.row.getX());
+            }
+            check (headersFirst, "menu columns start at a section header");
         }
     }
 
@@ -2383,7 +2773,7 @@ namespace
         // LFO panel chips
         {
             LfoModule module (p, 0);
-            module.setBounds (0, 0, 420, 150);
+            module.setBounds (0, 0, 420, 300);
             p.modulation.assign (0, M::targetIndex (ParamIDs::mix), 0.3f);
             const auto chips = module.targetChips();
             check (chips.size() == 2, "a chip per knob the LFO moves");
@@ -2434,6 +2824,8 @@ namespace
         bool allOwn = true, allMove = true;
         for (const auto& t : R::targets())
         {
+            if (t.params.empty())
+                continue;   // the room: it changes the room, not a parameter (tested on its own)
             tickOnly (t.key);
             bool moved = false;
             for (int k = 0; k < 8; ++k)
@@ -2542,6 +2934,7 @@ namespace
 
         // Open the requested view by clicking through the UI's own entry points.
         const auto mode = args[2];
+        bool filtersOpened = false;
         std::function<void (juce::Component&)> findAndShow = [&] (juce::Component& c)
         {
             for (auto* child : c.getChildren())
@@ -2551,6 +2944,19 @@ namespace
                         if ((b->getKind() == Kind::room) == (mode == "rooms")) { b->setVisible (true); b->toFront (false); }
                 if (mode == "save")
                     if (auto* bar = dynamic_cast<PresetBar*> (child)) if (bar->onSave) bar->onSave();
+                if (mode == "filters")
+                {
+                    if (auto* b = dynamic_cast<PresetBrowser*> (child))
+                        if (b->getKind() == Kind::studio) { b->setVisible (true); b->toFront (false); }
+                    if (auto* tb = dynamic_cast<juce::TextButton*> (child))
+                        if (tb->getButtonText().startsWith ("filters") && tb->onClick && ! filtersOpened
+                            && dynamic_cast<PresetBrowser*> (tb->getParentComponent()) != nullptr
+                            && dynamic_cast<PresetBrowser*> (tb->getParentComponent())->getKind() == Kind::studio)
+                        {
+                            filtersOpened = true;
+                            tb->onClick();
+                        }
+                }
                 if (mode == "newpack")
                 {
                     if (auto* b = dynamic_cast<PresetBrowser*> (child))
@@ -2565,8 +2971,19 @@ namespace
             }
         };
         findAndShow (ed);
+        if (mode == "lfo" || mode == "advlfo")
+        {
+            // a few LFO assignments, so the depth dots, arcs and chips show
+            using M = room::Modulation;
+            for (auto* id : { "size", "tape", "autoEq", "duck", "preDelay", "intensity" })
+                p.modulation.assign (0, M::targetIndex (id), 0.25f);
+            for (auto* id : { "tape", "mud", "damping" })
+                p.modulation.assign (1, M::targetIndex (id), -0.4f);
+        }
         if (mode == "lfo")
             ed.setAdvanced (true);
+        if (mode == "advlfo")
+            ed.setAdvancedOpen (true);
         if (mode == "advanced")
             ed.setAdvancedOpen (true);
         if (mode == "info")
@@ -2589,73 +3006,83 @@ namespace
         }
 
         auto img = ed.createComponentSnapshot (ed.getLocalBounds(), true, 1.0f);
-        if (mode == "menu" || mode == "mainmenu")
+        if (mode == "menu" || mode == "mainmenu" || mode == "noisemenu")
         {
-            // Draw the randomize menu and a knob's modulation menu with the editor's
-            // look and feel, laid over the snapshot where they would open.
-            auto& lf = ed.getLookAndFeel();
-            const juce::PopupMenu::Options opts;
-            auto drawMenu = [&] (juce::Point<int> at, std::vector<std::tuple<juce::String, int, bool, bool>> rows)
+            // ROOM's menus (RoomMenu), drawn over the snapshot where they would open
+            const auto scale = (float) img.getHeight() / (float) RoomAudioProcessorEditor::baseHeight;
+            auto drawMenu = [&] (juce::Point<int> at, const juce::PopupMenu& m, int hover)
             {
-                // rows: text, kind (0 item, 1 header, 2 separator, 3 submenu, 4 info line), ticked, highlighted
-                const auto border = lf.getPopupMenuBorderSizeWithOptions (opts);
-                int w = 0, h = 0;
-                for (auto& [text, kind, ticked, hi] : rows)
+                auto menu = RoomMenu::createForTest (m);
+                menu->setHoverForTest (hover);
+                juce::Image pic (juce::Image::ARGB, menu->getWidth(), menu->getHeight(), true);
                 {
-                    int iw = 0, ih = 0;
-                    lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
-                    w = std::max (w, iw);
-                    h += kind == 1 ? 26 : ih;
-                }
-                const auto scale = (float) img.getHeight() / (float) RoomAudioProcessorEditor::baseHeight;
-                juce::Image menu (juce::Image::ARGB, w + border * 2, h + border * 2, true);
-                {
-                    juce::Graphics g (menu);
-                    lf.drawPopupMenuBackgroundWithOptions (g, menu.getWidth(), menu.getHeight(), opts);
-                    int y = border;
-                    for (auto& [text, kind, ticked, hi] : rows)
-                    {
-                        int iw = 0, ih = 0;
-                        lf.getIdealPopupMenuItemSizeWithOptions (text, kind == 2, 30, iw, ih, opts);
-                        if (kind == 1)
-                        {
-                            lf.drawPopupMenuSectionHeaderWithOptions (g, { border, y, w, 26 }, text, opts);
-                            y += 26;
-                            continue;
-                        }
-                        juce::PopupMenu::Item item (text);
-                        item.isSeparator = kind == 2;
-                        item.isTicked = ticked;
-                        if (kind == 3)
-                            item.subMenu = std::make_unique<juce::PopupMenu>();
-                        item.isEnabled = kind != 4;   // 4: an info line
-                        lf.drawPopupMenuItemWithOptions (g, { border, y, w, ih }, hi, item, opts);
-                        y += ih;
-                    }
+                    juce::Graphics mg (pic);
+                    menu->paint (mg);
                 }
                 juce::Graphics g (img);
                 g.addTransform (juce::AffineTransform::scale (scale));
-                g.drawImageAt (menu, at.x, at.y);
+                g.drawImageAt (pic, at.x, at.y);
             };
-            if (args[2] == "mainmenu")
+            if (mode == "mainmenu")
             {
-                drawMenu ({ 74, 80 }, { { "new preset", 0, false, false }, { "", 2, false, false }, { "tips", 0, true, true },
-                                        { "", 2, false, false }, { "check for updates", 0, false, false },
-                                        { "visit website", 0, false, false }, { "get support", 0, false, false },
-                                        { juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), 0, false, false },
-                                        { "", 2, false, false }, { "room v0.1.0", 0, false, false } });
+                juce::PopupMenu m;
+                m.addItem ("new preset", [] {});
+                m.addItem ("reset all knobs", [] {});
+                m.addSeparator();
+                m.addItem ("tips", true, true, [] {});
+                m.addItem ("show the tour", [] {});
+                m.addSeparator();
+                m.addItem ("check for updates", [] {});
+                m.addItem ("visit website", [] {});
+                m.addItem ("get support", [] {});
+                m.addItem (juce::String (juce::CharPointer_UTF8 ("about room\xe2\x80\xa6")), [] {});
+                m.addSeparator();
+                m.addItem ("room v1.0.2", false, false, nullptr);
+                drawMenu ({ 4, 60 }, m, 2);
+            }
+            else if (mode == "noisemenu")
+            {
+                juce::PopupMenu m;
+                const auto& infos = room::NoiseBank::infos();
+                juce::StringArray sections;
+                for (const auto& info : infos)
+                    sections.addIfNotAlreadyThere (info.section);
+                for (const auto& section : sections)
+                {
+                    m.addSectionHeader (section);
+                    for (size_t k = 0; k < infos.size(); ++k)
+                        if (infos[k].section == section)
+                            m.addItem (infos[k].name, true, k == 31, [] {});
+                }
+                drawMenu ({ 4, 150 }, m, 31);
             }
             else
             {
-            drawMenu ({ 600, 100 }, { { "basement show", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("room  \xc2\xb7  medium  \xc2\xb7  neutral")), 4, false, false },
-                                      { "a packed basement: low, loud and wide.", 4, false, false }, { "factory  (built in)", 4, false, false },
-                                      { "", 2, false, false }, { "load", 0, false, false }, { "favourite", 0, false, false },
-                                      { "add to quick select", 0, false, true }, { "quick select slot", 3, false, false } });
-            drawMenu ({ 560, 470 }, { { "modulation", 1, false, false }, { juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), 3, false, true },
-                                      { "move with lfo 2", 0, false, false } });
-            drawMenu ({ 790, 500 }, { { "10%", 0, false, false }, { "25%", 0, true, true }, { "50%", 0, false, false },
-                                      { "100%", 0, false, false }, { "", 2, false, false }, { "invert", 0, false, false },
-                                      { "remove from lfo 1", 0, false, false } });
+                juce::PopupMenu row;
+                row.addSectionHeader ("basement show");
+                row.addItem (juce::String (juce::CharPointer_UTF8 ("room  \xc2\xb7  medium  \xc2\xb7  neutral")), false, false, nullptr);
+                row.addItem ("a packed basement: low, loud and wide.", false, false, nullptr);
+                row.addSeparator();
+                row.addItem ("load", [] {});
+                row.addItem ("favourite", [] {});
+                row.addItem ("add to quick select", [] {});
+                juce::PopupMenu slots;
+                slots.addItem ("slot 1", [] {});
+                row.addSubMenu ("quick select slot", slots);
+                drawMenu ({ 560, 90 }, row, 2);
+
+                juce::PopupMenu depth;
+                for (auto pct : { 10, 25, 50, 100 })
+                    depth.addItem (juce::String (pct) + "%", true, pct == 25, [] {});
+                depth.addSeparator();
+                depth.addItem ("invert", [] {});
+                depth.addItem ("remove from lfo 1", [] {});
+                juce::PopupMenu mod;
+                mod.addSectionHeader ("modulation");
+                mod.addSubMenu (juce::String (juce::CharPointer_UTF8 ("lfo 1 \xc2\xb7 25%")), depth);
+                mod.addItem ("move with lfo 2", [] {});
+                drawMenu ({ 300, 470 }, mod, 0);
+                drawMenu ({ 520, 470 }, depth, 1);
             }
         }
         juce::File out (args[1]);
@@ -2827,6 +3254,7 @@ int main (int argc, char* argv[])
     testIntensityGlitchQuick (root, roomSource);
     testNoiseRateToneSync (root);
     testRound4 (root);
+    testRound6 (root);
 
     root.getParentDirectory().deleteRecursively();
     std::cout << (failures == 0 ? "ALL ROOM TESTS PASSED" : "ROOM TESTS FAILED") << " (" << checks - failures << "/" << checks << ")\n";

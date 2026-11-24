@@ -1,4 +1,6 @@
 #pragma once
+#include <map>
+#include <juce_graphics/juce_graphics.h>
 
 #include "PresetFile.h"
 #include <juce_core/juce_core.h>
@@ -22,6 +24,7 @@ class PresetLibrary
 {
 public:
     static constexpr const char* factoryPack = "Factory";
+    static constexpr const char* evillePack = "Eville";   // built in: Eville's own, read-only like Factory
     static constexpr const char* userPack = "User";
 
     struct Entry
@@ -107,6 +110,21 @@ public:
     bool setQuick (const juce::String& key, bool on);
     bool createPack (const juce::String& name, juce::String& errorOut);
 
+    // PACK COVERS AND DELETE (user packs only; not Factory or User)
+    /** The pack's cover image file (cover.jpg / cover.png in its folder), or a non-existent file. */
+    juce::File packCoverFile (const juce::String& pack) const;
+    /** Makes `image` the pack's cover (saved as cover.jpg, at most 1200 px wide). */
+    bool setPackCover (const juce::String& pack, const juce::File& image, juce::String& errorOut);
+    void removePackCover (const juce::String& pack);
+    static bool isEditablePack (const juce::String& pack);
+
+    /** Adds a built-in, read-only pack (e.g. Eville's own) after Factory, with its cover. */
+    void addBuiltInPack (const juce::String& pack, std::vector<juce::String> xml, const juce::Image& cover = {});
+    /** A built-in pack's cover (empty if none). */
+    juce::Image builtInCover (const juce::String& pack) const;
+    /** Moves the pack's folder (and everything in it) to the trash. */
+    bool removePack (const juce::String& pack, juce::String& errorOut);
+
     /** Copies .room files into a pack. Returns how many were imported. */
     int importFiles (const juce::Array<juce::File>&, const juce::String& pack);
 
@@ -129,6 +147,8 @@ private:
     juce::File root;
     Kind kind;
     std::vector<juce::String> factoryXml;
+    std::vector<std::pair<juce::String, std::vector<juce::String>>> builtInPacks;
+    std::map<juce::String, juce::Image> builtInCovers;
     std::vector<Entry> entries;
     juce::StringArray favoriteKeys;
     juce::StringArray quickKeys;

@@ -1,6 +1,7 @@
 # Publishes a ROOM release to the download page (update.prodbyeville.com/room) and the
 # plugin's update check, the same way WARP's Server/release.ps1 does:
-#   room/ROOM-<version>-Windows-Setup.exe, room/ROOM-<version>-macOS.pkg, then room/latest.json
+#   room/ROOM-<version>-Windows.zip and room/ROOM-<version>-macOS.zip (each: the installer, the
+#   guide and a read-me), then room/latest.json
 # in the "warp-downloads" R2 bucket (latest.json goes last, so nobody is told about an
 # installer that isn't up yet).
 #
@@ -114,14 +115,31 @@ jobs:
 
           put () { npx --yes wrangler@4 r2 object put "$BUCKET/$PRODUCT/$1" --file "$2" --content-type "$3" --remote; }
 
-          echo "Uploading $WIN_FILE"
-          put "$WIN_FILE" "dist/$WIN_FILE" "application/vnd.microsoft.portable-executable"
+          # Each download is a zip: the installer, the guide and a read-me, in a "ROOM <version>" folder.
+          bundle () {   # installer  readme-template  zip-name
+            local dir="bundle/ROOM $VERSION"
+            rm -rf bundle && mkdir -p "$dir"
+            cp "dist/$1" "$dir/"
+            cp "plugin/docs/guide/ROOM-Guide.pdf" "$dir/ROOM Guide.pdf"
+            sed "s/{VERSION}/$VERSION/g" "$2" > "$dir/Read Me First.txt"
+            (cd bundle && zip -qr "../dist/$3" "ROOM $VERSION")
+            unzip -l "dist/$3"
+          }
+
+          WIN_ZIP="ROOM-$VERSION-Windows.zip"
+          MAC_ZIP="ROOM-$VERSION-macOS.zip"
+          bundle "$WIN_FILE" plugin/Installer/ReadMe-Windows.txt "$WIN_ZIP"
+          echo "Uploading $WIN_ZIP"
+          put "$WIN_ZIP" "dist/$WIN_ZIP" "application/zip"
           HAS_MAC=false
           if [ -f "dist/$MAC_FILE" ]; then
-            echo "Uploading $MAC_FILE"
-            put "$MAC_FILE" "dist/$MAC_FILE" "application/octet-stream"
+            bundle "$MAC_FILE" plugin/Installer/ReadMe-Mac.txt "$MAC_ZIP"
+            echo "Uploading $MAC_ZIP"
+            put "$MAC_ZIP" "dist/$MAC_ZIP" "application/zip"
             HAS_MAC=true
           fi
+          WIN_FILE="$WIN_ZIP"
+          MAC_FILE="$MAC_ZIP"
 
           # The same latest.json release.ps1 writes.
           python3 - "$VERSION" "$WIN_FILE" "$MAC_FILE" "$HAS_MAC" > latest.json <<'PY'

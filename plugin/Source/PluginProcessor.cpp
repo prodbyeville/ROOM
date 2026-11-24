@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "EvillePresets.h"
 #include "PluginEditor.h"
 #include "FactoryPresets.h"
 
@@ -128,6 +129,9 @@ RoomAudioProcessor::RoomAudioProcessor()
     rateReverbParam  = apvts.getRawParameterValue (ParamIDs::rateReverb);
     rateNoiseParam   = apvts.getRawParameterValue (ParamIDs::rateNoise);
     smoothParam      = apvts.getRawParameterValue (ParamIDs::smooth);
+    imprintParam     = apvts.getRawParameterValue (ParamIDs::imprint);
+    pitchParam       = apvts.getRawParameterValue (ParamIDs::pitch);
+    mudParam         = apvts.getRawParameterValue (ParamIDs::mud);
     noise.setBank (&noiseBank.get());
     bypassParam      = apvts.getRawParameterValue (ParamIDs::bypass);
 
@@ -326,6 +330,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout RoomAudioProcessor::createLa
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::smooth, 1 }, "Smooth",
         NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    // Pitch: an octave down (left) or up (right) blended into the room; the middle is the room as is
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::pitch, 1 }, "Pitch",
+        NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        {
+            if (std::abs (v) < 0.005f) return String ("dry");
+            return String (v > 0 ? "+1 oct " : "-1 oct ") + String (juce::roundToInt (std::abs (v) * 100.0f)) + "%";
+        })));
+    // Mud (Advanced): tames the boxy low mids
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::mud, 1 }, "Mud",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::imprint, 1 }, "Imprint",
+        NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f, pct));
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::bypass, 1 }, "Bypass", false));
 
@@ -384,9 +404,12 @@ void RoomAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     suppressor.prepare (sampleRate, getTotalNumOutputChannels());
     stereoWidth.prepare (sampleRate);
     noise.prepare (sampleRate, std::max (1, samplesPerBlock));
+    noiseBank->getNow (juce::roundToInt (noiseTypeParam->load()));   // unpacked now, so a bounce starts with it
     noiseRate.prepare (sampleRate);
     noiseBuf.setSize (2, std::max (1, samplesPerBlock));
     roomMic.prepare (sampleRate);
+    imprint.prepare (sampleRate, std::max (2, getTotalNumOutputChannels()));
+    mudCut.prepare (sampleRate);
     setLatencySamples (suppressor.getLatency());
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputParam->load()));
@@ -509,8 +532,13 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fx.duck = eff (ParamIDs::duck, duckParam);
         fx.duckReleaseMs = eff (ParamIDs::duckRelease, duckReleaseParam);
         fx.freeze = freezeParam->load() > 0.5f;
-        fx.extreme = juce::jlimit (0.0f, 1.0f, (eff (ParamIDs::intensity, intensityParam) - maxRoomIntensity)
-                                                   / (4.0f - maxRoomIntensity));
+        {
+            // Intensity above 100 %: the room's own artifacts up to 180 %, then shimmer / bloom.
+            const auto in = eff (ParamIDs::intensity, intensityParam);
+            fx.character = juce::jlimit (0.0f, 1.0f, (in - maxRoomIntensity) / (characterTopIntensity - maxRoomIntensity));
+            fx.extreme = juce::jlimit (0.0f, 1.0f, (in - characterTopIntensity) / (4.0f - characterTopIntensity));
+        }
+        fx.pitch = eff (ParamIDs::pitch, pitchParam);
         fx.stutter = glitchParam->load() > 0.5f;
         fx.glitchAmount = eff (ParamIDs::glitchAmount, glitchAmountParam);
         fx.glitchSync = glitchSyncParam->load() > 0.5f;
@@ -533,9 +561,15 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         noise.setIdle (noiseStopParam->load() > 0.5f && ! blockPlaying
                        && silentSamples > (int) (0.25 * std::max (1.0, currentSampleRate.load())));
         if (noiseOn)
+        {
             noise.trackInput (part, len);
+            noiseGateShown.store (noise.gateNowValue(), std::memory_order_relaxed);
+            noiseStopShown.store (noise.idleGainValue(), std::memory_order_relaxed);
+        }
 
-        // Room (Rate on dry / room) -> Noise (Rate on noise) -> Smooth -> Tape -> Auto EQ -> Width -> output gain
+        // Imprint -> Room (Rate on dry / room) -> Noise (Rate on noise) -> Smooth -> Tape -> Auto EQ -> Width -> output gain
+        imprint.setAmount (eff (ParamIDs::imprint, imprintParam));
+        imprint.process (part, len);
         engine.process (part, toneNow, spaceNow, eff (ParamIDs::mix, mixParam), 0.0f, fx);
         if (noiseOn && len <= noiseBuf.getNumSamples())
         {
@@ -558,6 +592,8 @@ void RoomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
         static const room::EqBand flat[room::tone::numEqBands] = {};   // the eq is gone: tape only
         toneShaper.process (part, eff (ParamIDs::tape, tapeParam), flat);
+        mudCut.setAmount (eff (ParamIDs::mud, mudParam));
+        mudCut.process (part, len);
         suppressor.process (part, eff (ParamIDs::autoEq, autoEqParam));
         stereoWidth.process (part, eff (ParamIDs::space, spaceParam));
 
@@ -733,6 +769,31 @@ void RoomAudioProcessor::parameterChanged (const juce::String&, float)
 
 //==============================================================================
 // Room handling
+
+bool RoomAudioProcessor::loadRandomRoom (juce::Random& rng)
+{
+    auto& lib = getRoomLibrary();
+    lib.rescan();
+    std::vector<const room::presets::PresetLibrary::Entry*> pool;
+    for (const auto& e : lib.getEntries())
+        if (e.key != getCurrentRoomKey())
+            pool.push_back (&e);
+    while (! pool.empty())
+    {
+        const auto pick = (size_t) rng.nextInt ((int) pool.size());
+        const auto* e = pool[pick];
+        const auto tree = lib.loadPreset (*e);
+        if (tree.isValid())
+        {
+            const auto key = e->key;
+            resetIntensityForNewRoom();
+            applyRoom (tree, key);
+            return true;
+        }
+        pool.erase (pool.begin() + (long) pick);
+    }
+    return false;
+}
 
 void RoomAudioProcessor::resetIntensityForNewRoom()
 {
@@ -914,8 +975,9 @@ void RoomAudioProcessor::rebuildRoom()
                                                       intensity, size, damping));
     const auto irSeconds = std::min (tail, longest + 0.1f);
 
-    engine.submitRoom (room::synthesizeIR (a, sr, irSeconds, intensity, 0, size, damping), sr,
-                       room::designTone (a, sr, intensity));
+    const auto tone = room::designTone (a, sr, std::min (intensity, maxRoomIntensity), size);
+    imprint.setProfile (room::Imprint::makeProfile (a, tone));
+    engine.submitRoom (room::synthesizeIR (a, sr, irSeconds, intensity, 0, size, damping), sr, tone);
 }
 
 room::RoomAnalysis RoomAudioProcessor::getAnalysis() const
@@ -1034,6 +1096,26 @@ void RoomAudioProcessor::ensureLibraries()
     PresetLibrary::migrateLegacy (roomsRoot, studiosRoot);
     library = std::make_unique<PresetLibrary> (studiosRoot, std::move (studios), Kind::studio);
     roomLibrary = std::make_unique<PresetLibrary> (roomsRoot, std::move (rooms), Kind::room);
+
+    // Eville's own rooms and studios: a built-in pack of their own, with its cover on both sides
+    std::vector<juce::String> evilleStudios, evilleRooms;
+    juce::Image evilleCover;
+    for (int i = 0; i < EvillePresets::namedResourceListSize; ++i)
+    {
+        int size = 0;
+        const auto* name = EvillePresets::namedResourceList[i];
+        if (auto* data = EvillePresets::getNamedResource (name, size))
+        {
+            const auto file = juce::String (EvillePresets::getNamedResourceOriginalFilename (name));
+            if (file.endsWithIgnoreCase (".jpg") || file.endsWithIgnoreCase (".png"))
+                evilleCover = juce::ImageFileFormat::loadFrom (data, (size_t) size);
+            else
+                (file.endsWithIgnoreCase (room::presets::roomExtension) ? evilleRooms : evilleStudios)
+                    .push_back (juce::String::fromUTF8 (data, size));
+        }
+    }
+    library->addBuiltInPack (PresetLibrary::evillePack, std::move (evilleStudios), evilleCover);
+    roomLibrary->addBuiltInPack (PresetLibrary::evillePack, std::move (evilleRooms), evilleCover);
 }
 
 room::presets::PresetLibrary& RoomAudioProcessor::getLibrary()

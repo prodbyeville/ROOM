@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ROOM Guide</title>
+<!-- The ROOM guide (the WARP guide's layout in ROOM's colours and type). Printed to PDF by
+     docs/guide/build-guide.ps1 (Microsoft Edge) or docs/guide/build-guide.mjs (Playwright).
+     Paths are relative to this file: the plugin's Resources/, Design/ and docs/guide/shots/
+     (the shots are `room_tests --screenshot ... 2`, saved as JPG). -->
+<style>
+  @font-face { font-family: Satoshi; font-weight: 400; src: url("../../Resources/Ui/Satoshi-Regular.otf"); }
+  @font-face { font-family: Satoshi; font-weight: 500; src: url("../../Resources/Ui/Satoshi-Medium.otf"); }
+  @font-face { font-family: Satoshi; font-weight: 700; src: url("../../Resources/Ui/Satoshi-Bold.otf"); }
+  @font-face { font-family: Satoshi; font-weight: 900; src: url("../../Resources/Ui/Satoshi-Black.otf"); }
+  @font-face { font-family: Cormorant; font-style: italic; font-weight: 500; src: url("../../Resources/Ui/CormorantGaramond-MediumItalic.ttf"); }
+
+  :root {
+    --bg: #0a0a0a; --module: #131111; --chip: #262222; --line: rgba(245,243,239,.09);
+    --text: #f5f3ef; --dim: rgba(245,243,239,.62); --red: #ba2727; --redLight: #e24a4a; --ink: #1b1a18;
+  }
+  @page { size: 8.5in 11in; margin: 0; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  body { font-family: Satoshi, "Segoe UI", sans-serif; color: var(--text); font-size: 10.5pt; line-height: 1.45; }
+
+  .page { width: 8.5in; height: 11in; position: relative; overflow: hidden; page-break-after: always;
+          padding: 0.62in 0.62in 0.7in; background: var(--bg); }
+  .page:last-child { page-break-after: auto; }
+  .page::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+                  background: radial-gradient(900px 500px at 50% 112%, rgba(186,39,39,.16), transparent 70%); }
+  .page > * { position: relative; }
+  .footer { position: absolute !important; left: .62in; right: .62in; bottom: .32in; display: flex; justify-content: space-between;
+            font-size: 7.5pt; letter-spacing: .22em; text-transform: uppercase; color: rgba(245,243,239,.38); }
+  .footer b { color: var(--redLight); font-weight: 700; }
+
+  .caps { text-transform: uppercase; letter-spacing: .2em; font-weight: 700; font-size: 8pt; }
+  .kicker { color: var(--redLight); }
+  h1 { font-weight: 900; font-size: 34pt; line-height: 1.02; margin: .08in 0 .14in; letter-spacing: -.01em; }
+  h2 { font-weight: 700; font-size: 15pt; margin: 0 0 .06in; }
+  p { margin: 0 0 .1in; }
+  .serif { font-family: Cormorant, Georgia, serif; font-style: italic; font-weight: 500; letter-spacing: 0; }
+  h1 .serif { font-size: 1.12em; color: var(--redLight); }
+  .lead { font-size: 13pt; line-height: 1.45; color: var(--text); font-weight: 500; }
+  .dim { color: var(--dim); }
+  .red { color: var(--redLight); }
+  .placeholder { border-left: 3px solid var(--red); padding: .04in 0 .04in .14in; color: var(--dim); font-style: italic; }
+
+  .shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #000 center / cover no-repeat;
+          box-shadow: 0 12px 40px rgba(0,0,0,.6); }
+  .crop { border-radius: 12px; border: 1px solid var(--line); background-repeat: no-repeat; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .16in .26in; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .14in; }
+  .grid4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: .12in; }
+  .item { padding: .1in 0 .08in; border-top: 1px solid var(--line); }
+  .item .name { display: flex; align-items: center; gap: .08in; font-weight: 700; font-size: 10pt; text-transform: uppercase; letter-spacing: .12em; margin-bottom: .03in; }
+  .item p { margin: 0; color: var(--dim); font-size: 9.4pt; }
+  .tag { display: inline-block; font-size: 7pt; letter-spacing: .14em; text-transform: uppercase; font-weight: 700;
+         padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(226,74,74,.55); color: var(--redLight); margin-left: 4px; vertical-align: 1px; }
+  .key { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 5px;
+         border: 1.5px solid var(--redLight); color: var(--redLight); font-size: 7.5pt; font-weight: 700; letter-spacing: 0; }
+
+  .tex { border-radius: 16px; padding: .16in .18in; background-size: cover; background-position: center; position: relative; overflow: hidden; }
+  .tex p { margin: .03in 0 0; font-size: 9.2pt; color: rgba(255,255,255,.9); text-shadow: 0 1px 8px rgba(0,0,0,.45), 0 0 2px rgba(0,0,0,.25); }
+  .tex .title { font-weight: 700; text-transform: uppercase; letter-spacing: .16em; font-size: 9.5pt; text-shadow: 0 1px 8px rgba(0,0,0,.35); }
+  .tex .big { font-weight: 900; font-size: 17pt; letter-spacing: -.01em; line-height: 1.1; margin-bottom: .02in; text-shadow: 0 1px 8px rgba(0,0,0,.35); }
+  .tex.paper { color: var(--ink); } .tex.paper p { color: rgba(27,26,24,.75); text-shadow: none; } .tex.paper .title, .tex.paper .big { text-shadow: none; }
+
+  .num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; background: var(--red); color: var(--text);
+         font-weight: 900; font-size: 8pt; align-items: center; justify-content: center; margin-right: 6px; flex: none; }
+
+  /* Cover: the mark's room, drawn big and faint, receding to the logo */
+  .cover { padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .cover::before { background: radial-gradient(700px 700px at 50% 40%, rgba(186,39,39,.12), transparent 65%),
+                               radial-gradient(1000px 600px at 50% 115%, rgba(186,39,39,.26), transparent 70%); }
+  .cover .walls { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cover .mark { width: 2.1in; margin-top: -.5in; }
+  .cover .word { width: 4.2in; margin-top: .5in; }
+  .cover .tagline { font-size: 17pt; font-weight: 500; margin-top: .32in; }
+  .cover .tagline .serif { font-size: 1.25em; color: var(--redLight); }
+  .cover .sub { margin-top: .14in; }
+  .cover .bottom { position: absolute; bottom: .55in; left: 0; right: 0; }
+
+  .range .tex { min-height: .9in; }
+  .faq .q { font-weight: 700; margin-bottom: .02in; }
+  .faq .a { color: var(--dim); font-size: 9.3pt; margin-bottom: .12in; }
+  .types .tex { min-height: .86in; display: flex; flex-direction: column; justify-content: flex-end; padding: .12in .16in; }
+  .types .count { font-weight: 500; letter-spacing: .02em; text-transform: none; opacity: .75; }
+</style>
+</head>
+<body>
+
+<!-- 1. COVER -->
+<section class="page cover">
+  <svg class="walls" viewBox="0 0 816 1056" preserveAspectRatio="none" fill="none" stroke-linecap="round">
+    <!-- nested rooms, each a step further back, with the corner lines running to the far wall -->
+    <g stroke="rgba(226,74,74,.10)" stroke-width="1.6">
+      <rect x="-40" y="-40" width="896" height="1136" rx="90"/>
+      <rect x="60" y="80" width="696" height="860" rx="70"/>
+      <rect x="150" y="190" width="516" height="600" rx="50"/>
+      <rect x="230" y="270" width="356" height="400" rx="34"/>
+    </g>
+    <g stroke="rgba(226,74,74,.14)" stroke-width="1.6">
+      <rect x="300" y="345" width="216" height="230"/>
+      <path d="M-40 -40 L300 345 M856 -40 L516 345 M-40 1096 L300 575 M856 1096 L516 575"/>
+    </g>
+    <g stroke="rgba(226,74,74,.07)" stroke-width="1">
+      <path d="M300 575 L180 1096 M350 575 L330 1096 M408 575 L408 1096 M466 575 L486 1096 M516 575 L636 1096"/>
+      <path d="M260 660 L556 660 M200 790 L616 790 M120 960 L696 960"/>
+    </g>
+  </svg>
+  <img class="mark" src="../../Design/brand/mark/room-mark-red.svg" alt="">
+  <img class="word" src="../../Design/brand/wordmark/room-wordmark-offwhite.svg" alt="ROOM">
+  <div class="tagline">capture the sound of <span class="serif">any space</span></div>
+  <div class="sub caps dim">Tone &nbsp;·&nbsp; Resonance &nbsp;·&nbsp; Decay</div>
+  <div class="sub caps dim" style="margin-top:.08in; opacity:.7">The ROOM guide &nbsp;·&nbsp; Version 1.0</div>
+  <div class="bottom caps dim">prodbyeville</div>
+</section>
+
+<!-- 2. WHAT + WHY -->
+<section class="page">
+  <div class="caps kicker">01 &nbsp;What ROOM is</div>
+  <h1>every sound has a <span class="serif">room</span> in it.</h1>
+  <p class="lead">A clap in a stairwell, a voice memo in a kitchen, a tap on a glass: each one carries the space it was made in. ROOM captures that space: its tone, the notes it rings at, and how it lets go of every frequency. <span class="red">Then it hands them back to you, so anything you play can live inside it.</span></p>
+  <p>Drop any audio on ROOM, or record straight into it, and a few seconds later you're playing through that place. Use its colour and its notes on their own, add its decay, make it bigger or longer, or imprint its timbre straight onto your sound. Push it past 100% and the room starts to fall apart; past 175% its own notes sing. It works anywhere you'd reach for a reverb, and in plenty of places you wouldn't.</p>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="145" data-w="1735" data-h="1060" style="margin:.12in auto .14in; width:74%"></div>
+  <div class="grid2">
+    <div>
+      <div class="caps kicker" style="margin-bottom:.06in">02 &nbsp;Why I made it</div>
+      <p class="dim" style="font-size:9.6pt">ROOM started with a voice memo. I'd recorded a friend playing guitar in a stairwell on my phone, and that clip had more feeling than anything I'd ever run through a plugin. It wasn't the reverb. It was the stairwell itself: the way it leaned on the low mids, and the one note that kept ringing after every chord. I spent weeks chasing that sound with reverbs and EQs and never got it back. So I built something that could listen to the memo and hand me the room.</p>
+      <p class="dim" style="font-size:9.6pt">ROOM is for producers who would rather capture a sound than dial one in: a vocal in the car you wrote it in, a snare in a tiled bathroom, a synth inside a glass bottle. On my own records I mostly use it with Space all the way down, just the room's colour and its notes, and I push Intensity past 100 when a track needs to fall apart.</p>
+      <p class="caps red" style="font-size:7.5pt; margin-top:.04in">Eville</p>
+    </div>
+    <div>
+      <div class="caps kicker" style="margin-bottom:.06in">In one look</div>
+      <div class="item"><div class="name">Room capture</div><p>Any sound in, the place it was made in out: a clap, a voice memo, a tap on a glass.</p></div>
+      <div class="item"><div class="name">Tone · resonance · decay</div><p>The room's colour, the notes it rings at, and how each frequency fades. Use any of them, with or without a tail.</p></div>
+      <div class="item"><div class="name">Imprint · pitch</div><p>Give your sound the room's timbre, and blend an octave down or up into the room.</p></div>
+      <div class="item"><div class="name">134 rooms and studios</div><p>74 rooms and 60 studios built in, including the Eville pack, plus your own packs.</p></div>
+    </div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>02</span></div>
+</section>
+
+<!-- 3. HOW IT WORKS -->
+<section class="page">
+  <div class="caps kicker">03 &nbsp;What ROOM captures</div>
+  <h1>tone · resonance · decay.</h1>
+  <div class="grid3" style="margin:.16in 0 .26in">
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')">
+      <div class="title">1 &nbsp;Tone</div>
+      <p>The colour a space puts on everything in it: a tiled bathroom's bite, a car's boxiness, a bottle's narrow hum. ROOM measures it across the spectrum, against a neutral reference, so it hears what the space added, not the source.</p>
+    </div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')">
+      <div class="title">2 &nbsp;Resonance</div>
+      <p>Every space rings at certain pitches, set by its size, shape and material. ROOM finds the notes that stand out most, with how strong and how narrow each one is. These are the room's own notes.</p>
+    </div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')">
+      <div class="title">3 &nbsp;Decay</div>
+      <p>How the space lets go of each frequency. ROOM measures how long 16 bands, lows to highs, take to die away: concrete holds its highs, carpet kills them, halls hang on to their lows.</p>
+    </div>
+  </div>
+  <p class="dim" style="font-size:9.6pt; margin:-.1in 0 .2in">ROOM keeps those measurements, not the audio, and rebuilds the place from them: a tone match, tuned resonators on the room's notes, and a fresh stereo decay at the room's own rates. So a two-second phone clip can become a five-second space, and you can make it bigger, darker or longer.</p>
+  <h2>Rooms and studios</h2>
+  <div class="grid2" style="margin-bottom:.22in">
+    <div class="item"><div class="name">Room <span class="tag">.room</span></div><p>Just the space: what ROOM measured from a sound. Load a room and your knobs stay where they are, so you can try the same settings in a hall, a car or a bottle.</p></div>
+    <div class="item"><div class="name">Studio <span class="tag">.studio</span></div><p>The whole sound: a room plus every knob, the noise, the Advanced settings and both LFOs. This is what the preset name at the top loads.</p></div>
+  </div>
+  <h2>The layout</h2>
+  <div class="grid2" style="grid-template-columns: 1.15fr 1fr; align-items:start">
+    <div class="shot" style="height:2.75in; background-image:url('shots/advanced.jpg'); background-position:left center"></div>
+    <div>
+      <p style="display:flex"><span class="num">1</span><span><b>Header:</b> menu, studios, save, Advanced, Randomize, Wet, Out and power.</span></p>
+      <p style="display:flex"><span class="num">2</span><span><b>Stage:</b> drop or record a sound, and your rooms float around it.</span></p>
+      <p style="display:flex"><span class="num">3</span><span><b>Controls:</b> Intensity, Tone, Space, Tail and Size; under them Smooth, Imprint, Pitch and Auto; and the white Glitch module.</span></p>
+      <p style="display:flex"><span class="num">4</span><span><b>Noise and Rate:</b> a texture under the room, and sample rate down to lo-fi.</span></p>
+      <p style="display:flex"><span class="num">5</span><span><b>Advanced:</b> pre-delay, damping, width, ducking, freeze, the finish box (tape, auto eq, mud) and two LFOs.</span></p>
+    </div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>03</span></div>
+</section>
+
+<!-- 4. HEADER + STAGE -->
+<section class="page">
+  <div class="caps kicker">04 &nbsp;Every control</div>
+  <h1>the header and the stage.</h1>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="0" data-y="0" data-w="1784" data-h="140" style="margin:.1in 0 .14in"></div>
+  <div class="grid2">
+    <div class="item"><div class="name">Menu (☰)</div><p>New preset, reset all knobs, tips on or off, the tour, check for updates, the website, get support (our address, ready to copy or email), about, and deactivate this computer. A red dot means an update is out.</p></div>
+    <div class="item"><div class="name">Studios</div><p>The loaded studio (a * means you've changed it). Click the name to browse; the arrows step through. The disk saves, the heart makes it a favourite.</p></div>
+    <div class="item"><div class="name">Advanced · Randomize</div><p><b>Advanced</b> opens the panel on the right (page 07). <b>Randomize</b>: left-click to randomize, right-click to choose what it may change.</p></div>
+    <div class="item"><div class="name">Wet · Out · Power</div><p><b>Wet</b> is the mix of dry and room; <b>Out</b> the output level. <b>Power</b> bypasses ROOM with a smooth crossfade, in time with the dry signal.</p></div>
+  </div>
+  <div class="grid2" style="grid-template-columns: 1.35fr 1fr; gap:.26in; margin-top:.22in; align-items:start">
+    <div class="crop" data-src="shots/info.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="145" data-w="1735" data-h="692"></div>
+    <div>
+      <div class="item" style="border-top:0"><div class="name">Drop a sound</div><p>Drag any audio file onto the stage. Hits (a clap, a snare, a door) give the clearest rooms; steady sounds (hiss, room tone) work too.</p></div>
+      <div class="item"><div class="name"><span style="color:var(--redLight)">●</span> Record</div><p>Press record and play into the track, up to 30 seconds. Stop and ROOM builds the room.</p></div>
+      <div class="item"><div class="name">The cards</div><p>Your quick rooms orbit the box. Click one to load it.</p></div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:.08in">
+    <div class="item"><div class="name">Save room · Clear</div><p><b>Save room</b> keeps the room you just made in your library. <b>Clear</b> empties the stage.</p></div>
+    <div class="item"><div class="name">The box · All rooms</div><p>Click the box and the room's numbers come up over the cards: its timbre, its decay in every band, how much is late energy, and the notes that ring. <b>All rooms</b> opens the room library.</p></div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>04</span></div>
+</section>
+
+<!-- 5. CONTROLS MODULE -->
+<section class="page">
+  <div class="caps kicker">05 &nbsp;Every control</div>
+  <h1>shaping the room.</h1>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="780" data-w="1735" data-h="430" style="margin:.02in auto .06in; width:62%"></div>
+  <div class="grid2">
+    <div class="item"><div class="name">Intensity</div><p>How much of the room you hear, from 0 to 200%. Up to 100% it's the room as captured. Past that, it falls apart (below).</p></div>
+    <div class="item"><div class="name">Tone · Space · Auto</div><p><b>Tone</b> is the room's colour and its ringing notes, with no tail. <b>Space</b> is its decay and width. <b>Auto</b> sets both from what ROOM heard in the sound.</p></div>
+    <div class="item"><div class="name">Tail · Size</div><p>Space, Tail and Size sit together on the light module, with Glitch below. <b>Tail</b> is how long the room rings. <b>Size</b> makes it smaller or bigger than the one you recorded; 50% is the room as it was.</p></div>
+    <div class="item"><div class="name">Smooth</div><p>The whole sound as a mic across the room hears it: softer hits, a rounder top, a little air.</p></div>
+    <div class="item"><div class="name">Imprint <span class="tag">New</span></div><p>Your sound takes on the room's own timbre, its colour and strongest notes, with or without the tail. No latency.</p></div>
+    <div class="item"><div class="name">Pitch <span class="tag">New</span></div><p>An octave blended into the room. The middle is dry; right brings in the room an octave up, left an octave down. Your dry sound stays in tune.</p></div>
+    <div class="item" style="grid-column: span 2"><div class="name">Glitch module · On · Sync · Amount</div><p><b>On</b> stutters short slices of the room, <b>Sync</b> locks them to your song's grid, <b>Amount</b> sets how often. It gets busier as Intensity rises.</p></div>
+  </div>
+  <h2 style="margin-top:.12in">Past 100%</h2>
+  <div class="grid4 range" style="margin-top:.1in">
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')"><div class="big">0–100%</div><div class="title">The room</div><p>Its tone, notes and decay, from a hint to all of it.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_rose.jpg')"><div class="big">100–140%</div><div class="title">Ringing walls</div><p>The room's notes ring out like metal and drift; a flutter echo slaps between the walls.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="big">140–175%</div><div class="title">Falling apart</div><p>A near wall that won't sit still, and a mic preamp pushed until it pumps and clips.</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')"><div class="big">175–200%</div><div class="title">Shimmer &amp; bloom</div><p>An octave-up shimmer, then the room's own notes, fifths and octaves sing. Every room blooms differently.</p></div>
+  </div>
+  <div class="tex" style="margin-top:.12in; background-image:url('../../Resources/Ui/card_red.jpg'); padding:.12in .2in">
+    <div class="title">Try this: Space at 0</div>
+    <p>Turn Space all the way down and Tone up. There's no tail at all, yet your sound is now in the room: its colour, and its notes ringing along with yours. That's the part a reverb can't give you.</p>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>05</span></div>
+</section>
+
+<!-- 6. NOISE + RATE -->
+<section class="page">
+  <div class="caps kicker">06 &nbsp;Every control</div>
+  <h1>noise and rate.</h1>
+  <div class="crop" data-src="shots/main.jpg" data-iw="1784" data-ih="1544" data-x="25" data-y="1222" data-w="1735" data-h="305" style="margin:.1in 0 .18in"></div>
+  <p class="lead" style="font-size:11.5pt"><b>Noise</b> lays one of 54 textures under the room, from vinyl to waves to a bus. <b>Rate</b> takes the sample rate down, from clean 44.1 kHz to dusty lo-fi.</p>
+  <div class="types" style="display:grid; grid-template-columns:repeat(5,1fr); gap:.1in; margin:.14in 0 .2in">
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')"><div class="title">Classics</div><p>Vinyl, tape hiss, air, room tone</p></div>
+    <div class="tex paper" style="background-image:url('../../Resources/Ui/card_plaster.jpg')"><div class="title">Nature</div><p>Waves, rain, birds, streams</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_rose.jpg')"><div class="title">Places</div><p>Rooms, crowds, a bus, the night</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="title">Machines</div><p>Tape, crackle, hum, radio</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')"><div class="title">Tonal</div><p>Drones, voices, whistles</p></div>
+  </div>
+  <div class="grid2">
+    <div class="item"><div class="name">Noise type</div><p>Click the screen to pick from the menu, grouped as above, or step with the arrows. Every texture is a seamless loop: no seam, no click.</p></div>
+    <div class="item"><div class="name">Level</div><p>How loud the texture is.</p></div>
+    <div class="item"><div class="name">Follow</div><p>At 0 the noise plays all the time. Turn it up and the noise follows your playing, rising with the sound and falling away in the gaps.</p></div>
+    <div class="item"><div class="name">Stop <span class="tag">On</span></div><p>Silences the noise when nothing is playing: the transport is stopped and no audio is coming in. Switch it off to keep the hiss going.</p></div>
+    <div class="item"><div class="name">Rate</div><p>Full is 44.1 kHz, untouched. Turn it towards low and the top end closes down like an old sampler: smooth and clean, no harsh crunch.</p></div>
+    <div class="item"><div class="name"><span class="key">D</span><span class="key">R</span><span class="key">N</span> &nbsp;What Rate hits</div><p><b>D</b> the dry sound, <b>R</b> the room (tone and space), <b>N</b> the noise. All three are on by default; switch one off to keep it full rate.</p></div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>06</span></div>
+</section>
+
+<!-- 7. ADVANCED + LFOS + RANDOMIZE -->
+<section class="page">
+  <div class="caps kicker">07 &nbsp;Every control</div>
+  <h1>advanced, lfos and randomize.</h1>
+  <div class="grid2" style="grid-template-columns: 1.55in 1fr; gap:.28in; margin-top:.12in">
+    <div class="crop" data-src="shots/advlfo.jpg" data-iw="2304" data-ih="1544" data-x="1782" data-y="22" data-w="512" data-h="1500"></div>
+    <div>
+      <div class="grid2" style="gap:0 .22in">
+        <div class="item" style="border-top:0"><div class="name">Pre-delay</div><p>A gap before the room starts, up to 500 ms, so the dry hit stays clear.</p></div>
+        <div class="item" style="border-top:0"><div class="name">Damping</div><p>Makes the highs die faster (darker) or slower (brighter) than the room.</p></div>
+        <div class="item"><div class="name">Width</div><p>From mono to extra wide.</p></div>
+        <div class="item"><div class="name">Ducking · Release</div><p>Turns the room down while you play and lets it bloom in the gaps. Release sets how fast it comes back.</p></div>
+        <div class="item"><div class="name">Freeze</div><p>Holds the tail forever. Play over it.</p></div>
+        <div class="item"><div class="name">Finish: Tape</div><p>The dark box. Tape closes in the lows and highs, like an old machine.</p></div>
+        <div class="item"><div class="name">Finish: Auto eq</div><p>Tames harsh ringing between 2 and 10 kHz, only where it builds up.</p></div>
+        <div class="item"><div class="name">Finish: Mud <span class="tag">New</span></div><p>Cuts the boxy low mids (280 to 450 Hz), harder when they build up.</p></div>
+        <div class="item"><div class="name">Two LFOs</div><p>Seven shapes, free or synced, with retrigger. Drag an LFO's handle onto any knob; drag its coloured dot to set how much it moves.</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="grid-template-columns: 1.15fr 1fr; gap:.26in; margin-top:.24in; align-items:center">
+    <div class="crop" data-src="shots/randomize.jpg" data-iw="1784" data-ih="1544" data-x="0" data-y="40" data-w="1784" data-h="820"></div>
+    <div>
+      <h2>Randomize</h2>
+      <p class="dim" style="font-size:9.4pt">Right-click Randomize to tick what it may change, including the room itself. <b style="color:var(--text)">Intensity</b> sets how far it goes:</p>
+      <p class="dim" style="font-size:9.4pt"><b class="red">Basic</b> stays musical: each knob lands near the middle of its sweet spot, and switches rarely flip. <b class="red">Moderate</b> uses the whole sweet spot. <b class="red">Extreme</b> uses every knob's full range and flips every switch it's allowed to.</p>
+      <p class="dim" style="font-size:9.4pt">Your ticks and intensity are saved with the project.</p>
+    </div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>07</span></div>
+</section>
+
+<!-- 8. LIBRARIES -->
+<section class="page">
+  <div class="caps kicker">08 &nbsp;Rooms and studios</div>
+  <h1>134 places to start.</h1>
+  <p class="lead" style="font-size:11.5pt">The whole library comes with ROOM: Factory, and the <b>Eville</b> pack (10 rooms and 14 studios in Eville's own style). Click the studio name (or All rooms on the stage) to open a library. Click an entry to hear it and keep browsing; arrow keys step through.</p>
+  <div class="grid3 types" style="margin:.16in 0 .22in">
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_red.jpg')"><div class="title">Small spaces <span class="count">· 20</span></div><p>Closets, cars, booths</p></div>
+    <div class="tex paper" style="background-image:url('../../Resources/Ui/card_plaster.jpg')"><div class="title">Rooms <span class="count">· 16</span></div><p>Live rooms, garages, apartments</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_plum.jpg')"><div class="title">Halls &amp; chambers <span class="count">· 20</span></div><p>Halls, chapels, cathedrals</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_rose.jpg')"><div class="title">Objects <span class="count">· 20</span></div><p>Bottles, pipes, bells, old keys</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/card_charcoal.jpg')"><div class="title">Textures <span class="count">· 13</span></div><p>Room tone, rain, vinyl, dust</p></div>
+    <div class="tex" style="background-image:url('../../Resources/Ui/ui_stage.jpg')"><div class="title">FX &amp; lo-fi <span class="count">· 21</span></div><p>Outdoor, cassette, synths, strange</p></div>
+  </div>
+  <div class="grid2" style="grid-template-columns: 1.25fr 1fr; gap:.26in; align-items:start">
+    <div class="crop" data-src="shots/rooms.jpg" data-iw="1784" data-ih="1544" data-x="92" data-y="215" data-w="1600" data-h="1135"></div>
+    <div>
+      <div class="item" style="border-top:0"><div class="name">Quick slots</div><p>Six slots at the top of the room library. The rooms in them are the cards on the stage.</p></div>
+      <div class="item"><div class="name">Favourites and search</div><p>Heart anything to find it in Favourites. Search covers names, types, styles and what it's made for; the Filters drawer narrows it down by tag and sorts it.</p></div>
+      <div class="item"><div class="name">Your own packs</div><p>Save into a pack, or make one with + new pack. Right-click a pack's banner to give it a cover image or delete it.</p></div>
+      <div class="item"><div class="name">Share</div><p>Import and export rooms, studios and whole packs. A room file is tiny, so they're easy to pass around.</p></div>
+      <div class="item"><div class="name">Right-click</div><p>Load, favourite, add to quick select, move or copy to another pack, edit, show in folder or delete.</p></div>
+    </div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;The guide</span><span>08</span></div>
+</section>
+
+<!-- 9. FAQ + SUPPORT -->
+<section class="page faq">
+  <div class="caps kicker">09 &nbsp;Questions</div>
+  <h1>faq.</h1>
+  <div class="grid2" style="margin-top:.14in; gap:0 .3in">
+    <div>
+      <div class="q">What do I need to run ROOM?</div>
+      <div class="a">Windows 10 or 11 (64-bit) with a DAW that loads VST3, or a Mac with a DAW that loads AU or VST3: FL Studio, Ableton Live, Logic, Bitwig, Reaper, Studio One, Cubase and others.</div>
+      <div class="q">How do I install it?</div>
+      <div class="a">Run the installer from update.prodbyeville.com/room. It puts ROOM in the standard plugin folders; open your DAW and rescan plugins if it doesn't appear.</div>
+      <div class="q">My computer warns about the installer.</div>
+      <div class="a">The installers aren't code-signed yet. Windows: "Windows protected your PC", then More info and Run anyway. Mac: right-click the .pkg and choose Open.</div>
+      <div class="q">How do I activate it?</div>
+      <div class="a">Load ROOM and sign in with your email and the license key from your ROOM email (no key yet? click "get room free"). You need the internet once; after that ROOM works offline.</div>
+      <div class="q">How many computers can I use?</div>
+      <div class="a">Three at once. To move ROOM to a new computer, open the menu on the old one and choose deactivate this computer.</div>
+      <div class="q">I lost my license key.</div>
+      <div class="a">Click "lost your key?" on the sign-in page, or email support from the address you signed up with, and we'll resend it.</div>
+      <div class="q">How do I update?</div>
+      <div class="a">Updates are free. When one is out, ROOM tells you and a red dot appears on the menu: download it and run the installer. Your license, rooms and studios stay.</div>
+    </div>
+    <div>
+      <div class="q">What sound makes the best room?</div>
+      <div class="a">A short, sharp hit in the space: a clap, a snare, a door slam, a balloon. Let it ring out and keep the recording clean. Anything works, though; odd sources make the best surprises.</div>
+      <div class="q">Does ROOM keep my recording?</div>
+      <div class="a">No. It keeps only the measurements, so a room is a few kilobytes and your project stays small.</div>
+      <div class="q">Why does my DAW show latency?</div>
+      <div class="a">Auto eq looks a little ahead, so ROOM reports 2048 samples of latency. Your DAW compensates for it, and the power button stays in time.</div>
+      <div class="q">Is ROOM a reverb?</div>
+      <div class="a">It can be: turn up Space and you're in the room's decay. But a reverb only gives you a tail. ROOM also gives you the room's tone and the notes it rings at, with or without the tail, and past 100% it turns those notes into an instrument.</div>
+      <div class="q">Where are my rooms and studios?</div>
+      <div class="a">In Documents / Eville: ROOMS and STUDIOS, one folder per pack.</div>
+      <div class="q">Something's wrong. Who do I ask?</div>
+      <div class="a">Menu → get support, or email us below. Tell us your DAW, your computer and what happened.</div>
+    </div>
+  </div>
+  <div class="tex" style="margin-top:.16in; background-image:url('../../Resources/Ui/card_red.jpg'); display:flex; align-items:center; gap:.3in; padding:.22in .3in">
+    <img src="../../Design/brand/mark/room-mark-offwhite.svg" style="width:.9in">
+    <div>
+      <div class="title" style="font-size:12pt">Support &amp; updates</div>
+      <p style="font-size:11pt; color:#fff"><b>support@prodbyeville.com</b><br>Downloads and updates: update.prodbyeville.com/room<br>prodbyeville.com</p>
+    </div>
+  </div>
+  <div class="footer"><span><b>ROOM</b> &nbsp;© 2026 prodbyeville</span><span>09</span></div>
+</section>
+
+<script>
+  // Crops: shows part of a screenshot (data-x/y/w/h in the image's pixels) at the element's width.
+  for (const el of document.querySelectorAll(".crop")) {
+    const iw = +el.dataset.iw, ih = +el.dataset.ih, x = +el.dataset.x, y = +el.dataset.y, w = +el.dataset.w, h = +el.dataset.h;
+    const width = el.getBoundingClientRect().width;
+    const scale = width / w;
+    el.style.height = (h * scale) + "px";
+    el.style.backgroundImage = `url("${el.dataset.src}")`;
+    el.style.backgroundSize = `${iw * scale}px ${ih * scale}px`;
+    el.style.backgroundPosition = `${-x * scale}px ${-y * scale}px`;
+  }
+</script>
+</body>
+</html>

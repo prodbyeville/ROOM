@@ -131,16 +131,21 @@ UPDATES
 TIPS AND THE TOUR
   Rest the mouse on any knob or key for a moment to see what it does.
   Turn tips off (or back on) in the menu.
-  The first time ROOM opens, a three-step tour shows load, shape and
-  finish. See it again any time: menu > show the tour.
+  The first time ROOM opens, a six-step tour walks through the room,
+  intensity / tone / space, tail and size, glitch, noise and rate, and
+  advanced and randomize. See it again any time: menu > show the tour.
 
 FIRST RUN
   A new ROOM starts with "Init Room" loaded (a plain, short room), so you
   hear it straight away. Projects you saved keep whatever they had.
 
 FACTORY LIBRARY
-  49 ROOMS (spaces, objects and textures) and 46 STUDIOS, covering every
+  The Eville pack (built in, next to Factory): Eville's own 10 ROOMS and
+  14 STUDIOS, in his style, with its cover.
+
+  Factory: 64 ROOMS (spaces, objects and textures) and 46 STUDIOS, covering every
   "made for" and character tag. 24 ROOMS come from sounds synthesized for
-  ROOM (plugin/Tools/make_factory_presets.sh) and 25 from Eville's own
-  recordings (plugin/Tools/make_pack_rooms.sh). A ROOM keeps only the
+  ROOM (plugin/Tools/make_factory_presets.sh), 25 from Eville's own
+  recordings (plugin/Tools/make_pack_rooms.sh) and 15 from Eville's synth
+  and melodic sounds (plugin/Tools/make_upload_rooms.sh). A ROOM keeps only the
   analysis, never the audio.
