@@ -94,10 +94,18 @@ jobs:
           sed "s/@VERSION@/$VERSION/g" plugin/Installer/mac-distribution.xml > distribution.xml
           productbuild --distribution distribution.xml --resources pkgres --package-path pkgs "package/ROOM-$VERSION-macOS.pkg"
           pkgutil --check-signature "package/ROOM-$VERSION-macOS.pkg" || true
+          # The VST3 on its own too (ad-hoc signed), zipped with ditto so the bundle survives intact
+          ditto -c -k --sequesterRsrc --keepParent pkgroot/vst3/ROOM.vst3 "package/ROOM-$VERSION-macOS-VST3.zip"
           ls -la package
 
       - uses: actions/upload-artifact@v5
         with:
           name: ROOM-macOS
           path: package/ROOM-*-macOS.pkg
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ROOM-VST3-macOS
+          path: package/ROOM-*-macOS-VST3.zip
           if-no-files-found: error
