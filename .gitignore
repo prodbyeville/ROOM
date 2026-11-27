@@ -13,3 +13,4 @@ ROOM_Renders_Final/04_Video/raw/
 # Lower third videos (70-100 MB because of the grain; regenerate with tools/lower_third.py)
 ROOM_Renders_Final/06_Lower_Third/*.mp4
 ROOM_Renders_Final/06_Lower_Third/*.mov
+ROOM_Renders_Final/09_BF_Stories/*.mp4
